@@ -6,7 +6,7 @@ import click
 
 from .core.context import AppContext
 
-_VERSION = "0.2.5"
+_VERSION = "0.2.6"
 
 
 def _configure_utf8_stdio(stdout=None, stderr=None):
@@ -39,6 +39,7 @@ def cli(ctx, config_path):
       wechat-cli search "你好" --limit 50           # 全局搜索
       wechat-cli contacts --query "李"              # 搜索联系人
       wechat-cli new-messages                       # 获取增量新消息
+      wechat-cli invite-stats "群名"                # 群邀请统计与排行
     """
     # init/web/version 命令不需要 AppContext
     if ctx.invoked_subcommand in ("init", "web", "version"):

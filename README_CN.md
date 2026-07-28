@@ -19,7 +19,7 @@
 ## ✨ 功能亮点
 
 - **🚀 开箱即用** — `npm install -g` 一键安装，无需 Python
-- **📦 11 个命令** — sessions、history、search、contacts、members、stats、export、favorites、unread、new-messages、init
+- **📦 12 个命令** — sessions、history、search、contacts、members、stats、invite-stats、export、favorites、unread、new-messages、init
 - **🤖 AI 优先** — 默认 JSON 输出，专为 LLM Agent 工具调用设计
 - **🔒 全程本地** — SQLCipher 即时解密，数据不出本机
 - **📊 丰富统计** — 发言排行、消息类型分布、24 小时活跃图
@@ -178,6 +178,7 @@ WeChat CLI 专为 AI Agent 设计，所有命令默认输出结构化 JSON。
 - `wechat-cli new-messages` — 获取上次以来的新消息
 - `wechat-cli members "群名"` — 列出群成员
 - `wechat-cli stats "聊天名" --format text` — 聊天统计
+- `wechat-cli invite-stats "群名"` — 群邀请统计与拉新排行
 ```
 
 然后在对话中可以直接问 Claude：
@@ -264,6 +265,22 @@ wechat-cli stats "AI交流群" --format text
 ```
 
 返回：消息总数、类型分布、发言 Top 10、24 小时活跃分布。
+
+### `invite-stats` — 群邀请统计
+
+统计“某人邀请某人加入群聊”和“通过扫描某人分享的二维码加入群聊”等系统提示，按唯一被邀请人数从多到少排行：
+
+```powershell
+wechat-cli invite-stats "群名"
+wechat-cli invite-stats "群名" --format text
+wechat-cli invite-stats "群名" --format csv --output invite-stats.csv
+wechat-cli invite-stats "群名" --start-time "2026-07-23" --end-time "2026-07-28"
+wechat-cli invite-stats "群名" --bind-identity "历史昵称=wxid_xxx"
+```
+
+默认统计本工具当前可见的全部数据库历史。相同邀请者、相同被邀请者只计一个唯一拉新人，但每次邀请事件都保留在明细中；自己扫码等没有邀请来源的提示保留为“来源不明”，不计入排行。
+
+身份只使用当前群成员资料做精确匹配；相似昵称不会自动合并。无法唯一确认的历史昵称会标记为“身份待确认”，可用可重复的 `--bind-identity` 参数手工绑定稳定账号。Web 端在侧边栏“邀请统计”页面提供相同的摘要、排行、关系明细和 CSV 下载。
 
 ### `export` — 导出聊天记录
 
