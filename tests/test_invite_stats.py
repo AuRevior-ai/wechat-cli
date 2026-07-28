@@ -1,7 +1,9 @@
 import unittest
 
 from wechat_cli.core.invite_stats import (
+    IdentityResolver,
     is_invite_like_notice,
+    parse_identity_bindings,
     parse_invite_notice,
 )
 
@@ -55,6 +57,74 @@ class InviteNoticeParserTests(unittest.TestCase):
         text = '"甲"修改群名为“项目群”'
         self.assertIsNone(parse_invite_notice(text))
         self.assertFalse(is_invite_like_notice(text))
+
+
+class InviteIdentityTests(unittest.TestCase):
+    def setUp(self):
+        self.members = [
+            {
+                "username": "wxid_8ncies5owakx11",
+                "display_name": "小陶 老师",
+                "nick_name": "小陶老师 陶金会老板",
+                "remark": "小陶 老师",
+            },
+            {
+                "username": "wxid_gd9gzapbdq8e12",
+                "display_name": "小陶老师 青年OPC盟主",
+                "nick_name": "小陶老师 青年OPC盟主",
+                "remark": "小陶老师 青年OPC盟主",
+            },
+        ]
+
+    def test_keeps_similar_names_as_distinct_accounts(self):
+        resolver = IdentityResolver(self.members, {})
+
+        first = resolver.resolve("小陶 老师")
+        second = resolver.resolve("小陶老师 青年OPC盟主")
+
+        self.assertEqual(first["username"], "wxid_8ncies5owakx11")
+        self.assertEqual(second["username"], "wxid_gd9gzapbdq8e12")
+        self.assertNotEqual(first["key"], second["key"])
+
+    def test_does_not_fuzzy_match_partial_name(self):
+        resolver = IdentityResolver(self.members, {})
+
+        identity = resolver.resolve("小陶老师")
+
+        self.assertEqual(identity["status"], "unresolved")
+        self.assertEqual(identity["key"], "name:小陶老师")
+
+    def test_marks_duplicate_exact_names_ambiguous(self):
+        duplicate = {
+            "username": "wxid_other",
+            "display_name": "小陶 老师",
+            "nick_name": "另一个人",
+            "remark": "小陶 老师",
+        }
+        resolver = IdentityResolver([*self.members, duplicate], {})
+
+        identity = resolver.resolve("小陶 老师")
+
+        self.assertEqual(identity["status"], "unresolved")
+        self.assertEqual(identity["source"], "ambiguous")
+
+    def test_manual_binding_has_highest_priority(self):
+        bindings = parse_identity_bindings(
+            ["旧昵称=wxid_gd9gzapbdq8e12"]
+        )
+        resolver = IdentityResolver(self.members, bindings)
+
+        identity = resolver.resolve("旧昵称")
+
+        self.assertEqual(identity["username"], "wxid_gd9gzapbdq8e12")
+        self.assertEqual(identity["source"], "manual")
+
+    def test_rejects_conflicting_manual_bindings(self):
+        with self.assertRaisesRegex(ValueError, "重复绑定"):
+            parse_identity_bindings([
+                "旧昵称=wxid_one",
+                "旧昵称=wxid_two",
+            ])
 
 
 if __name__ == "__main__":
