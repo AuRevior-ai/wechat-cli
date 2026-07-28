@@ -28,8 +28,22 @@ function Stop-InstalledWeChatCliWeb {
             $MatchesInstallDir = $_.CommandLine.IndexOf($TargetInstallDir, [System.StringComparison]::OrdinalIgnoreCase) -ge 0
         }
 
-        $MatchesExe -or $MatchesInstallDir
+        $MatchesDefaultWebServer = $false
+        if ($_.CommandLine) {
+            $MatchesDefaultWebServer = (
+                $_.CommandLine -match '(^|\s)web(\s|$)' -and
+                $_.CommandLine -match '--port(?:\s+|=)8787(?:\s|$)'
+            )
+        }
+
+        $MatchesExe -or $MatchesInstallDir -or $MatchesDefaultWebServer
     }
+
+    $StoppedServerParentIds = @(
+        $RunningProcesses |
+            ForEach-Object { $_.ParentProcessId } |
+            Where-Object { $_ }
+    )
 
     foreach ($Process in $RunningProcesses) {
         Write-Host "Stopping running WeChat CLI Web process: PID $($Process.ProcessId)"
@@ -38,7 +52,12 @@ function Stop-InstalledWeChatCliWeb {
     }
 
     $RunningLaunchers = Get-CimInstance Win32_Process -Filter "name = 'cmd.exe'" | Where-Object {
-        $_.CommandLine -and $_.CommandLine.IndexOf($StartScript, [System.StringComparison]::OrdinalIgnoreCase) -ge 0
+        (
+            $_.CommandLine -and
+            $_.CommandLine.IndexOf($StartScript, [System.StringComparison]::OrdinalIgnoreCase) -ge 0
+        ) -or (
+            $StoppedServerParentIds -contains $_.ProcessId
+        )
     }
 
     foreach ($Process in $RunningLaunchers) {

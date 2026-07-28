@@ -53,6 +53,23 @@ class WindowsPackagingTests(unittest.TestCase):
             script.index("Copy-WithRetry -Recurse"),
         )
 
+    def test_installer_stops_legacy_portable_web_server_on_default_port(self):
+        script = (ROOT / "packaging" / "windows" / "install.ps1").read_text(encoding="utf-8")
+
+        self.assertIn("$MatchesDefaultWebServer", script)
+        self.assertIn("'(^|\\s)web(\\s|$)'", script)
+        self.assertIn("'--port(?:\\s+|=)8787(?:\\s|$)'", script)
+        self.assertIn(
+            "$MatchesExe -or $MatchesInstallDir -or $MatchesDefaultWebServer",
+            script,
+        )
+
+    def test_installer_closes_launcher_parent_of_stopped_portable_server(self):
+        script = (ROOT / "packaging" / "windows" / "install.ps1").read_text(encoding="utf-8")
+
+        self.assertIn("$StoppedServerParentIds", script)
+        self.assertIn("$StoppedServerParentIds -contains $_.ProcessId", script)
+
     def test_installer_retries_copy_after_stopping_old_server(self):
         script = (ROOT / "packaging" / "windows" / "install.ps1").read_text(encoding="utf-8")
 
