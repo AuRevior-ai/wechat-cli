@@ -1,0 +1,318 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>WeChat CLI Web</title>
+  <link rel="stylesheet" href="/static/app.css?v=20260518-alignmine">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <span class="brand-mark">W</span>
+        <div>
+          <strong>WeChat CLI Web</strong>
+          <small>localhost</small>
+        </div>
+      </div>
+      <nav id="nav" class="nav">
+        <button data-target="dashboard" class="active">总览</button>
+        <button data-target="setup">初始化</button>
+        <button data-target="sessions">最近会话</button>
+        <button data-target="history">聊天记录</button>
+        <button data-target="search">消息搜索</button>
+        <button data-target="contacts">联系人</button>
+        <button data-target="members">群成员</button>
+        <button data-target="stats">统计</button>
+        <button data-target="export">导出</button>
+        <button data-target="favorites">收藏</button>
+        <button data-target="unread">未读与新增</button>
+      </nav>
+    </aside>
+
+    <main class="workspace">
+      <header class="topbar">
+        <div>
+          <p class="kicker">本机微信数据控制台</p>
+          <h1 id="screen-title">总览</h1>
+        </div>
+        <div class="status-strip">
+          <span id="init-pill" class="pill muted">检查中</span>
+          <button id="refresh-status" class="icon-button" title="刷新状态" type="button">↻</button>
+        </div>
+      </header>
+
+      <section id="dashboard" class="screen active" data-title="总览">
+        <div class="dashboard-grid">
+          <section class="panel status-panel">
+            <div class="panel-head">
+              <span class="label">状态</span>
+              <button class="ghost" data-action="refresh-status" type="button">刷新</button>
+            </div>
+            <dl id="status-list" class="status-list"></dl>
+          </section>
+          <section class="panel quick-panel">
+            <div class="panel-head">
+              <span class="label">快捷操作</span>
+            </div>
+            <div class="quick-actions">
+              <button data-jump="sessions" type="button">查看最近会话</button>
+              <button data-jump="unread" type="button">查看未读</button>
+              <button data-jump="search" type="button">搜索消息</button>
+              <button data-jump="setup" type="button">重新初始化</button>
+            </div>
+          </section>
+        </div>
+      </section>
+
+      <section id="setup" class="screen" data-title="初始化">
+        <form class="tool-form" data-command="init">
+          <div class="form-grid two">
+            <label class="full">检测到的微信目录
+              <span class="inline-control">
+                <select id="db-dir-candidates">
+                  <option value="">检测中</option>
+                </select>
+                <button id="detect-db-dirs" class="ghost" type="button">检测目录</button>
+              </span>
+            </label>
+            <label class="full">微信 db_storage 目录
+              <input id="setup-db-dir" data-param="db_dir" placeholder="可手动粘贴或从上方选择">
+            </label>
+            <label class="checkline">
+              <input data-param="force" type="checkbox">
+              <span>强制重新提取密钥</span>
+            </label>
+          </div>
+          <button class="primary" type="submit">开始初始化</button>
+        </form>
+      </section>
+
+      <section id="sessions" class="screen" data-title="最近会话">
+        <form class="tool-form" data-command="sessions">
+          <div class="form-grid compact">
+            <label>数量
+              <input data-param="limit" type="number" min="1" value="20">
+            </label>
+          </div>
+          <button class="primary" type="submit">查询会话</button>
+        </form>
+      </section>
+
+      <section id="history" class="screen" data-title="聊天记录">
+        <form class="tool-form" data-command="history">
+          <div class="form-grid">
+            <label>聊天对象
+              <input data-param="chat_name" required placeholder="昵称、备注、群名或 wxid">
+            </label>
+            <label>消息类型
+              <select data-param="type">
+                <option value="">全部</option>
+                <option value="text">文本</option>
+                <option value="image">图片</option>
+                <option value="voice">语音</option>
+                <option value="video">视频</option>
+                <option value="sticker">表情</option>
+                <option value="location">位置</option>
+                <option value="link">链接</option>
+                <option value="file">文件</option>
+                <option value="call">通话</option>
+                <option value="system">系统</option>
+              </select>
+            </label>
+            <label>开始时间
+              <input data-param="start_time" placeholder="YYYY-MM-DD HH:MM">
+            </label>
+            <label>结束时间
+              <input data-param="end_time" placeholder="YYYY-MM-DD HH:MM">
+            </label>
+            <label>数量
+              <input data-param="limit" type="number" min="1" value="50">
+            </label>
+            <label>偏移
+              <input data-param="offset" type="number" min="0" value="0">
+            </label>
+            <label class="checkline">
+              <input data-param="media" type="checkbox" checked>
+              <span>解析媒体路径</span>
+            </label>
+          </div>
+          <button class="primary" type="submit">读取记录</button>
+        </form>
+      </section>
+
+      <section id="search" class="screen" data-title="消息搜索">
+        <form class="tool-form" data-command="search">
+          <div class="form-grid">
+            <label>关键词
+              <input data-param="keyword" placeholder="留空时必须填写开始和结束时间">
+            </label>
+            <label>限定聊天
+              <textarea data-param="chat" data-list="lines" rows="3" placeholder="每行一个聊天对象"></textarea>
+            </label>
+            <label>开始时间
+              <input data-param="start_time" placeholder="YYYY-MM-DD">
+            </label>
+            <label>结束时间
+              <input data-param="end_time" placeholder="YYYY-MM-DD">
+            </label>
+            <label>数量
+              <input data-param="limit" type="number" min="1" max="500" value="20">
+            </label>
+            <label>偏移
+              <input data-param="offset" type="number" min="0" value="0">
+            </label>
+            <label>消息类型
+              <select data-param="type">
+                <option value="">全部</option>
+                <option value="text">文本</option>
+                <option value="image">图片</option>
+                <option value="voice">语音</option>
+                <option value="video">视频</option>
+                <option value="sticker">表情</option>
+                <option value="location">位置</option>
+                <option value="link">链接</option>
+                <option value="file">文件</option>
+                <option value="call">通话</option>
+                <option value="system">系统</option>
+              </select>
+            </label>
+          </div>
+          <button class="primary" type="submit">搜索</button>
+        </form>
+      </section>
+
+      <section id="contacts" class="screen" data-title="联系人">
+        <form class="tool-form" data-command="contacts">
+          <div class="form-grid">
+            <label>搜索关键词
+              <input data-param="query" placeholder="昵称、备注、wxid">
+            </label>
+            <label>查看详情
+              <input data-param="detail" placeholder="昵称、备注或 wxid">
+            </label>
+            <label>数量
+              <input data-param="limit" type="number" min="1" value="50">
+            </label>
+          </div>
+          <button class="primary" type="submit">查询联系人</button>
+        </form>
+      </section>
+
+      <section id="members" class="screen" data-title="群成员">
+        <form class="tool-form" data-command="members">
+          <div class="form-grid compact">
+            <label>群名
+              <input data-param="group_name" required>
+            </label>
+          </div>
+          <button class="primary" type="submit">列出成员</button>
+        </form>
+      </section>
+
+      <section id="stats" class="screen" data-title="统计">
+        <form class="tool-form" data-command="stats">
+          <div class="form-grid">
+            <label>聊天对象
+              <input data-param="chat_name" required>
+            </label>
+            <label>开始时间
+              <input data-param="start_time" placeholder="YYYY-MM-DD">
+            </label>
+            <label>结束时间
+              <input data-param="end_time" placeholder="YYYY-MM-DD">
+            </label>
+          </div>
+          <button class="primary" type="submit">生成统计</button>
+        </form>
+      </section>
+
+      <section id="export" class="screen" data-title="导出">
+        <form class="tool-form" data-command="export">
+          <div class="form-grid">
+            <label>聊天对象
+              <input data-param="chat_name" required>
+            </label>
+            <label>格式
+              <select data-param="format">
+                <option value="markdown">Markdown</option>
+                <option value="txt">TXT</option>
+              </select>
+            </label>
+            <label>开始时间
+              <input data-param="start_time" placeholder="YYYY-MM-DD">
+            </label>
+            <label>结束时间
+              <input data-param="end_time" placeholder="YYYY-MM-DD">
+            </label>
+            <label>数量
+              <input data-param="limit" type="number" min="1" value="500">
+            </label>
+            <label>输出文件路径
+              <input data-param="output_path" placeholder="留空则在网页中生成">
+            </label>
+          </div>
+          <button class="primary" type="submit">导出</button>
+        </form>
+      </section>
+
+      <section id="favorites" class="screen" data-title="收藏">
+        <form class="tool-form" data-command="favorites">
+          <div class="form-grid">
+            <label>关键词
+              <input data-param="query">
+            </label>
+            <label>类型
+              <select data-param="type">
+                <option value="">全部</option>
+                <option value="text">文本</option>
+                <option value="image">图片</option>
+                <option value="article">文章</option>
+                <option value="card">名片</option>
+                <option value="video">视频号</option>
+              </select>
+            </label>
+            <label>数量
+              <input data-param="limit" type="number" min="1" value="20">
+            </label>
+          </div>
+          <button class="primary" type="submit">查询收藏</button>
+        </form>
+      </section>
+
+      <section id="unread" class="screen" data-title="未读与新增">
+        <div class="split-tools">
+          <form class="tool-form" data-command="unread">
+            <div class="form-grid compact">
+              <label>未读会话数量
+                <input data-param="limit" type="number" min="1" value="50">
+              </label>
+            </div>
+            <button class="primary" type="submit">查看未读</button>
+          </form>
+          <form class="tool-form" data-command="new-messages">
+            <button class="primary" type="submit">获取新增消息</button>
+          </form>
+        </div>
+      </section>
+
+      <section class="result-area">
+        <div class="result-head">
+          <div>
+            <span class="label">结果</span>
+            <code id="command-preview">等待操作</code>
+          </div>
+          <div class="result-actions">
+            <button id="copy-result" class="ghost" type="button">复制</button>
+            <button id="copy-key-result" class="ghost hidden" type="button">复制关键信息</button>
+            <button id="download-result" class="ghost hidden" type="button">下载</button>
+          </div>
+        </div>
+        <div id="result" class="result empty">请选择左侧功能并提交。</div>
+      </section>
+    </main>
+  </div>
+  <script src="/static/app.js?v=20260518-keycopy"></script>
+</body>
+</html>
