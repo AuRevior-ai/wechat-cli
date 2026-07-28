@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import csv
+import io
 import re
 import sqlite3
 from collections import defaultdict
@@ -423,3 +425,107 @@ def collect_group_invite_stats(
         "unparsed_messages": unparsed,
         "failures": failures,
     }
+
+
+def format_invite_stats_text(result):
+    summary = result["summary"]
+    lines = [
+        f'{result["chat"]} 群邀请统计',
+        (
+            "可见范围: "
+            f'{result["scope"]["first_visible_system_time"] or "无"}'
+            " ~ "
+            f'{result["scope"]["last_visible_system_time"] or "无"}'
+        ),
+        (
+            f'邀请事件 {summary["invite_event_count"]}；'
+            f'已归属 {summary["attributed_event_count"]}；'
+            f'唯一被邀请人 {summary["unique_invitee_count"]}；'
+            f'来源不明 {summary["unattributed_count"]}；'
+            f'身份待确认 {summary["unresolved_identity_count"]}；'
+            f'未解析 {summary["unparsed_count"]}'
+        ),
+        "",
+        "排行榜:",
+    ]
+    for item in result["ranking"]:
+        identity = (
+            f' ({item["inviter_username"]})'
+            if item["inviter_username"] else " (身份待确认)"
+        )
+        lines.append(
+            f'{item["rank"]}. {item["inviter_name"]}{identity}'
+            f' — {item["unique_invitee_count"]} 人'
+        )
+        lines.append(
+            f'   直接 {item["direct_count"]} / '
+            f'二维码 {item["qr_count"]} / 事件 {item["event_count"]}'
+        )
+    lines.append("")
+    lines.append("邀请关系明细:")
+    for event in result["events"]:
+        method = "直接邀请" if event["method"] == "direct" else "二维码"
+        identity_note = (
+            " [身份待确认]"
+            if event["inviter_identity_status"] != "resolved"
+            or event["invitee_identity_status"] != "resolved"
+            else ""
+        )
+        lines.append(
+            f'  [{event["time"]}] {event["inviter_name_raw"]}'
+            f' -> {event["invitee_name_raw"]} ({method}){identity_note}'
+        )
+    if result["unattributed_events"]:
+        lines.append("")
+        lines.append("来源不明:")
+        for event in result["unattributed_events"]:
+            lines.append(
+                f'  [{event["time"]}] {event["invitee_name_raw"]}: '
+                f'{event["raw_text"]}'
+            )
+    if result["unparsed_messages"]:
+        lines.append("")
+        lines.append("未解析提示:")
+        for item in result["unparsed_messages"]:
+            lines.append(f'  [{item["time"]}] {item["raw_text"]}')
+    if result["failures"]:
+        lines.append("读取失败: " + "；".join(result["failures"]))
+    return "\n".join(lines)
+
+
+def format_invite_stats_csv(result):
+    stream = io.StringIO(newline="")
+    stream.write("\ufeff")
+    writer = csv.writer(stream)
+    writer.writerow([
+        "邀请者排名", "邀请者", "邀请者账号", "邀请者身份状态",
+        "唯一拉人数", "被邀请者", "被邀请者账号",
+        "被邀请者身份状态", "入群时间", "邀请方式", "原始提示",
+    ])
+    ranking = {
+        item["inviter_key"]: item for item in result["ranking"]
+    }
+    all_events = [
+        *result["events"],
+        *result["unattributed_events"],
+    ]
+    for event in all_events:
+        item = ranking.get(event["inviter_key"], {})
+        writer.writerow([
+            item.get("rank", ""),
+            item.get("inviter_name", ""),
+            item.get("inviter_username", ""),
+            event["inviter_identity_status"],
+            item.get("unique_invitee_count", 0),
+            event["invitee_name_raw"],
+            event["invitee_username"],
+            event["invitee_identity_status"],
+            event["time"],
+            {
+                "direct": "直接邀请",
+                "qr": "二维码",
+                "unattributed_qr": "来源不明扫码",
+            }[event["method"]],
+            event["raw_text"],
+        ])
+    return stream.getvalue()

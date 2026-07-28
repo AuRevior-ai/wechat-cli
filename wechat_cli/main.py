@@ -68,6 +68,7 @@ from .commands.unread import unread
 from .commands.favorites import favorites
 from .commands.web import web
 from .commands.media import media
+from .commands.invite_stats import invite_stats
 
 cli.add_command(init)
 cli.add_command(sessions)
@@ -82,6 +83,7 @@ cli.add_command(unread)
 cli.add_command(favorites)
 cli.add_command(web)
 cli.add_command(media)
+cli.add_command(invite_stats)
 
 
 if __name__ == "__main__":
