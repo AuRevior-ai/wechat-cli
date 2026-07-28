@@ -13,6 +13,44 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class BuildCliArgsTests(unittest.TestCase):
+    def test_builds_invite_stats_with_repeated_identity_bindings(self):
+        args = build_cli_args({
+            "command": "invite-stats",
+            "params": {
+                "group_name": "破界青年OPC销冠争霸赛🏆",
+                "start_time": "2026-07-23",
+                "bind_identity": [
+                    "旧昵称=wxid_one",
+                    "另一个旧昵称=wxid_two",
+                ],
+            },
+        })
+
+        self.assertEqual(args, [
+            "invite-stats", "破界青年OPC销冠争霸赛🏆",
+            "--start-time", "2026-07-23",
+            "--bind-identity", "旧昵称=wxid_one",
+            "--bind-identity", "另一个旧昵称=wxid_two",
+            "--format", "json",
+        ])
+
+    def test_invite_stats_page_has_form_and_renderer(self):
+        html = (
+            ROOT / "wechat_cli" / "web" / "static" / "index.html"
+        ).read_text(encoding="utf-8")
+        js = (
+            ROOT / "wechat_cli" / "web" / "static" / "app.js"
+        ).read_text(encoding="utf-8")
+        css = (
+            ROOT / "wechat_cli" / "web" / "static" / "app.css"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn('data-target="invite-stats"', html)
+        self.assertIn('data-command="invite-stats"', html)
+        self.assertIn('data-param="bind_identity"', html)
+        self.assertIn("function renderInviteStats", js)
+        self.assertIn("invite-ranking-table", css)
+
     def test_builds_sessions_with_json_format(self):
         args = build_cli_args({
             "command": "sessions",

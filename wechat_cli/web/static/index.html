@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>WeChat CLI Web</title>
-  <link rel="stylesheet" href="/static/app.css?v=20260518-alignmine">
+  <link rel="stylesheet" href="/static/app.css?v=20260728-invite-stats">
 </head>
 <body>
   <div class="app-shell">
@@ -25,6 +25,7 @@
         <button data-target="contacts">联系人</button>
         <button data-target="members">群成员</button>
         <button data-target="stats">统计</button>
+        <button data-target="invite-stats">邀请统计</button>
         <button data-target="export">导出</button>
         <button data-target="favorites">收藏</button>
         <button data-target="unread">未读与新增</button>
@@ -228,6 +229,33 @@
         </form>
       </section>
 
+      <section id="invite-stats" class="screen" data-title="群邀请统计">
+        <form class="tool-form invite-stats-form" data-command="invite-stats">
+          <div class="invite-form-intro">
+            <span>GROUP INVITE LEDGER</span>
+            <strong>按唯一被邀请人数排行</strong>
+            <p>读取本工具当前可见的全部群系统提示；二维码入群归属于二维码分享者。</p>
+          </div>
+          <div class="form-grid">
+            <label>群名称
+              <input data-param="group_name" required placeholder="输入群聊名称">
+            </label>
+            <label>开始时间
+              <input data-param="start_time" placeholder="2026-07-23">
+            </label>
+            <label>结束时间
+              <input data-param="end_time" placeholder="2026-07-28">
+            </label>
+            <label class="full">历史昵称绑定
+              <textarea data-param="bind_identity" rows="4"
+                placeholder="每行一个：历史昵称=wxid_xxx"></textarea>
+              <small>仅在当前群成员无法精确匹配历史昵称时填写；不会进行模糊合并。</small>
+            </label>
+          </div>
+          <button class="primary" type="submit">生成邀请统计</button>
+        </form>
+      </section>
+
       <section id="export" class="screen" data-title="导出">
         <form class="tool-form" data-command="export">
           <div class="form-grid">
@@ -313,6 +341,6 @@
       </section>
     </main>
   </div>
-  <script src="/static/app.js?v=20260518-keycopy"></script>
+  <script src="/static/app.js?v=20260728-invite-stats"></script>
 </body>
 </html>

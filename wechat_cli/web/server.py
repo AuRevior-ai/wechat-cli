@@ -100,6 +100,16 @@ COMMAND_SPECS: dict[str, CommandSpec] = {
         },
         default_format="json",
     ),
+    "invite-stats": CommandSpec(
+        positional=("group_name",),
+        options={
+            "start_time": OptionSpec("--start-time"),
+            "end_time": OptionSpec("--end-time"),
+            "bind_identity": OptionSpec("--bind-identity", "multi"),
+            "format": OptionSpec("--format"),
+        },
+        default_format="json",
+    ),
     "export": CommandSpec(
         positional=("chat_name",),
         options={

@@ -77,6 +77,12 @@ function readForm(form) {
   if (form.dataset.command === "history") {
     params.media = true;
   }
+  if (form.dataset.command === "invite-stats") {
+    params.bind_identity = String(params.bind_identity || "")
+      .split(/\r?\n/)
+      .map((value) => value.trim())
+      .filter(Boolean);
+  }
   return { command: form.dataset.command, params: compactObject(params) };
 }
 
@@ -228,6 +234,156 @@ function renderStats(data) {
     </div>`;
 }
 
+function inviteCsv(data) {
+  const rows = [[
+    "邀请者排名", "邀请者", "邀请者账号", "邀请者身份状态",
+    "唯一拉人数", "被邀请者", "被邀请者账号",
+    "被邀请者身份状态", "入群时间", "邀请方式", "原始提示",
+  ]];
+  const ranking = new Map(
+    (data.ranking || []).map((item) => [item.inviter_key, item])
+  );
+  const events = [
+    ...(data.events || []),
+    ...(data.unattributed_events || []),
+  ];
+  for (const event of events) {
+    const inviter = ranking.get(event.inviter_key) || {};
+    rows.push([
+      inviter.rank || "",
+      inviter.inviter_name || event.inviter_name_raw || "",
+      inviter.inviter_username || "",
+      event.inviter_identity_status || "",
+      inviter.unique_invitee_count || 0,
+      event.invitee_name_raw || "",
+      event.invitee_username || "",
+      event.invitee_identity_status || "",
+      event.time || "",
+      ({
+        direct: "直接邀请",
+        qr: "二维码",
+        unattributed_qr: "来源不明扫码",
+      })[event.method] || event.method,
+      event.raw_text || "",
+    ]);
+  }
+  const quote = (value) => `"${String(value).replaceAll('"', '""')}"`;
+  return "\ufeff" + rows.map((row) => row.map(quote).join(",")).join("\r\n");
+}
+
+function renderInviteStats(data) {
+  const summary = data.summary || {};
+  const scope = data.scope || {};
+  const cards = [
+    ["邀请事件", summary.invite_event_count || 0],
+    ["已归属", summary.attributed_event_count || 0],
+    ["唯一成员", summary.unique_invitee_count || 0],
+    ["来源不明", summary.unattributed_count || 0],
+    ["身份待确认", summary.unresolved_identity_count || 0],
+    ["未解析", summary.unparsed_count || 0],
+  ];
+  const scopeHtml = `
+    <div class="invite-scope">
+      <div>
+        <span>统计群聊</span>
+        <strong>${escapeHtml(data.chat || "")}</strong>
+        <code>${escapeHtml(data.username || "")}</code>
+      </div>
+      <div>
+        <span>可见系统消息范围</span>
+        <strong>${escapeHtml(scope.first_visible_system_time || "无记录")}
+          <i>→</i> ${escapeHtml(scope.last_visible_system_time || "无记录")}</strong>
+      </div>
+    </div>`;
+  const cardHtml = `<div class="invite-summary">${
+    cards.map(([label, value], index) => `
+      <div class="invite-summary-card" style="--card-index:${index}">
+        <span>${escapeHtml(label)}</span>
+        <strong>${escapeHtml(value)}</strong>
+      </div>`).join("")
+  }</div>`;
+  const rows = (data.ranking || []).map((item) => `
+    <details class="invite-rank-row">
+      <summary>
+        <span class="invite-rank">#${escapeHtml(item.rank)}</span>
+        <span class="invite-person">
+          <strong>${escapeHtml(item.inviter_name)}</strong>
+          <code>${escapeHtml(item.inviter_username || "身份待确认")}</code>
+        </span>
+        <b>${escapeHtml(item.unique_invitee_count)} 人</b>
+        <span class="invite-method-counts">
+          直接 ${escapeHtml(item.direct_count)} · 二维码 ${escapeHtml(item.qr_count)}
+        </span>
+      </summary>
+      <div class="invitee-list">${
+        (item.invitees || []).map((invitee) => `
+          <div>
+            <strong>${escapeHtml(invitee.name)}</strong>
+            ${invitee.username ? `<code>${escapeHtml(invitee.username)}</code>` : ""}
+            <span>${escapeHtml(invitee.time)} ·
+              ${invitee.method === "direct" ? "直接邀请" : "二维码"}</span>
+          </div>
+        `).join("") || "没有明细"
+      }</div>
+    </details>`).join("");
+  const tableHtml = `
+    <div class="invite-section-heading">
+      <span>LEADERBOARD</span><h3>拉新排行榜</h3>
+    </div>
+    <div class="invite-ranking-table">${
+      rows || '<div class="empty">当前可见范围没有邀请记录。</div>'
+    }</div>`;
+  const eventRows = (data.events || []).map((event) => `
+    <tr>
+      <td>${escapeHtml(event.time)}</td>
+      <td><strong>${escapeHtml(event.inviter_name_raw)}</strong>
+        ${event.inviter_username ? `<code>${escapeHtml(event.inviter_username)}</code>` : ""}</td>
+      <td><strong>${escapeHtml(event.invitee_name_raw)}</strong>
+        ${event.invitee_username ? `<code>${escapeHtml(event.invitee_username)}</code>` : ""}</td>
+      <td><span class="method-badge ${event.method}">${
+        event.method === "direct" ? "直接邀请" : "二维码"
+      }</span></td>
+      <td>${event.inviter_identity_status === "resolved" &&
+             event.invitee_identity_status === "resolved"
+             ? '<span class="identity-ok">已确认</span>'
+             : '<span class="identity-pending">身份待确认</span>'}</td>
+    </tr>`).join("");
+  const detailsHtml = `
+    <div class="invite-section-heading">
+      <span>AUDIT TRAIL</span><h3>全部邀请关系</h3>
+    </div>
+    <div class="invite-detail-scroll">
+      <table class="invite-detail-table">
+        <thead><tr><th>时间</th><th>邀请者</th><th>被邀请者</th><th>方式</th><th>身份</th></tr></thead>
+        <tbody>${eventRows || '<tr><td colspan="5">没有明细</td></tr>'}</tbody>
+      </table>
+    </div>`;
+  const issueItems = [
+    ...(data.unattributed_events || []).map((event) => ({
+      label: "来源不明",
+      time: event.time,
+      text: event.raw_text,
+    })),
+    ...(data.unparsed_messages || []).map((item) => ({
+      label: "未解析",
+      time: item.time,
+      text: item.raw_text,
+    })),
+  ];
+  const issuesHtml = issueItems.length ? `
+    <div class="invite-section-heading">
+      <span>REVIEW QUEUE</span><h3>待核查记录</h3>
+    </div>
+    <div class="invite-issues">${issueItems.map((item) => `
+      <div><b>${escapeHtml(item.label)}</b>
+      <span>${escapeHtml(item.time)}</span>
+      <p>${escapeHtml(item.text)}</p></div>
+    `).join("")}</div>` : "";
+  return `<div class="invite-dashboard">${
+    scopeHtml + cardHtml + tableHtml + detailsHtml + issuesHtml
+  }</div>`;
+}
+
 function isSafeImageUrl(url) {
   return /^https?:\/\//i.test(url) || /^data:image\//i.test(url) || /^\/api\/media\?path=/i.test(url);
 }
@@ -310,6 +466,11 @@ function renderArray(items) {
 }
 
 function renderData(data) {
+  if (data && typeof data === "object" &&
+      Array.isArray(data.ranking) && data.summary &&
+      Array.isArray(data.events)) {
+    return renderInviteStats(data);
+  }
   if (data && typeof data === "object" && "hourly" in data && "total" in data) {
     return renderStats(data);
   }
@@ -346,7 +507,15 @@ function setResult(payload) {
 
   if (payload.data) {
     result.innerHTML = renderData(payload.data);
-    downloadButton.classList.add("hidden");
+    if (payload.command?.[1] === "invite-stats") {
+      lastDownload = {
+        text: inviteCsv(payload.data),
+        filename: "wechat-invite-stats.csv",
+      };
+      downloadButton.classList.remove("hidden");
+    } else {
+      downloadButton.classList.add("hidden");
+    }
     return;
   }
 
