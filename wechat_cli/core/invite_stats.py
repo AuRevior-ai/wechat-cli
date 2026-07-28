@@ -3,6 +3,12 @@
 from __future__ import annotations
 
 import re
+import sqlite3
+from collections import defaultdict
+from contextlib import closing
+from datetime import datetime
+
+from .messages import _is_safe_msg_table_name, decompress_content
 
 _SYSTEM_PREFIX_RE = re.compile(r"^\s*\[系统\]\s*")
 _QUOTE_RE = re.compile(r'["“](.*?)["”]')
@@ -149,3 +155,271 @@ class IdentityResolver:
             "status": "unresolved",
             "source": "ambiguous" if candidates else "unmatched",
         }
+
+
+def _system_rows(
+    conn,
+    table_name,
+    start_ts=None,
+    end_ts=None,
+):
+    if not _is_safe_msg_table_name(table_name):
+        raise ValueError(f"非法消息表名: {table_name}")
+    clauses = ["(local_type & 0xFFFFFFFF) = 10000"]
+    params = []
+    if start_ts is not None:
+        clauses.append("create_time >= ?")
+        params.append(start_ts)
+    if end_ts is not None:
+        clauses.append("create_time <= ?")
+        params.append(end_ts)
+    return conn.execute(
+        f"""SELECT local_id, server_id, create_time, message_content,
+                   WCDB_CT_message_content
+            FROM [{table_name}]
+            WHERE {' AND '.join(clauses)}
+            ORDER BY create_time ASC""",
+        params,
+    ).fetchall()
+
+
+def _identity_fields(prefix, identity):
+    return {
+        f"{prefix}_username": identity["username"],
+        f"{prefix}_key": identity["key"],
+        f"{prefix}_identity_status": identity["status"],
+        f"{prefix}_identity_source": identity["source"],
+    }
+
+
+def _format_time(timestamp):
+    return datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d %H:%M")
+
+
+def collect_group_invite_stats(
+    chat_ctx,
+    members,
+    bindings,
+    start_ts=None,
+    end_ts=None,
+):
+    if not chat_ctx.get("is_group"):
+        raise ValueError("邀请统计只支持群聊")
+
+    resolver = IdentityResolver(members, bindings)
+    seen_rows = set()
+    events = []
+    unattributed = []
+    unparsed = []
+    failures = []
+    system_times = []
+
+    for table in chat_ctx.get("message_tables") or []:
+        try:
+            with closing(sqlite3.connect(table["db_path"])) as conn:
+                rows = _system_rows(
+                    conn,
+                    table["table_name"],
+                    start_ts=start_ts,
+                    end_ts=end_ts,
+                )
+        except Exception as exc:
+            failures.append(f'{table.get("db_path", "")}: {exc}')
+            continue
+
+        for (
+            local_id,
+            server_id,
+            timestamp,
+            content,
+            compression,
+        ) in rows:
+            text = decompress_content(content, compression)
+            if text is None:
+                text = ""
+            notice = normalize_notice_text(text)
+            row_key = (
+                ("server", int(server_id))
+                if server_id
+                else ("fallback", int(timestamp), notice)
+            )
+            if row_key in seen_rows:
+                continue
+            seen_rows.add(row_key)
+            system_times.append(int(timestamp))
+
+            parsed = parse_invite_notice(notice)
+            if parsed is None:
+                if is_invite_like_notice(notice):
+                    unparsed.append({
+                        "timestamp": int(timestamp),
+                        "time": _format_time(timestamp),
+                        "raw_text": notice,
+                        "reason": "unknown_template",
+                    })
+                continue
+
+            for relation_index, relation in enumerate(parsed):
+                event = {
+                    "event_id": (
+                        f"{server_id}:{relation_index}"
+                        if server_id
+                        else (
+                            f"{timestamp}:{local_id}:"
+                            f"{relation_index}"
+                        )
+                    ),
+                    "server_id": int(server_id or 0),
+                    "timestamp": int(timestamp),
+                    "time": _format_time(timestamp),
+                    "method": relation["method"],
+                    "inviter_name_raw": (
+                        relation["inviter_name_raw"]
+                    ),
+                    "invitee_name_raw": (
+                        relation["invitee_name_raw"]
+                    ),
+                    "raw_text": notice,
+                }
+                invitee = resolver.resolve(
+                    relation["invitee_name_raw"]
+                )
+                event.update(_identity_fields("invitee", invitee))
+
+                if relation["method"] == "unattributed_qr":
+                    event.update({
+                        "inviter_username": "",
+                        "inviter_key": "",
+                        "inviter_identity_status": "unattributed",
+                        "inviter_identity_source": "notice",
+                    })
+                    unattributed.append(event)
+                    continue
+
+                inviter = resolver.resolve(
+                    relation["inviter_name_raw"]
+                )
+                event.update(_identity_fields("inviter", inviter))
+                events.append(event)
+
+    buckets = defaultdict(list)
+    for event in events:
+        buckets[event["inviter_key"]].append(event)
+
+    ranking = []
+    for inviter_key, inviter_events in buckets.items():
+        unique_invitees = {}
+        for event in inviter_events:
+            unique_invitees.setdefault(
+                event["invitee_key"], event
+            )
+        first_timestamp = min(
+            event["timestamp"] for event in inviter_events
+        )
+        last_timestamp = max(
+            event["timestamp"] for event in inviter_events
+        )
+        sample = inviter_events[0]
+        resolved_inviter = resolver.resolve(
+            sample["inviter_name_raw"]
+        )
+        ranking.append({
+            "rank": 0,
+            "inviter_key": inviter_key,
+            "inviter_username": sample["inviter_username"],
+            "inviter_name": resolved_inviter["name"],
+            "historical_names": sorted({
+                event["inviter_name_raw"]
+                for event in inviter_events
+            }),
+            "identity_status": (
+                sample["inviter_identity_status"]
+            ),
+            "identity_source": (
+                sample["inviter_identity_source"]
+            ),
+            "unique_invitee_count": len(unique_invitees),
+            "event_count": len(inviter_events),
+            "direct_count": sum(
+                event["method"] == "direct"
+                for event in inviter_events
+            ),
+            "qr_count": sum(
+                event["method"] == "qr"
+                for event in inviter_events
+            ),
+            "first_invite_time": _format_time(
+                first_timestamp
+            ),
+            "last_invite_time": _format_time(
+                last_timestamp
+            ),
+            "invitees": [
+                {
+                    "name": event["invitee_name_raw"],
+                    "username": event["invitee_username"],
+                    "time": event["time"],
+                    "method": event["method"],
+                }
+                for event in unique_invitees.values()
+            ],
+        })
+
+    ranking.sort(key=lambda item: (
+        -item["unique_invitee_count"],
+        item["first_invite_time"],
+        item["inviter_name"],
+    ))
+    for index, item in enumerate(ranking, 1):
+        item["rank"] = index
+
+    rank_by_key = {
+        item["inviter_key"]: item["rank"]
+        for item in ranking
+    }
+    for event in events:
+        event["rank"] = rank_by_key[event["inviter_key"]]
+
+    global_invitees = {
+        event["invitee_key"] for event in events
+    }
+    unresolved_count = sum(
+        event["inviter_identity_status"] != "resolved"
+        or event["invitee_identity_status"] != "resolved"
+        for event in events
+    )
+
+    return {
+        "chat": chat_ctx.get("display_name", ""),
+        "username": chat_ctx.get("username", ""),
+        "scope": {
+            "start_timestamp": start_ts,
+            "end_timestamp": end_ts,
+            "first_visible_system_time": (
+                _format_time(min(system_times))
+                if system_times else None
+            ),
+            "last_visible_system_time": (
+                _format_time(max(system_times))
+                if system_times else None
+            ),
+        },
+        "summary": {
+            "system_message_count": len(seen_rows),
+            "invite_event_count": (
+                len(events) + len(unattributed)
+            ),
+            "attributed_event_count": len(events),
+            "unique_invitee_count": len(global_invitees),
+            "unattributed_count": len(unattributed),
+            "unresolved_identity_count": unresolved_count,
+            "unparsed_count": len(unparsed),
+        },
+        "ranking": ranking,
+        "events": sorted(
+            events, key=lambda item: item["timestamp"]
+        ),
+        "unattributed_events": unattributed,
+        "unparsed_messages": unparsed,
+        "failures": failures,
+    }

@@ -1,11 +1,35 @@
+import sqlite3
+import tempfile
 import unittest
+from pathlib import Path
 
 from wechat_cli.core.invite_stats import (
     IdentityResolver,
+    collect_group_invite_stats,
     is_invite_like_notice,
     parse_identity_bindings,
     parse_invite_notice,
 )
+
+
+def create_message_db(path: Path, table_name: str, rows: list[tuple]):
+    conn = sqlite3.connect(path)
+    conn.execute(
+        f"""CREATE TABLE [{table_name}] (
+            local_id INTEGER,
+            server_id INTEGER,
+            local_type INTEGER,
+            create_time INTEGER,
+            message_content TEXT,
+            WCDB_CT_message_content INTEGER
+        )"""
+    )
+    conn.executemany(
+        f"INSERT INTO [{table_name}] VALUES (?, ?, ?, ?, ?, ?)",
+        rows,
+    )
+    conn.commit()
+    conn.close()
 
 
 class InviteNoticeParserTests(unittest.TestCase):
@@ -125,6 +149,230 @@ class InviteIdentityTests(unittest.TestCase):
                 "旧昵称=wxid_one",
                 "旧昵称=wxid_two",
             ])
+
+
+class InviteAggregationTests(unittest.TestCase):
+    def test_deduplicates_shards_and_ranks_unique_invitees(self):
+        table_name = "Msg_" + "a" * 32
+        with tempfile.TemporaryDirectory() as tmp:
+            first = Path(tmp) / "message_0.db"
+            second = Path(tmp) / "message_1.db"
+            shared = (
+                1, 101, 10000, 1000,
+                '"甲"邀请"乙"加入了群聊', 0,
+            )
+            create_message_db(first, table_name, [
+                shared,
+                (
+                    2, 102, 10000, 1010,
+                    '"甲"邀请"乙"加入了群聊', 0,
+                ),
+                (
+                    3, 103, 10000, 1020,
+                    '"甲"邀请"丙"加入了群聊', 0,
+                ),
+            ])
+            create_message_db(second, table_name, [
+                shared,
+                (
+                    4, 104, 10000, 1030,
+                    '"丁"邀请"戊"加入了群聊', 0,
+                ),
+                (
+                    5, 105, 10000, 1040,
+                    "你通过扫描二维码加入群聊", 0,
+                ),
+                (
+                    6, 106, 10000, 1050,
+                    '"己"通过新的入群方式加入了群聊', 0,
+                ),
+            ])
+            ctx = {
+                "display_name": "测试群",
+                "username": "room@chatroom",
+                "is_group": True,
+                "message_tables": [
+                    {
+                        "db_path": str(first),
+                        "table_name": table_name,
+                    },
+                    {
+                        "db_path": str(second),
+                        "table_name": table_name,
+                    },
+                ],
+            }
+
+            result = collect_group_invite_stats(ctx, [], {})
+
+        self.assertEqual(
+            result["summary"]["system_message_count"], 6
+        )
+        self.assertEqual(
+            result["summary"]["invite_event_count"], 5
+        )
+        self.assertEqual(
+            result["summary"]["attributed_event_count"], 4
+        )
+        self.assertEqual(
+            result["summary"]["unattributed_count"], 1
+        )
+        self.assertEqual(result["summary"]["unparsed_count"], 1)
+        self.assertEqual(result["ranking"][0]["inviter_name"], "甲")
+        self.assertEqual(
+            result["ranking"][0]["unique_invitee_count"], 2
+        )
+        self.assertEqual(result["ranking"][0]["event_count"], 3)
+        self.assertEqual(result["ranking"][1]["inviter_name"], "丁")
+
+    def test_applies_time_range_before_aggregation(self):
+        table_name = "Msg_" + "b" * 32
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "message.db"
+            create_message_db(path, table_name, [
+                (
+                    1, 201, 10000, 1000,
+                    '"甲"邀请"乙"加入了群聊', 0,
+                ),
+                (
+                    2, 202, 10000, 2000,
+                    '"甲"邀请"丙"加入了群聊', 0,
+                ),
+            ])
+            ctx = {
+                "display_name": "测试群",
+                "username": "room@chatroom",
+                "is_group": True,
+                "message_tables": [{
+                    "db_path": str(path),
+                    "table_name": table_name,
+                }],
+            }
+
+            result = collect_group_invite_stats(
+                ctx, [], {}, start_ts=1500, end_ts=2500
+            )
+
+        self.assertEqual(
+            result["ranking"][0]["unique_invitee_count"], 1
+        )
+        self.assertEqual(
+            result["events"][0]["invitee_name_raw"], "丙"
+        )
+
+    def test_counts_methods_and_breaks_ties_by_first_invite_time(self):
+        table_name = "Msg_" + "e" * 32
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "message.db"
+            create_message_db(path, table_name, [
+                (
+                    1, 501, 10000, 900,
+                    '"丁"邀请"戊"加入了群聊', 0,
+                ),
+                (
+                    2, 502, 10000, 1000,
+                    '"甲"邀请"乙"加入了群聊', 0,
+                ),
+                (
+                    3, 503, 10000, 1010,
+                    '"丙"通过扫描"甲"分享的二维码加入群聊',
+                    0,
+                ),
+                (
+                    4, 504, 10000, 1100,
+                    '"己"邀请"庚"加入了群聊', 0,
+                ),
+            ])
+            ctx = {
+                "display_name": "测试群",
+                "username": "room@chatroom",
+                "is_group": True,
+                "message_tables": [{
+                    "db_path": str(path),
+                    "table_name": table_name,
+                }],
+            }
+
+            result = collect_group_invite_stats(ctx, [], {})
+
+        self.assertEqual(result["ranking"][0]["inviter_name"], "甲")
+        self.assertEqual(result["ranking"][0]["direct_count"], 1)
+        self.assertEqual(result["ranking"][0]["qr_count"], 1)
+        self.assertEqual(
+            [
+                item["inviter_name"]
+                for item in result["ranking"][1:]
+            ],
+            ["丁", "己"],
+        )
+
+    def test_rejects_private_chat_context(self):
+        with self.assertRaisesRegex(ValueError, "只支持群聊"):
+            collect_group_invite_stats(
+                {"is_group": False, "message_tables": []},
+                [],
+                {},
+            )
+
+    def test_returns_empty_success_when_group_has_no_invites(self):
+        table_name = "Msg_" + "c" * 32
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "message.db"
+            create_message_db(path, table_name, [
+                (
+                    1, 301, 10000, 1000,
+                    '"甲"修改群名为“测试群”', 0,
+                ),
+            ])
+            ctx = {
+                "display_name": "测试群",
+                "username": "room@chatroom",
+                "is_group": True,
+                "message_tables": [{
+                    "db_path": str(path),
+                    "table_name": table_name,
+                }],
+            }
+
+            result = collect_group_invite_stats(ctx, [], {})
+
+        self.assertEqual(result["ranking"], [])
+        self.assertEqual(
+            result["summary"]["invite_event_count"], 0
+        )
+
+    def test_continues_after_one_message_database_fails(self):
+        table_name = "Msg_" + "d" * 32
+        with tempfile.TemporaryDirectory() as tmp:
+            valid = Path(tmp) / "valid.db"
+            create_message_db(valid, table_name, [
+                (
+                    1, 401, 10000, 1000,
+                    '"甲"邀请"乙"加入了群聊', 0,
+                ),
+            ])
+            ctx = {
+                "display_name": "测试群",
+                "username": "room@chatroom",
+                "is_group": True,
+                "message_tables": [
+                    {
+                        "db_path": str(Path(tmp) / "missing.db"),
+                        "table_name": table_name,
+                    },
+                    {
+                        "db_path": str(valid),
+                        "table_name": table_name,
+                    },
+                ],
+            }
+
+            result = collect_group_invite_stats(ctx, [], {})
+
+        self.assertEqual(
+            result["summary"]["attributed_event_count"], 1
+        )
+        self.assertEqual(len(result["failures"]), 1)
 
 
 if __name__ == "__main__":
