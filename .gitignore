@@ -22,6 +22,7 @@ npm/platforms/*/bin/*.exe
 Thumbs.db
 
 .worktrees/
+.superpowers/
 .wechat-cli/
 all_keys.json
 config.json
