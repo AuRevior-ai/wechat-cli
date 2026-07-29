@@ -87,9 +87,16 @@ def ai_package(
     def progress(message):
         click.echo(message, err=True)
 
+    image_paths = [
+        str((item.get("media") or {}).get("path"))
+        for item in items
+        if item.get("type") == "image"
+        and (item.get("media") or {}).get("path")
+    ]
     image_keys = ensure_image_keys(
         app.cfg,
         config_path=app.config_path,
+        sample_paths=image_paths,
         progress=progress,
     )
     image_aes_key, image_xor_key = image_keys or (None, None)

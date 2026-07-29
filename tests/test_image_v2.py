@@ -10,6 +10,7 @@ from wechat_cli.core.image_keys import (
     candidate_image_keys,
     derive_image_xor_key,
     scan_buffers_for_image_key,
+    scan_buffers_for_image_keys,
     validate_image_aes_key,
 )
 from wechat_cli.core.media import (
@@ -65,6 +66,20 @@ class WeChatV2ImageTests(unittest.TestCase):
         self.assertEqual(body, clear)
         self.assertEqual(content_type, "image/jpeg")
 
+    def test_decode_media_bytes_tries_multiple_session_keys(self):
+        clear = b"\xff\xd8\xff\xe0JFIF" + b"x" * 1200 + b"\xff\xd9"
+        encrypted = _encrypt_v2_image(clear)
+
+        body, content_type = decode_media_bytes(
+            encrypted,
+            "sample.dat",
+            image_aes_key=["wrongwrongwrong1", AES_KEY.decode()],
+            image_xor_key=XOR_KEY,
+        )
+
+        self.assertEqual(body, clear)
+        self.assertEqual(content_type, "image/jpeg")
+
     def test_v2_without_key_does_not_claim_to_be_decoded(self):
         clear = b"\xff\xd8\xff\xe0JFIF" + b"x" * 1200 + b"\xff\xd9"
         encrypted = _encrypt_v2_image(clear)
@@ -106,6 +121,19 @@ class WeChatImageKeyTests(unittest.TestCase):
         self.assertTrue(validate_image_aes_key(AES_KEY, ciphertexts))
         self.assertFalse(validate_image_aes_key(b"wrongwrongwrong1", ciphertexts))
 
+    def test_accepts_key_matching_one_sample_from_mixed_sessions(self):
+        matching = AES.new(AES_KEY, AES.MODE_ECB).encrypt(
+            b"\xff\xd8\xff" + b"\x00" * 13
+        )
+        other_session = AES.new(
+            b"otherSessionKey1",
+            AES.MODE_ECB,
+        ).encrypt(b"\x89PNG" + b"\x00" * 12)
+
+        self.assertTrue(
+            validate_image_aes_key(AES_KEY, [matching, other_session])
+        )
+
     def test_scans_memory_buffers_and_returns_first_verified_key(self):
         clear = b"\xff\xd8\xff\xe0JFIF" + b"x" * 1200 + b"\xff\xd9"
         encrypted = _encrypt_v2_image(clear)
@@ -117,6 +145,23 @@ class WeChatImageKeyTests(unittest.TestCase):
         key = scan_buffers_for_image_key(buffers, [encrypted[15:31]])
 
         self.assertEqual(key, AES_KEY)
+
+    def test_scans_memory_once_and_collects_keys_for_multiple_sessions(self):
+        other_key = b"otherSessionKey1"
+        clear = b"\xff\xd8\xff\xe0JFIF" + b"x" * 1200 + b"\xff\xd9"
+        first = _encrypt_v2_image(clear, aes_key=AES_KEY)
+        second = _encrypt_v2_image(clear, aes_key=other_key)
+        buffers = [
+            b" token " + AES_KEY + b" done ",
+            b" token " + other_key + b" done ",
+        ]
+
+        keys = scan_buffers_for_image_keys(
+            buffers,
+            [first[15:31], second[15:31]],
+        )
+
+        self.assertEqual(keys, [AES_KEY, other_key])
 
     def test_derives_xor_key_from_recent_v2_thumbnail_tails(self):
         clear = b"\xff\xd8\xff\xe0JFIF" + b"x" * 1200 + b"\xff\xd9"

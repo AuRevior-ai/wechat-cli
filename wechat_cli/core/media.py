@@ -179,17 +179,12 @@ def decode_wechat_v2_dat_image(
     else:
         if not aes_key or xor_key is None:
             return None
-        try:
-            key_bytes = (
-                aes_key.encode("ascii")
-                if isinstance(aes_key, str)
-                else bytes(aes_key)
-            )[:16]
-        except (UnicodeEncodeError, TypeError, ValueError):
-            return None
+        keys = (
+            list(aes_key)
+            if isinstance(aes_key, (list, tuple))
+            else [aes_key]
+        )
         xor_value = int(xor_key) & 0xFF
-    if len(key_bytes) != 16:
-        return None
     try:
         aes_size, xor_size = struct.unpack("<II", raw[6:14])
     except struct.error:
@@ -204,24 +199,29 @@ def decode_wechat_v2_dat_image(
         or xor_start < encrypted_end
     ):
         return None
-    try:
-        decrypted_aes = unpad(
-            AES.new(key_bytes, AES.MODE_ECB).decrypt(
-                raw[encrypted_start:encrypted_end]
-            ),
-            16,
-        )
-    except (ValueError, TypeError):
-        return None
-    if len(decrypted_aes) != aes_size:
-        return None
-    raw_middle = raw[encrypted_end:xor_start]
-    decrypted_tail = bytes(value ^ xor_value for value in raw[xor_start:])
-    body = decrypted_aes + raw_middle + decrypted_tail
-    content_type = image_content_type(body, "")
-    if not content_type:
-        return None
-    return body, content_type
+    for key in keys if raw.startswith(WECHAT_V2_DAT_MAGIC) else [key_bytes]:
+        try:
+            candidate = key.encode("ascii") if isinstance(key, str) else bytes(key)
+            candidate = candidate[:16]
+            if len(candidate) != 16:
+                continue
+            decrypted_aes = unpad(
+                AES.new(candidate, AES.MODE_ECB).decrypt(
+                    raw[encrypted_start:encrypted_end]
+                ),
+                16,
+            )
+        except (UnicodeEncodeError, ValueError, TypeError):
+            continue
+        if len(decrypted_aes) != aes_size:
+            continue
+        raw_middle = raw[encrypted_end:xor_start]
+        decrypted_tail = bytes(value ^ xor_value for value in raw[xor_start:])
+        body = decrypted_aes + raw_middle + decrypted_tail
+        content_type = image_content_type(body, "")
+        if content_type:
+            return body, content_type
+    return None
 
 
 def _decode_clear_v2_compat(raw: bytes) -> tuple[bytes, str] | None:
