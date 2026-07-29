@@ -547,7 +547,10 @@ function renderSummaryResult(data) {
       <div><b>复制关键信息</b><span>只保留范围、时间、发言人、类型和正文。</span></div>
     </section>
     ${previewNotice}
-    ${renderChatMessages(previewItems, { allowRemoteAvatars: false })}
+    ${renderChatMessages(previewItems, {
+      allowRemoteAvatars: false,
+      allowRemoteMedia: false,
+    })}
   </div>`;
 }
 
@@ -732,9 +735,10 @@ function isSafeImageUrl(url) {
   return /^https?:\/\//i.test(url) || /^data:image\//i.test(url) || /^\/api\/media\?path=/i.test(url);
 }
 
-function mediaUrl(media) {
+function mediaUrl(media, { allowRemote = true } = {}) {
   if (!media || typeof media !== "object") return "";
-  if (media.url && isSafeImageUrl(media.url)) return media.url;
+  const isRemote = /^https?:\/\//i.test(media.url || "");
+  if (media.url && isSafeImageUrl(media.url) && (allowRemote || !isRemote)) return media.url;
   if (media.path) return `/api/media?path=${encodeURIComponent(media.path)}`;
   return "";
 }
@@ -749,10 +753,10 @@ function renderAvatar(item, label, { allowRemote = true } = {}) {
   return `<span class="avatar-fallback" aria-hidden="true">${escapeHtml(initial)}</span>`;
 }
 
-function renderMessageMedia(item) {
+function renderMessageMedia(item, { allowRemote = true } = {}) {
   const media = item?.media;
   if (!media || typeof media !== "object") return "";
-  const src = mediaUrl(media);
+  const src = mediaUrl(media, { allowRemote });
   const label = media.kind === "sticker" ? "表情" : (TYPE_LABELS[media.kind] || "媒体");
   const meta = [
     media.filename,
@@ -768,7 +772,10 @@ function renderMessageMedia(item) {
   return `<div class="media-chip">${escapeHtml(label)}${meta ? ` · ${escapeHtml(meta)}` : ""}</div>`;
 }
 
-function renderChatMessages(items, { allowRemoteAvatars = true } = {}) {
+function renderChatMessages(items, {
+  allowRemoteAvatars = true,
+  allowRemoteMedia = true,
+} = {}) {
   if (!items.length) return `<div class="empty">没有消息。</div>`;
   return `<div class="chat-list">${items.map((item) => {
     const sender = item.sender === "me" ? "我" : (item.sender || item.chat || "消息");
@@ -783,7 +790,7 @@ function renderChatMessages(items, { allowRemoteAvatars = true } = {}) {
         </div>
         <div class="message-bubble">
           <p>${escapeHtml(item.text || "")}</p>
-          ${renderMessageMedia(item)}
+          ${renderMessageMedia(item, { allowRemote: allowRemoteMedia })}
         </div>
       </div>
     </article>`;
@@ -956,7 +963,9 @@ async function runForm(form) {
   if (payload.command === "init") {
     try {
       await refreshStatus();
+      if (screenRequestVersions.get(screenId) !== requestVersion) return;
     } catch (error) {
+      if (screenRequestVersions.get(screenId) !== requestVersion) return;
       showTransientError(error, screenId);
     }
   }

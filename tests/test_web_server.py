@@ -122,11 +122,25 @@ class BuildCliArgsTests(unittest.TestCase):
         self.assertIn("const SUMMARY_PREVIEW_LIMIT = 200;", js)
         self.assertIn("共 ${items.length} 条，仅在网页预览前 ${previewItems.length} 条", js)
         self.assertIn("allowRemoteAvatars: false", js)
+        self.assertIn("allowRemoteMedia: false", js)
+        self.assertIn("function renderMessageMedia(item, { allowRemote = true } = {})", js)
         self.assertIn('id="summary-chat-retry"', html)
         self.assertIn("aria-activedescendant", html)
         self.assertIn("aria-selected", js)
         self.assertIn(".summary-combobox", css)
         self.assertIn(".summary-result-hero", css)
+
+    def test_init_status_refresh_obeys_latest_request_version(self):
+        js = (
+            ROOT / "wechat_cli" / "web" / "static" / "app.js"
+        ).read_text(encoding="utf-8")
+
+        start = js.index('if (payload.command === "init") {', js.index("setResult(response"))
+        refresh_block = js[start:js.index("\n  }\n}", start)]
+        self.assertGreaterEqual(
+            refresh_block.count("screenRequestVersions.get(screenId) !== requestVersion"),
+            2,
+        )
 
     @patch("wechat_cli.web.server.subprocess.run")
     def test_summary_response_omits_duplicate_messages_and_stdout(self, run_mock):
