@@ -219,6 +219,12 @@ def _cli_subprocess_argv(args: list[str]) -> list[str]:
 
 
 def run_cli_command(payload: dict[str, Any]) -> dict[str, Any]:
+    response_mode = payload.get("response_mode", "")
+    if response_mode not in {"", "summary"}:
+        raise ValueError(f"Unsupported response mode: {response_mode}")
+    if response_mode == "summary" and payload.get("command") != "history":
+        raise ValueError("Summary response mode is only available for history")
+
     args = build_cli_args(payload)
     env = {
         **os.environ,
@@ -243,12 +249,16 @@ def run_cli_command(payload: dict[str, Any]) -> dict[str, Any]:
             data = json.loads(stdout)
         except json.JSONDecodeError:
             data = None
+    if response_mode == "summary" and isinstance(data, dict):
+        data = dict(data)
+        for duplicate_key in ("messages", "saved_media", "save_dir"):
+            data.pop(duplicate_key, None)
 
     return {
         "ok": proc.returncode == 0,
         "returncode": proc.returncode,
         "command": ["wechat-cli", *args],
-        "stdout": proc.stdout,
+        "stdout": "" if response_mode == "summary" and data is not None else proc.stdout,
         "stderr": proc.stderr,
         "data": data,
     }

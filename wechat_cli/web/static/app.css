@@ -625,6 +625,18 @@ pre {
   font-weight: 400;
 }
 
+.summary-retry {
+  justify-self: start;
+  border: 0;
+  background: transparent;
+  color: var(--green);
+  padding: 0;
+  font-size: 12px;
+  font-weight: 800;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
 .summary-combobox {
   position: relative;
 }
@@ -835,6 +847,15 @@ pre {
 
 .summary-copy-guide span {
   color: var(--muted);
+  font-size: 12px;
+}
+
+.summary-preview-notice {
+  border-left: 4px solid var(--ochre);
+  border-radius: 6px;
+  background: #fff6d7;
+  color: #6c4a05;
+  padding: 9px 12px;
   font-size: 12px;
 }
 

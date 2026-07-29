@@ -15,11 +15,13 @@ const summaryChatSearch = document.querySelector("#summary-chat-search");
 const summaryChatValue = document.querySelector("#summary-chat-value");
 const summaryChatOptions = document.querySelector("#summary-chat-options");
 const summaryChatHint = document.querySelector("#summary-chat-hint");
+const summaryChatRetry = document.querySelector("#summary-chat-retry");
 const summaryDateInputs = [...document.querySelectorAll(".summary-date")];
 
 let lastText = "";
 let lastKeyText = "";
 let lastDownload = null;
+let lastCopyData = null;
 let dbDirCandidates = [];
 let summarySessions = [];
 let summarySessionsLoaded = false;
@@ -27,6 +29,8 @@ let summaryVisibleSessionIndexes = [];
 let summaryActiveOption = -1;
 let currentScreenId = document.querySelector(".screen.active")?.id || "dashboard";
 const screenResultStates = new Map();
+const screenRequestVersions = new Map();
+const SUMMARY_PREVIEW_LIMIT = 200;
 
 const TYPE_LABELS = {
   text: "文本",
@@ -121,6 +125,7 @@ function emptyResultState(screenId) {
     lastText: "",
     lastKeyText: "",
     lastDownload: null,
+    copyData: null,
   };
 }
 
@@ -133,6 +138,7 @@ function saveResultState(screenId) {
     lastText,
     lastKeyText,
     lastDownload,
+    copyData: lastCopyData,
   });
 }
 
@@ -143,7 +149,8 @@ function applyResultState(state) {
   lastText = state.lastText || "";
   lastKeyText = state.lastKeyText || "";
   lastDownload = state.lastDownload || null;
-  copyKeyButton.classList.toggle("hidden", !lastKeyText);
+  lastCopyData = state.copyData || null;
+  copyKeyButton.classList.toggle("hidden", !lastKeyText && !lastCopyData);
   downloadButton.classList.toggle("hidden", !lastDownload);
 }
 
@@ -163,13 +170,11 @@ function setScreen(id) {
   const active = document.getElementById(id);
   title.textContent = active?.dataset.title || "WeChat CLI Web";
   if (id === "setup" && dbDirCandidates.length === 0) {
-    refreshDbDirs().catch(showTransientError);
+    refreshDbDirs().catch((error) => showTransientError(error, "setup"));
   }
   restoreResultState(id);
   if (id === "chat-summary" && !summarySessionsLoaded) {
-    loadSummarySessions().catch((error) => {
-      if (summaryChatHint) summaryChatHint.textContent = `会话读取失败：${error.message}`;
-    });
+    loadSummarySessions().catch(showSummarySessionsError);
   }
 }
 
@@ -334,7 +339,8 @@ function renderSummarySessionOptions(query = "") {
       session.time || "",
       session.unread ? `${session.unread} 条未读` : "",
     ].filter(Boolean).join(" · ");
-    return `<button type="button" role="option" data-session-index="${sessionIndex}">
+    return `<button id="summary-session-option-${sessionIndex}" type="button" role="option"
+      aria-selected="false" data-session-index="${sessionIndex}">
       <span class="summary-option-avatar">${escapeHtml(initial)}</span>
       <span class="summary-option-main">
         <strong>${escapeHtml(session.chat || session.username)}</strong>
@@ -362,13 +368,20 @@ function moveSummaryActiveOption(direction) {
   const optionButtons = [...summaryChatOptions.querySelectorAll("button[data-session-index]")];
   if (!optionButtons.length) return;
   summaryActiveOption = (summaryActiveOption + direction + optionButtons.length) % optionButtons.length;
-  optionButtons.forEach((button, index) => button.classList.toggle("active", index === summaryActiveOption));
-  optionButtons[summaryActiveOption].scrollIntoView({ block: "nearest" });
+  optionButtons.forEach((button, index) => {
+    const isActive = index === summaryActiveOption;
+    button.classList.toggle("active", isActive);
+    button.setAttribute("aria-selected", String(isActive));
+  });
+  const activeButton = optionButtons[summaryActiveOption];
+  summaryChatSearch.setAttribute("aria-activedescendant", activeButton.id);
+  activeButton.scrollIntoView({ block: "nearest" });
 }
 
 async function loadSummarySessions() {
   if (!summaryChatSearch || !summaryChatOptions) return [];
   if (summaryChatHint) summaryChatHint.textContent = "正在读取最近会话…";
+  if (summaryChatRetry) summaryChatRetry.classList.add("hidden");
   const payload = await fetchJson("/api/run", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -382,14 +395,19 @@ async function loadSummarySessions() {
   }
   summarySessions = payload.data;
   summarySessionsLoaded = true;
-  renderSummarySessionOptions("");
+  renderSummarySessionOptions(summaryChatSearch.value);
   if (summaryChatHint) {
     summaryChatHint.textContent = `已载入 ${summarySessions.length} 个会话，输入名称或账号可快速匹配`;
   }
   return summarySessions;
 }
 
-function showTransientError(error) {
+function showSummarySessionsError(error) {
+  if (summaryChatHint) summaryChatHint.textContent = `会话读取失败：${error.message}`;
+  if (summaryChatRetry) summaryChatRetry.classList.remove("hidden");
+}
+
+function showTransientError(error, screenId = currentScreenId) {
   const state = {
     className: "result error",
     html: `<pre>${escapeHtml(error.message)}</pre>`,
@@ -397,13 +415,16 @@ function showTransientError(error) {
     lastText: error.message || "",
     lastKeyText: "",
     lastDownload: null,
+    copyData: null,
   };
-  screenResultStates.set(currentScreenId, state);
-  applyResultState(state);
+  screenResultStates.set(screenId, state);
+  if (currentScreenId === screenId) {
+    applyResultState(state);
+  }
 }
 
 function fieldLabel(key) {
-  return FIELD_LABELS[key] || String(key).replaceAll("_", " ");
+  return FIELD_LABELS[key] || String(key);
 }
 
 function renderKeyValue(obj, mode = "div") {
@@ -426,12 +447,15 @@ function formatScalar(value) {
 function localizeStructuredValue(value) {
   if (Array.isArray(value)) return value.map(localizeStructuredValue);
   if (value && typeof value === "object") {
-    return Object.fromEntries(
-      Object.entries(value).map(([key, nestedValue]) => [
-        fieldLabel(key),
-        localizeStructuredValue(nestedValue),
-      ])
-    );
+    const localized = {};
+    Object.entries(value).forEach(([key, nestedValue]) => {
+      const label = fieldLabel(key);
+      const uniqueLabel = Object.prototype.hasOwnProperty.call(localized, label)
+        ? `${label}（${key}）`
+        : label;
+      localized[uniqueLabel] = localizeStructuredValue(nestedValue);
+    });
+    return localized;
   }
   if (typeof value === "boolean") return value ? "是" : "否";
   return value;
@@ -498,6 +522,10 @@ function formatSummaryKeyCopy(data) {
 
 function renderSummaryResult(data) {
   const items = Array.isArray(data?.message_items) ? data.message_items : [];
+  const previewItems = items.slice(0, SUMMARY_PREVIEW_LIMIT);
+  const previewNotice = items.length > previewItems.length
+    ? `<div class="summary-preview-notice">共 ${items.length} 条，仅在网页预览前 ${previewItems.length} 条；复制仍包含全部记录。</div>`
+    : "";
   return `<div class="summary-result">
     <section class="summary-result-hero">
       <div>
@@ -518,7 +546,8 @@ function renderSummaryResult(data) {
       <div><b>复制</b><span>包含总结要求与完整聊天记录，可直接粘贴给 AI。</span></div>
       <div><b>复制关键信息</b><span>只保留范围、时间、发言人、类型和正文。</span></div>
     </section>
-    ${renderChatMessages(items)}
+    ${previewNotice}
+    ${renderChatMessages(previewItems, { allowRemoteAvatars: false })}
   </div>`;
 }
 
@@ -710,9 +739,10 @@ function mediaUrl(media) {
   return "";
 }
 
-function renderAvatar(item, label) {
+function renderAvatar(item, label, { allowRemote = true } = {}) {
   const url = item?.sender_avatar_url || item?.avatar_url || item?.chat_avatar_url || "";
-  if (url && isSafeImageUrl(url)) {
+  const isRemote = /^https?:\/\//i.test(url);
+  if (url && isSafeImageUrl(url) && (allowRemote || !isRemote)) {
     return `<img class="avatar-img" src="${escapeHtml(url)}" alt="${escapeHtml(label || "头像")}" loading="lazy" referrerpolicy="no-referrer">`;
   }
   const initial = String(label || "W").trim().slice(0, 1).toUpperCase() || "W";
@@ -738,13 +768,13 @@ function renderMessageMedia(item) {
   return `<div class="media-chip">${escapeHtml(label)}${meta ? ` · ${escapeHtml(meta)}` : ""}</div>`;
 }
 
-function renderChatMessages(items) {
+function renderChatMessages(items, { allowRemoteAvatars = true } = {}) {
   if (!items.length) return `<div class="empty">没有消息。</div>`;
   return `<div class="chat-list">${items.map((item) => {
     const sender = item.sender === "me" ? "我" : (item.sender || item.chat || "消息");
     const type = TYPE_LABELS[item.type] || item.type_label || item.type || "消息";
     return `<article class="message-row ${item.is_self ? "mine" : ""}">
-      ${renderAvatar(item, sender)}
+      ${renderAvatar(item, sender, { allowRemote: allowRemoteAvatars })}
       <div class="message-main">
         <div class="message-meta">
           <strong>${escapeHtml(sender)}</strong>
@@ -807,14 +837,17 @@ function renderData(data) {
 
 function buildResultState(payload, resultMode = "") {
   const output = payload.stdout || payload.stderr || payload.error || "";
-  const text = payload.data ? JSON.stringify(payload.data, null, 2) : output;
+  const isSummaryData = resultMode === "summary" &&
+    payload.data && Array.isArray(payload.data.message_items);
+  const text = isSummaryData ? "" : (payload.data ? JSON.stringify(payload.data, null, 2) : output);
   const state = {
     className: `result ${payload.ok ? "" : "error"}`.trim(),
     html: "",
     commandPreview: payload.command ? payload.command.join(" ") : "请求失败",
-    lastText: text || JSON.stringify(payload, null, 2),
+    lastText: isSummaryData ? "" : (text || JSON.stringify(payload, null, 2)),
     lastKeyText: keyCopyText(payload),
     lastDownload: null,
+    copyData: null,
   };
 
   if (!payload.ok) {
@@ -823,13 +856,21 @@ function buildResultState(payload, resultMode = "") {
   }
 
   if (payload.data) {
-    if (resultMode === "summary" && Array.isArray(payload.data.message_items)) {
-      state.html = renderSummaryResult(payload.data);
-      state.lastText = formatSummaryCopy(payload.data);
-      state.lastKeyText = formatSummaryKeyCopy(payload.data);
-      state.commandPreview = `聊天总结 · ${payload.data.chat || payload.data.username || "会话"} · ${
-        payload.data.start_time || "最早"
-      } 至 ${payload.data.end_time || "最新"}`;
+    if (isSummaryData) {
+      const summaryData = {
+        chat: payload.data.chat || "",
+        username: payload.data.username || "",
+        start_time: payload.data.start_time || null,
+        end_time: payload.data.end_time || null,
+        message_items: payload.data.message_items,
+      };
+      state.html = renderSummaryResult(summaryData);
+      state.lastText = "";
+      state.lastKeyText = "";
+      state.copyData = summaryData;
+      state.commandPreview = `聊天总结 · ${summaryData.chat || summaryData.username || "会话"} · ${
+        summaryData.start_time || "最早"
+      } 至 ${summaryData.end_time || "最新"}`;
       return state;
     }
     state.html = renderData(payload.data);
@@ -864,6 +905,8 @@ async function runForm(form) {
   if (!form.reportValidity()) return;
   const screenId = form.closest(".screen")?.id || currentScreenId;
   const resultMode = form.dataset.resultMode || "";
+  const requestVersion = (screenRequestVersions.get(screenId) || 0) + 1;
+  screenRequestVersions.set(screenId, requestVersion);
   const payload = readForm(form);
   const validationError = resultMode === "summary"
     ? validateSummaryPayload(payload.params)
@@ -876,6 +919,7 @@ async function runForm(form) {
       lastText: validationError,
       lastKeyText: "",
       lastDownload: null,
+      copyData: null,
     };
     screenResultStates.set(screenId, errorState);
     if (currentScreenId === screenId) applyResultState(errorState);
@@ -888,17 +932,33 @@ async function runForm(form) {
     lastText: "",
     lastKeyText: "",
     lastDownload: null,
+    copyData: null,
   };
   screenResultStates.set(screenId, loadingState);
   if (currentScreenId === screenId) applyResultState(loadingState);
-  const response = await fetchJson("/api/run", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
+  const requestPayload = resultMode === "summary"
+    ? { ...payload, response_mode: "summary" }
+    : payload;
+  let response;
+  try {
+    response = await fetchJson("/api/run", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(requestPayload),
+    });
+  } catch (error) {
+    if (screenRequestVersions.get(screenId) !== requestVersion) return;
+    showTransientError(error, screenId);
+    return;
+  }
+  if (screenRequestVersions.get(screenId) !== requestVersion) return;
   setResult(response, screenId, resultMode);
   if (payload.command === "init") {
-    await refreshStatus();
+    try {
+      await refreshStatus();
+    } catch (error) {
+      showTransientError(error, screenId);
+    }
   }
 }
 
@@ -919,12 +979,14 @@ document.querySelectorAll(".tool-form").forEach((form) => {
 });
 
 document.querySelectorAll("[data-action='refresh-status'], #refresh-status").forEach((button) => {
-  button.addEventListener("click", refreshStatus);
+  button.addEventListener("click", () => {
+    refreshStatus().catch((error) => showTransientError(error, "dashboard"));
+  });
 });
 
 if (detectDbDirsButton) {
   detectDbDirsButton.addEventListener("click", () => {
-    refreshDbDirs().catch(showTransientError);
+    refreshDbDirs().catch((error) => showTransientError(error, "setup"));
   });
 }
 
@@ -974,6 +1036,12 @@ if (summaryChatSearch && summaryChatValue && summaryChatOptions) {
   });
 }
 
+if (summaryChatRetry) {
+  summaryChatRetry.addEventListener("click", () => {
+    loadSummarySessions().catch(showSummarySessionsError);
+  });
+}
+
 const localDate = new Date();
 const localToday = [
   localDate.getFullYear(),
@@ -985,15 +1053,17 @@ summaryDateInputs.forEach((input) => {
 });
 
 copyButton.addEventListener("click", async () => {
-  if (!lastText) return;
-  await navigator.clipboard.writeText(lastText);
+  const copyText = lastText || (lastCopyData ? formatSummaryCopy(lastCopyData) : "");
+  if (!copyText) return;
+  await navigator.clipboard.writeText(copyText);
   copyButton.textContent = "已复制";
   setTimeout(() => { copyButton.textContent = "复制"; }, 1000);
 });
 
 copyKeyButton.addEventListener("click", async () => {
-  if (!lastKeyText) return;
-  await navigator.clipboard.writeText(lastKeyText);
+  const copyText = lastKeyText || (lastCopyData ? formatSummaryKeyCopy(lastCopyData) : "");
+  if (!copyText) return;
+  await navigator.clipboard.writeText(copyText);
   copyKeyButton.textContent = "已复制关键信息";
   setTimeout(() => { copyKeyButton.textContent = "复制关键信息"; }, 1000);
 });
@@ -1011,8 +1081,7 @@ downloadButton.addEventListener("click", () => {
 refreshStatus().catch((error) => {
   initPill.textContent = "状态错误";
   initPill.className = "pill warn";
-  result.className = "result error";
-  result.innerHTML = `<pre>${escapeHtml(error.message)}</pre>`;
+  showTransientError(error, "dashboard");
 });
 
 refreshDbDirs().catch(() => {});

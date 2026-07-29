@@ -156,13 +156,14 @@
               <div id="summary-chat-combobox" class="summary-combobox">
                 <input id="summary-chat-search" type="search" role="combobox"
                   aria-autocomplete="list" aria-controls="summary-chat-options"
-                  aria-expanded="false" autocomplete="off"
+                  aria-expanded="false" aria-activedescendant="" autocomplete="off"
                   placeholder="输入群名、联系人或账号进行搜索">
                 <input id="summary-chat-value" data-param="chat_name" type="hidden">
                 <div id="summary-chat-options" class="summary-chat-options"
                   role="listbox" hidden></div>
               </div>
               <small id="summary-chat-hint">正在读取最近会话…</small>
+              <button id="summary-chat-retry" class="summary-retry hidden" type="button">重新读取会话</button>
             </label>
             <label>开始日期
               <input class="summary-date" data-param="start_time" type="date" required>

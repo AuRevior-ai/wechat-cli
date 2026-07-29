@@ -1,4 +1,5 @@
 import unittest
+import json
 import sys
 import subprocess
 import tempfile
@@ -57,10 +58,21 @@ class BuildCliArgsTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
 
         self.assertIn("const screenResultStates = new Map();", js)
+        self.assertIn("const screenRequestVersions = new Map();", js)
         self.assertIn("function saveResultState(screenId)", js)
         self.assertIn("function restoreResultState(screenId)", js)
         self.assertIn("function setResult(payload, screenId", js)
         self.assertIn("restoreResultState(id)", js)
+        self.assertIn("screenRequestVersions.get(screenId) !== requestVersion", js)
+
+    def test_async_errors_keep_the_originating_screen(self):
+        js = (
+            ROOT / "wechat_cli" / "web" / "static" / "app.js"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("function showTransientError(error, screenId = currentScreenId)", js)
+        self.assertIn('showTransientError(error, "setup")', js)
+        self.assertIn('showTransientError(error, "dashboard")', js)
 
     def test_generic_result_fields_are_localized_to_chinese(self):
         js = (
@@ -104,10 +116,49 @@ class BuildCliArgsTests(unittest.TestCase):
         self.assertIn('type="date"', html)
         self.assertIn('data-param="limit" type="hidden" value="50000"', html)
         self.assertIn("async function loadSummarySessions()", js)
+        self.assertEqual(js.count("renderSummarySessionOptions(summaryChatSearch.value);"), 3)
         self.assertIn("function formatSummaryCopy(data)", js)
         self.assertIn("function formatSummaryKeyCopy(data)", js)
+        self.assertIn("const SUMMARY_PREVIEW_LIMIT = 200;", js)
+        self.assertIn("共 ${items.length} 条，仅在网页预览前 ${previewItems.length} 条", js)
+        self.assertIn("allowRemoteAvatars: false", js)
+        self.assertIn('id="summary-chat-retry"', html)
+        self.assertIn("aria-activedescendant", html)
+        self.assertIn("aria-selected", js)
         self.assertIn(".summary-combobox", css)
         self.assertIn(".summary-result-hero", css)
+
+    @patch("wechat_cli.web.server.subprocess.run")
+    def test_summary_response_omits_duplicate_messages_and_stdout(self, run_mock):
+        run_mock.return_value = CompletedProcess(
+            [],
+            0,
+            stdout=json.dumps({
+                "chat": "项目群",
+                "messages": ["[10:00] 张三: 原始文本"],
+                "message_items": [{"time": "10:00", "sender": "张三", "text": "原始文本"}],
+                "saved_media": [],
+                "save_dir": None,
+            }, ensure_ascii=False),
+            stderr="",
+        )
+
+        payload = run_cli_command({
+            "command": "history",
+            "response_mode": "summary",
+            "params": {
+                "chat_name": "项目群",
+                "start_time": "2026-07-29",
+                "end_time": "2026-07-29",
+                "limit": 50000,
+            },
+        })
+
+        self.assertEqual(payload["stdout"], "")
+        self.assertNotIn("messages", payload["data"])
+        self.assertNotIn("saved_media", payload["data"])
+        self.assertNotIn("save_dir", payload["data"])
+        self.assertEqual(payload["data"]["message_items"][0]["text"], "原始文本")
 
     def test_builds_sessions_with_json_format(self):
         args = build_cli_args({
@@ -233,7 +284,8 @@ class BuildCliArgsTests(unittest.TestCase):
         self.assertIn("let lastKeyText = \"\";", js)
         self.assertIn("function formatMessagesForKeyCopy(messages)", js)
         self.assertIn("Array.isArray(payload.data.messages)", js)
-        self.assertIn("navigator.clipboard.writeText(lastKeyText)", js)
+        self.assertIn("lastKeyText || (lastCopyData ? formatSummaryKeyCopy(lastCopyData)", js)
+        self.assertIn("navigator.clipboard.writeText(copyText)", js)
 
     def test_own_private_chat_messages_align_next_to_avatar(self):
         css = (ROOT / "wechat_cli" / "web" / "static" / "app.css").read_text(encoding="utf-8")
