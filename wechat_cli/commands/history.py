@@ -13,6 +13,7 @@ from ..core.messages import (
     validate_pagination,
 )
 from ..output.formatter import output
+from ..core.voice import decrypted_media_db_paths
 
 
 @click.command("history")
@@ -56,11 +57,17 @@ def history(ctx, chat_name, limit, offset, start_time, end_time, fmt, msg_type, 
     names = get_contact_names(app.cache, app.decrypted_dir)
     avatars = get_contact_avatars(app.cache, app.decrypted_dir)
     type_filter = MSG_TYPE_FILTERS[msg_type] if msg_type else None
+    resolve_media = media or bool(save_dir)
+    media_db_paths = (
+        decrypted_media_db_paths(app.all_keys, app.cache)
+        if resolve_media else None
+    )
     message_items, failures = collect_chat_history_items(
         chat_ctx, names, app.display_name_fn,
         avatars=avatars,
         start_ts=start_ts, end_ts=end_ts, limit=limit, offset=offset,
-        msg_type_filter=type_filter, resolve_media=media or bool(save_dir), db_dir=app.db_dir,
+        msg_type_filter=type_filter, resolve_media=resolve_media, db_dir=app.db_dir,
+        media_db_paths=media_db_paths,
     )
     saved_media = []
     save_failures = []

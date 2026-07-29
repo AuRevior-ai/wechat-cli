@@ -13,6 +13,7 @@ from ..core.messages import (
     validate_pagination,
 )
 from ..output.formatter import output
+from ..core.voice import decrypted_media_db_paths
 
 
 @click.command("export")
@@ -54,10 +55,12 @@ def export(ctx, chat_name, fmt, output_path, start_time, end_time, limit, media,
     names = get_contact_names(app.cache, app.decrypted_dir)
     saved_media = []
     if save_dir:
+        media_db_paths = decrypted_media_db_paths(app.all_keys, app.cache)
         message_items, failures = collect_chat_history_items(
             chat_ctx, names, app.display_name_fn,
             start_ts=start_ts, end_ts=end_ts, limit=limit, offset=0,
             resolve_media=True, db_dir=app.db_dir,
+            media_db_paths=media_db_paths,
         )
         saved_media, save_failures = save_message_items_media(message_items, save_dir, db_dir=app.db_dir)
         failures.extend(save_failures)

@@ -15,6 +15,7 @@ import zstandard as zstd
 from .key_utils import key_path_variants
 from .media import export_media_file
 from .forwarded import format_forwarded_text, parse_forwarded_message
+from .voice import find_voice_record, voice_duration_seconds
 
 _zstd_dctx = zstd.ZstdDecompressor()
 _XML_UNSAFE_RE = re.compile(r'<!DOCTYPE|<!ENTITY', re.IGNORECASE)
@@ -430,6 +431,9 @@ def _format_message_text(local_id, local_type, content, is_group, chat_username,
         else:
             tag = f"[图片] (local_id={local_id})"
         text = tag
+    elif base_type == 34:
+        duration = voice_duration_seconds(text)
+        text = f"[语音 {duration:.1f}秒]" if duration else "[语音]"
     elif base_type == 47:
         sticker = _extract_sticker_payload(text)
         sticker_id = sticker.get("md5", "") if sticker else ""
@@ -766,7 +770,17 @@ def _build_history_line(row, ctx, names, id_to_username, display_name_fn, resolv
     return create_time, f'[{time_str}] {text}'
 
 
-def _build_history_item(row, ctx, names, id_to_username, display_name_fn, avatars=None, resolve_media=False, db_dir=None):
+def _build_history_item(
+    row,
+    ctx,
+    names,
+    id_to_username,
+    display_name_fn,
+    avatars=None,
+    resolve_media=False,
+    db_dir=None,
+    media_db_paths=None,
+):
     local_id, local_type, create_time, real_sender_id, content, ct = row
     time_str = datetime.fromtimestamp(create_time).strftime('%Y-%m-%d %H:%M')
     content = decompress_content(content, ct)
@@ -785,6 +799,20 @@ def _build_history_item(row, ctx, names, id_to_username, display_name_fn, avatar
     forwarded = parse_forwarded_message(parsed_content) if base_type == 49 else None
     if base_type == 47:
         media_payload = _extract_sticker_payload(content)
+    voice_payload = None
+    if base_type == 34 and resolve_media and media_db_paths:
+        record = find_voice_record(
+            media_db_paths, ctx['username'], local_id, create_time
+        )
+        if record:
+            voice_payload = {
+                "source": "media_database",
+                "media_db": record.media_db,
+                "local_id": record.local_id,
+                "svr_id": record.svr_id,
+                "bytes": len(record.data),
+                "chunks": record.chunks,
+            }
     if resolve_media and db_dir and content:
         try:
             media_path, media_exists = _resolve_media_path(
@@ -815,6 +843,8 @@ def _build_history_item(row, ctx, names, id_to_username, display_name_fn, avatar
     }
     if media_payload:
         item["media"] = media_payload
+    if voice_payload:
+        item["voice"] = voice_payload
     if forwarded:
         item["forwarded"] = forwarded
     return item
@@ -877,7 +907,20 @@ def collect_chat_history(ctx, names, display_name_fn, start_ts=None, end_ts=None
     return [line for _, line in paged], failures
 
 
-def collect_chat_history_items(ctx, names, display_name_fn, avatars=None, start_ts=None, end_ts=None, limit=20, offset=0, msg_type_filter=None, resolve_media=False, db_dir=None):
+def collect_chat_history_items(
+    ctx,
+    names,
+    display_name_fn,
+    avatars=None,
+    start_ts=None,
+    end_ts=None,
+    limit=20,
+    offset=0,
+    msg_type_filter=None,
+    resolve_media=False,
+    db_dir=None,
+    media_db_paths=None,
+):
     collected = []
     failures = []
     candidate_limit = _candidate_page_size(limit, offset)
@@ -899,6 +942,7 @@ def collect_chat_history_items(ctx, names, display_name_fn, avatars=None, start_
                             item = _build_history_item(
                                 row, table_ctx, names, id_to_username, display_name_fn,
                                 avatars=avatars, resolve_media=resolve_media, db_dir=db_dir,
+                                media_db_paths=media_db_paths,
                             )
                             collected.append((item["timestamp"], item))
                         except Exception as e:

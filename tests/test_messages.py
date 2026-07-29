@@ -4,6 +4,7 @@ import os
 import tempfile
 from datetime import datetime
 from pathlib import Path
+from unittest import mock
 
 from wechat_cli.core.messages import (
     _build_history_item,
@@ -11,6 +12,7 @@ from wechat_cli.core.messages import (
     save_message_item_media,
     validate_search_scope,
 )
+from wechat_cli.core.voice import VoiceRecord
 
 
 class MessageShardDiscoveryTests(unittest.TestCase):
@@ -211,6 +213,39 @@ class HistoryItemTests(unittest.TestCase):
         self.assertEqual(item["media"]["kind"], "sticker")
         self.assertEqual(item["media"]["url"], "https://example.com/sticker.gif")
         self.assertEqual(item["media"]["md5"], "abc123")
+
+    def test_builds_clean_voice_message_from_media_database(self):
+        ts = int(datetime(2026, 7, 29, 11, 5, 52).timestamp())
+        content = '<msg><voicemsg voicelength="7460" voiceformat="4" /></msg>'
+        record = VoiceRecord(
+            data=b"#!SILK_V3voice",
+            local_id=116,
+            create_time=ts,
+            svr_id=999,
+            media_db="media_1.db",
+        )
+
+        with mock.patch(
+            "wechat_cli.core.messages.find_voice_record",
+            return_value=record,
+        ):
+            item = _build_history_item(
+                (116, 34, ts, 7, content, None),
+                {"username": "wxid_friend", "display_name": "佳佳姐", "is_group": False},
+                {"wxid_friend": "佳佳姐"},
+                {7: "wxid_friend"},
+                lambda username, all_names: all_names.get(username, username),
+                {},
+                resolve_media=True,
+                db_dir="unused",
+                media_db_paths=["decrypted-media-1.db"],
+            )
+
+        self.assertEqual(item["text"], "[语音 7.5秒]")
+        self.assertNotIn("<voicemsg", item["line"])
+        self.assertEqual(item["voice"]["source"], "media_database")
+        self.assertEqual(item["voice"]["media_db"], "media_1.db")
+        self.assertEqual(item["voice"]["bytes"], len(record.data))
 
     def test_saves_message_item_media_to_output_directory(self):
         with tempfile.TemporaryDirectory() as tmp:
