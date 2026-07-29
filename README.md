@@ -12,12 +12,16 @@ Chat history · Merged forwards · Voice transcription · AI media packages
 
 [中文文档](README_CN.md)
 
+Maintained by **Au Revior**.
+
 </div>
 
 ---
 
 ## ✨ Highlights
 
+- **🖥️ Local Web console** — includes an “About & Support” page with the
+  author's local-only contact and support QR codes
 - **🚀 Zero-config install** — `npm install -g` and you're done, no Python needed
 - **📦 AI material packages** — recursively expands merged forwards and bundles images, stickers, decoded voice, and copy-ready text
 - **🤖 AI-first** — JSON output by default, designed for LLM agent tool calls

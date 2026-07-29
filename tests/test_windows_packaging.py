@@ -14,6 +14,17 @@ def load_module(name, path):
 
 
 class WindowsPackagingTests(unittest.TestCase):
+    def test_release_metadata_and_windows_guide_credit_author(self):
+        pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+        guide = (
+            ROOT / "packaging" / "windows" / "README-APP.md"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn('version = "0.4.1"', pyproject)
+        self.assertIn('authors = [{ name = "Au Revior" }]', pyproject)
+        self.assertIn("作者：Au Revior", guide)
+        self.assertIn("关于与支持", guide)
+
     def test_pyinstaller_command_bundles_web_static_files(self):
         build = load_module("npm_build", ROOT / "npm" / "scripts" / "build.py")
 

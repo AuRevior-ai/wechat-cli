@@ -12,12 +12,15 @@
 
 [English](README.md)
 
+作者：**Au Revior**
+
 </div>
 
 ---
 
 ## ✨ 功能亮点
 
+- **🖥️ 本机网页控制台** — “关于与支持”页可查看作者微信和收款码，二维码仅由本机服务展示
 - **🚀 开箱即用** — `npm install -g` 一键安装，无需 Python
 - **📦 12 个命令** — sessions、history、search、contacts、members、stats、invite-stats、export、favorites、unread、new-messages、init
 - **🤖 AI 优先** — 默认 JSON 输出，专为 LLM Agent 工具调用设计
