@@ -135,11 +135,16 @@ class BuildCliArgsTests(unittest.TestCase):
             ROOT / "wechat_cli" / "web" / "static" / "app.js"
         ).read_text(encoding="utf-8")
 
-        start = js.index('if (payload.command === "init") {', js.index("setResult(response"))
-        refresh_block = js[start:js.index("\n  }\n}", start)]
-        self.assertGreaterEqual(
-            refresh_block.count("screenRequestVersions.get(screenId) !== requestVersion"),
-            2,
+        refresh_start = js.index("async function refreshStatus")
+        refresh_end = js.index("\n}\n", refresh_start)
+        refresh_block = js[refresh_start:refresh_end]
+        self.assertLess(
+            refresh_block.index("if (!shouldApply()) return status;"),
+            refresh_block.index("initPill.textContent"),
+        )
+        self.assertIn(
+            "await refreshStatus(() => screenRequestVersions.get(screenId) === requestVersion);",
+            js,
         )
 
     @patch("wechat_cli.web.server.subprocess.run")

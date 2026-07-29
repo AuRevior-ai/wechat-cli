@@ -249,8 +249,9 @@ async function fetchJson(url, options = {}) {
   return payload;
 }
 
-async function refreshStatus() {
+async function refreshStatus(shouldApply = () => true) {
   const status = await fetchJson("/api/status");
+  if (!shouldApply()) return status;
   initPill.textContent = status.initialized ? `已初始化 · ${status.keys_count} 个密钥` : "未初始化";
   initPill.className = `pill ${status.initialized ? "ready" : "warn"}`;
   statusList.innerHTML = renderKeyValue({
@@ -962,7 +963,7 @@ async function runForm(form) {
   setResult(response, screenId, resultMode);
   if (payload.command === "init") {
     try {
-      await refreshStatus();
+      await refreshStatus(() => screenRequestVersions.get(screenId) === requestVersion);
       if (screenRequestVersions.get(screenId) !== requestVersion) return;
     } catch (error) {
       if (screenRequestVersions.get(screenId) !== requestVersion) return;
