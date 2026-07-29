@@ -70,6 +70,29 @@ textarea {
   border-radius: 8px;
   font-weight: 800;
   letter-spacing: 0;
+  overflow: hidden;
+  flex: 0 0 auto;
+}
+
+.brand-avatar,
+.brand-avatar img,
+.brand-avatar .avatar-shell-fallback {
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+}
+
+.brand-avatar {
+  display: block;
+}
+
+.brand-avatar .avatar-shell-fallback {
+  background: var(--green);
+  color: #fffdf8;
+}
+
+.brand-avatar img {
+  object-fit: cover;
 }
 
 .brand strong {
@@ -78,6 +101,11 @@ textarea {
 }
 
 .brand small {
+  display: block;
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   color: var(--muted);
   font-size: 12px;
 }
@@ -408,8 +436,7 @@ textarea:focus {
   grid-template-columns: minmax(0, 1fr) 42px;
 }
 
-.message-row.mine .avatar-img,
-.message-row.mine .avatar-fallback {
+.message-row.mine .message-avatar {
   grid-column: 2;
 }
 
@@ -431,6 +458,38 @@ textarea:focus {
   border-radius: 8px;
   border: 1px solid var(--line);
   background: #efe8db;
+}
+
+.avatar-shell {
+  position: relative;
+  overflow: hidden;
+}
+
+.avatar-shell-fallback {
+  display: grid;
+  place-items: center;
+}
+
+.avatar-shell img[data-avatar-image] {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.message-avatar {
+  display: block;
+  width: 42px;
+  height: 42px;
+  border-radius: 8px;
+}
+
+.message-avatar .avatar-img,
+.message-avatar .avatar-fallback {
+  position: absolute;
+  inset: 0;
 }
 
 .avatar-img {
@@ -702,6 +761,14 @@ pre {
   background: var(--green);
   color: #fff;
   font-weight: 900;
+  overflow: hidden;
+}
+
+.summary-option-avatar .avatar-shell-fallback {
+  width: 100%;
+  height: 100%;
+  background: var(--green);
+  color: #fff;
 }
 
 .summary-option-main {
@@ -734,7 +801,8 @@ pre {
   text-align: center;
 }
 
-.summary-date {
+.summary-date,
+.invite-date {
   color-scheme: light;
 }
 
@@ -775,6 +843,23 @@ pre {
   gap: 5px;
   padding: 16px 18px;
   background: rgba(17, 107, 95, .76);
+}
+
+.summary-result-hero > .summary-chat-identity {
+  grid-template-columns: 46px minmax(0, 1fr);
+  align-items: center;
+}
+
+.summary-chat-identity > div {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.summary-chat-identity .message-avatar {
+  width: 46px;
+  height: 46px;
+  border-radius: 9px;
 }
 
 .summary-result-hero span {

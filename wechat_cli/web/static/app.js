@@ -17,6 +17,13 @@ const summaryChatOptions = document.querySelector("#summary-chat-options");
 const summaryChatHint = document.querySelector("#summary-chat-hint");
 const summaryChatRetry = document.querySelector("#summary-chat-retry");
 const summaryDateInputs = [...document.querySelectorAll(".summary-date")];
+const inviteGroupSearch = document.querySelector("#invite-group-search");
+const inviteGroupValue = document.querySelector("#invite-group-value");
+const inviteGroupOptions = document.querySelector("#invite-group-options");
+const inviteGroupHint = document.querySelector("#invite-group-hint");
+const inviteGroupRetry = document.querySelector("#invite-group-retry");
+const profileAvatar = document.querySelector("#profile-avatar");
+const profileName = document.querySelector("#profile-name");
 
 let lastText = "";
 let lastKeyText = "";
@@ -27,6 +34,8 @@ let summarySessions = [];
 let summarySessionsLoaded = false;
 let summaryVisibleSessionIndexes = [];
 let summaryActiveOption = -1;
+let inviteVisibleSessionIndexes = [];
+let inviteActiveOption = -1;
 let currentScreenId = document.querySelector(".screen.active")?.id || "dashboard";
 const screenResultStates = new Map();
 const screenRequestVersions = new Map();
@@ -173,7 +182,7 @@ function setScreen(id) {
     refreshDbDirs().catch((error) => showTransientError(error, "setup"));
   }
   restoreResultState(id);
-  if (id === "history" && !summarySessionsLoaded) {
+  if ((id === "history" || id === "invite-stats") && !summarySessionsLoaded) {
     loadSummarySessions().catch(showSummarySessionsError);
   }
 }
@@ -226,8 +235,15 @@ function validatePayload(payload) {
     }
     return "";
   }
-  if (payload.command !== "search") return "";
   const params = payload.params || {};
+  if (payload.command === "invite-stats") {
+    if (!params.group_name) return "请先从下拉列表选择一个群聊。";
+    if (params.start_time && params.end_time && params.start_time > params.end_time) {
+      return "开始日期不能晚于结束日期。";
+    }
+    return "";
+  }
+  if (payload.command !== "search") return "";
   if (params.keyword) return "";
   if (params.start_time && params.end_time) return "";
   return "关键词为空时，必须同时填写开始时间和结束时间。";
@@ -308,6 +324,38 @@ async function refreshDbDirs() {
   return payload;
 }
 
+function avatarProxyUrl(url) {
+  if (/^https:\/\//i.test(url || "")) {
+    return `/api/avatar?url=${encodeURIComponent(url)}`;
+  }
+  if (/^data:image\//i.test(url || "") || /^\/api\/media\?path=/i.test(url || "")) {
+    return url;
+  }
+  return "";
+}
+
+function avatarMarkup(url, label, className = "summary-option-avatar") {
+  const initial = String(label || "W").trim().slice(0, 1).toUpperCase() || "W";
+  const src = avatarProxyUrl(url);
+  return `<span class="${escapeHtml(className)} avatar-shell">
+    <span class="avatar-shell-fallback" aria-hidden="true">${escapeHtml(initial)}</span>
+    ${src ? `<img src="${escapeHtml(src)}" alt="${escapeHtml(label || "头像")}" loading="lazy" data-avatar-image>` : ""}
+  </span>`;
+}
+
+async function loadProfile() {
+  if (!profileAvatar || !profileName) return;
+  const profile = await fetchJson("/api/profile");
+  const displayName = profile.display_name || profile.username || "本机微信";
+  profileName.textContent = displayName;
+  profileName.title = profile.username || displayName;
+  profileAvatar.innerHTML = avatarMarkup(
+    profile.avatar_url,
+    displayName,
+    "brand-avatar",
+  );
+}
+
 function setSummaryOptionsOpen(open) {
   if (!summaryChatOptions || !summaryChatSearch) return;
   summaryChatOptions.hidden = !open;
@@ -334,7 +382,6 @@ function renderSummarySessionOptions(query = "") {
   }
   summaryChatOptions.innerHTML = summaryVisibleSessionIndexes.map((sessionIndex) => {
     const session = summarySessions[sessionIndex];
-    const initial = String(session.chat || "聊").trim().slice(0, 1);
     const meta = [
       session.is_group ? "群聊" : "私聊",
       session.time || "",
@@ -342,7 +389,7 @@ function renderSummarySessionOptions(query = "") {
     ].filter(Boolean).join(" · ");
     return `<button id="summary-session-option-${sessionIndex}" type="button" role="option"
       aria-selected="false" data-session-index="${sessionIndex}">
-      <span class="summary-option-avatar">${escapeHtml(initial)}</span>
+      ${avatarMarkup(session.avatar_url, session.chat || session.username)}
       <span class="summary-option-main">
         <strong>${escapeHtml(session.chat || session.username)}</strong>
         <small>${escapeHtml(meta)}</small>
@@ -379,6 +426,72 @@ function moveSummaryActiveOption(direction) {
   activeButton.scrollIntoView({ block: "nearest" });
 }
 
+function setInviteOptionsOpen(open) {
+  if (!inviteGroupOptions || !inviteGroupSearch) return;
+  inviteGroupOptions.hidden = !open;
+  inviteGroupSearch.setAttribute("aria-expanded", String(open));
+}
+
+function renderInviteGroupOptions(query = "") {
+  if (!inviteGroupOptions) return;
+  const normalizedQuery = query.trim().toLocaleLowerCase("zh-CN");
+  inviteVisibleSessionIndexes = summarySessions
+    .map((session, index) => ({ session, index }))
+    .filter(({ session }) => session.is_group)
+    .filter(({ session }) => {
+      if (!normalizedQuery) return true;
+      return [session.chat, session.username]
+        .some((value) => String(value || "").toLocaleLowerCase("zh-CN").includes(normalizedQuery));
+    })
+    .slice(0, 80)
+    .map(({ index }) => index);
+  inviteActiveOption = -1;
+
+  if (!inviteVisibleSessionIndexes.length) {
+    inviteGroupOptions.innerHTML = '<div class="summary-option-empty">没有匹配的群聊</div>';
+    return;
+  }
+  inviteGroupOptions.innerHTML = inviteVisibleSessionIndexes.map((sessionIndex) => {
+    const session = summarySessions[sessionIndex];
+    return `<button id="invite-group-option-${sessionIndex}" type="button" role="option"
+      aria-selected="false" data-session-index="${sessionIndex}">
+      ${avatarMarkup(session.avatar_url, session.chat || session.username)}
+      <span class="summary-option-main">
+        <strong>${escapeHtml(session.chat || session.username)}</strong>
+        <small>群聊${session.time ? ` · ${escapeHtml(session.time)}` : ""}</small>
+      </span>
+      <code>${escapeHtml(session.username || "")}</code>
+    </button>`;
+  }).join("");
+}
+
+function selectInviteGroup(sessionIndex) {
+  const session = summarySessions[sessionIndex];
+  if (!session?.is_group || !inviteGroupSearch || !inviteGroupValue) return;
+  inviteGroupSearch.value = session.chat || session.username;
+  inviteGroupValue.value = session.username || session.chat;
+  inviteGroupSearch.setAttribute("aria-activedescendant", "");
+  if (inviteGroupHint) {
+    inviteGroupHint.textContent = `已选择：${session.chat || session.username}`;
+  }
+  setInviteOptionsOpen(false);
+}
+
+function moveInviteActiveOption(direction) {
+  if (!inviteGroupOptions || !inviteVisibleSessionIndexes.length) return;
+  const optionButtons = [...inviteGroupOptions.querySelectorAll("button[data-session-index]")];
+  if (!optionButtons.length) return;
+  inviteActiveOption = (inviteActiveOption + direction + optionButtons.length) % optionButtons.length;
+  optionButtons.forEach((button, index) => {
+    const isActive = index === inviteActiveOption;
+    button.classList.toggle("active", isActive);
+    button.setAttribute("aria-selected", String(isActive));
+  });
+  const activeButton = optionButtons[inviteActiveOption];
+  inviteGroupSearch.setAttribute("aria-activedescendant", activeButton.id);
+  activeButton.scrollIntoView({ block: "nearest" });
+}
+
 async function loadSummarySessions() {
   if (!summaryChatSearch || !summaryChatOptions) return [];
   if (summaryChatHint) summaryChatHint.textContent = "正在读取最近会话…";
@@ -388,7 +501,7 @@ async function loadSummarySessions() {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       command: "sessions",
-      params: { limit: 500 },
+      params: { limit: 5000 },
     }),
   });
   if (!payload.ok || !Array.isArray(payload.data)) {
@@ -397,8 +510,13 @@ async function loadSummarySessions() {
   summarySessions = payload.data;
   summarySessionsLoaded = true;
   renderSummarySessionOptions(summaryChatSearch.value);
+  renderInviteGroupOptions(inviteGroupSearch?.value || "");
   if (summaryChatHint) {
     summaryChatHint.textContent = `已载入 ${summarySessions.length} 个会话，输入名称或账号可快速匹配`;
+  }
+  if (inviteGroupHint) {
+    const groupCount = summarySessions.filter((session) => session.is_group).length;
+    inviteGroupHint.textContent = `已载入 ${groupCount} 个群聊，输入群名称或群账号可快速匹配`;
   }
   return summarySessions;
 }
@@ -406,6 +524,8 @@ async function loadSummarySessions() {
 function showSummarySessionsError(error) {
   if (summaryChatHint) summaryChatHint.textContent = `会话读取失败：${error.message}`;
   if (summaryChatRetry) summaryChatRetry.classList.remove("hidden");
+  if (inviteGroupHint) inviteGroupHint.textContent = `群聊读取失败：${error.message}`;
+  if (inviteGroupRetry) inviteGroupRetry.classList.remove("hidden");
 }
 
 function showTransientError(error, screenId = currentScreenId) {
@@ -529,10 +649,13 @@ function renderSummaryResult(data) {
     : "";
   return `<div class="summary-result">
     <section class="summary-result-hero">
-      <div>
-        <span>已整理，可交给 AI</span>
-        <h2>${escapeHtml(data?.chat || data?.username || "聊天记录")}</h2>
-        <code>${escapeHtml(data?.username || "")}</code>
+      <div class="summary-chat-identity">
+        ${renderAvatar(data, data?.chat || data?.username || "聊天记录", { allowRemote: true })}
+        <div>
+          <span>已整理，可交给 AI</span>
+          <h2>${escapeHtml(data?.chat || data?.username || "聊天记录")}</h2>
+          <code>${escapeHtml(data?.username || "")}</code>
+        </div>
       </div>
       <div class="summary-range">
         <span>日期范围</span>
@@ -549,7 +672,7 @@ function renderSummaryResult(data) {
     </section>
     ${previewNotice}
     ${renderChatMessages(previewItems, {
-      allowRemoteAvatars: false,
+      allowRemoteAvatars: true,
       allowRemoteMedia: false,
     })}
   </div>`;
@@ -747,11 +870,14 @@ function mediaUrl(media, { allowRemote = true } = {}) {
 function renderAvatar(item, label, { allowRemote = true } = {}) {
   const url = item?.sender_avatar_url || item?.avatar_url || item?.chat_avatar_url || "";
   const isRemote = /^https?:\/\//i.test(url);
-  if (url && isSafeImageUrl(url) && (allowRemote || !isRemote)) {
-    return `<img class="avatar-img" src="${escapeHtml(url)}" alt="${escapeHtml(label || "头像")}" loading="lazy" referrerpolicy="no-referrer">`;
-  }
   const initial = String(label || "W").trim().slice(0, 1).toUpperCase() || "W";
-  return `<span class="avatar-fallback" aria-hidden="true">${escapeHtml(initial)}</span>`;
+  const src = url && isSafeImageUrl(url) && (allowRemote || !isRemote)
+    ? avatarProxyUrl(url)
+    : "";
+  return `<span class="message-avatar avatar-shell">
+    <span class="avatar-fallback avatar-shell-fallback" aria-hidden="true">${escapeHtml(initial)}</span>
+    ${src ? `<img class="avatar-img" src="${escapeHtml(src)}" alt="${escapeHtml(label || "头像")}" loading="lazy" data-avatar-image>` : ""}
+  </span>`;
 }
 
 function renderMessageMedia(item, { allowRemote = true } = {}) {
@@ -868,6 +994,7 @@ function buildResultState(payload, resultMode = "") {
       const summaryData = {
         chat: payload.data.chat || "",
         username: payload.data.username || "",
+        avatar_url: payload.data.avatar_url || "",
         start_time: payload.data.start_time || null,
         end_time: payload.data.end_time || null,
         message_items: payload.data.message_items,
@@ -1048,6 +1175,50 @@ if (summaryChatRetry) {
   });
 }
 
+if (inviteGroupSearch && inviteGroupValue && inviteGroupOptions) {
+  inviteGroupSearch.addEventListener("focus", () => {
+    renderInviteGroupOptions(inviteGroupSearch.value);
+    setInviteOptionsOpen(true);
+  });
+  inviteGroupSearch.addEventListener("input", () => {
+    inviteGroupValue.value = "";
+    if (inviteGroupHint) inviteGroupHint.textContent = "请从匹配结果中选择一个群聊";
+    renderInviteGroupOptions(inviteGroupSearch.value);
+    setInviteOptionsOpen(true);
+  });
+  inviteGroupSearch.addEventListener("keydown", (event) => {
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      setInviteOptionsOpen(true);
+      moveInviteActiveOption(event.key === "ArrowDown" ? 1 : -1);
+    } else if (event.key === "Enter" && inviteActiveOption >= 0) {
+      event.preventDefault();
+      const sessionIndex = inviteVisibleSessionIndexes[inviteActiveOption];
+      selectInviteGroup(sessionIndex);
+    } else if (event.key === "Escape") {
+      setInviteOptionsOpen(false);
+    }
+  });
+  inviteGroupOptions.addEventListener("mousedown", (event) => {
+    event.preventDefault();
+  });
+  inviteGroupOptions.addEventListener("click", (event) => {
+    const option = event.target.closest("button[data-session-index]");
+    if (option) selectInviteGroup(Number(option.dataset.sessionIndex));
+  });
+  document.addEventListener("click", (event) => {
+    if (!event.target.closest("#invite-group-combobox")) {
+      setInviteOptionsOpen(false);
+    }
+  });
+}
+
+if (inviteGroupRetry) {
+  inviteGroupRetry.addEventListener("click", () => {
+    loadSummarySessions().catch(showSummarySessionsError);
+  });
+}
+
 const localDate = new Date();
 const localToday = [
   localDate.getFullYear(),
@@ -1057,6 +1228,12 @@ const localToday = [
 summaryDateInputs.forEach((input) => {
   if (!input.value) input.value = localToday;
 });
+
+document.addEventListener("error", (event) => {
+  if (event.target.matches?.("img[data-avatar-image]")) {
+    event.target.remove();
+  }
+}, true);
 
 copyButton.addEventListener("click", async () => {
   const copyText = lastText || (lastCopyData ? formatSummaryCopy(lastCopyData) : "");
@@ -1091,3 +1268,6 @@ refreshStatus().catch((error) => {
 });
 
 refreshDbDirs().catch(() => {});
+loadProfile().catch(() => {
+  if (profileName) profileName.textContent = "本机微信";
+});

@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import mimetypes
 import os
+import re
 import subprocess
 import sys
 import webbrowser
@@ -16,14 +17,34 @@ from dataclasses import dataclass
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib import resources
+from threading import Lock
 from typing import Any
+from urllib.error import URLError
 from urllib.parse import parse_qs, quote, urlparse
+from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from ..core.config import CONFIG_FILE, KEYS_FILE, STATE_DIR, detect_db_dir_candidates
 from ..core.media import decode_media_bytes as _core_decode_media_bytes
 from ..core.media import media_download_filename as _core_media_download_filename
 from ..core.media import read_media_file_payload
 from ..core.messages import validate_search_scope
+
+AVATAR_MAX_BYTES = 2 * 1024 * 1024
+AVATAR_ALLOWED_HOSTS = ("qlogo.cn", "qpic.cn", "weixin.qq.com")
+AVATAR_CACHE_LIMIT = 512
+AVATAR_CACHE_MAX_BYTES = 32 * 1024 * 1024
+_AVATAR_CACHE: dict[str, dict[str, Any]] = {}
+_AVATAR_CACHE_LOCK = Lock()
+_AVATAR_CACHE_BYTES = 0
+
+
+class _AvatarRedirectHandler(HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        _validate_avatar_url(newurl)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+urlopen = build_opener(_AvatarRedirectHandler()).open
 
 
 @dataclass(frozen=True)
@@ -317,6 +338,94 @@ def status_payload() -> dict[str, Any]:
     }
 
 
+def _validate_avatar_url(url: str) -> str:
+    parsed = urlparse(url)
+    host = (parsed.hostname or "").lower().rstrip(".")
+    allowed = any(
+        host == suffix or host.endswith(f".{suffix}")
+        for suffix in AVATAR_ALLOWED_HOSTS
+    )
+    if parsed.scheme != "https" or not allowed:
+        raise PermissionError("avatar URL is not an allowed WeChat image URL")
+    return url
+
+
+def avatar_remote_payload(url: str) -> dict[str, Any]:
+    """Fetch and validate one WeChat avatar through the localhost server."""
+    global _AVATAR_CACHE_BYTES
+    _validate_avatar_url(url)
+    with _AVATAR_CACHE_LOCK:
+        cached = _AVATAR_CACHE.get(url)
+    if cached is not None:
+        return cached
+
+    request = Request(
+        url,
+        headers={
+            "Accept": "image/*",
+            "User-Agent": "wechat-cli-web",
+        },
+    )
+    with urlopen(request, timeout=5) as response:
+        _validate_avatar_url(response.geturl())
+        declared_type = (response.headers.get("Content-Type") or "").split(";", 1)[0].lower()
+        if not declared_type.startswith("image/"):
+            raise ValueError("avatar response is not an image")
+        declared_size = response.headers.get("Content-Length")
+        if declared_size and declared_size.isdigit() and int(declared_size) > AVATAR_MAX_BYTES:
+            raise ValueError("avatar response is too large")
+        raw = response.read(AVATAR_MAX_BYTES + 1)
+
+    if len(raw) > AVATAR_MAX_BYTES:
+        raise ValueError("avatar response is too large")
+    detected_type = _image_content_type(raw, "")
+    if not detected_type:
+        raise ValueError("avatar payload is not a supported image")
+
+    payload = {"body": raw, "content_type": detected_type}
+    with _AVATAR_CACHE_LOCK:
+        existing = _AVATAR_CACHE.get(url)
+        if existing is not None:
+            return existing
+        while _AVATAR_CACHE and (
+            len(_AVATAR_CACHE) >= AVATAR_CACHE_LIMIT
+            or _AVATAR_CACHE_BYTES + len(raw) > AVATAR_CACHE_MAX_BYTES
+        ):
+            removed = _AVATAR_CACHE.pop(next(iter(_AVATAR_CACHE)))
+            _AVATAR_CACHE_BYTES -= len(removed["body"])
+        _AVATAR_CACHE[url] = payload
+        _AVATAR_CACHE_BYTES += len(raw)
+    return payload
+
+
+def profile_payload() -> dict[str, str]:
+    """Return the current account identity shown in the web console."""
+    db_dir = str(status_payload().get("db_dir") or "")
+    if not db_dir:
+        return {"username": "", "display_name": "", "avatar_url": ""}
+
+    account_dir = os.path.basename(os.path.dirname(os.path.normpath(db_dir)))
+    match = re.fullmatch(r"(.+?)_[0-9a-fA-F]{4,}", account_dir)
+    username = match.group(1) if match else account_dir
+    if not username:
+        return {"username": "", "display_name": "", "avatar_url": ""}
+
+    result = run_cli_command({
+        "command": "contacts",
+        "params": {"detail": username},
+    })
+    data = result.get("data") if result.get("ok") else {}
+    if not isinstance(data, dict):
+        data = {}
+    display_name = str(data.get("remark") or data.get("nick_name") or username)
+    avatar_url = str(data.get("avatar") or data.get("avatar_url") or "")
+    return {
+        "username": username,
+        "display_name": display_name,
+        "avatar_url": avatar_url,
+    }
+
+
 def _static_bytes(name: str) -> bytes:
     root = resources.files("wechat_cli.web.static")
     return root.joinpath(name).read_bytes()
@@ -435,6 +544,9 @@ class WeChatWebHandler(BaseHTTPRequestHandler):
         if parsed.path == "/api/status":
             self._send_json(status_payload())
             return
+        if parsed.path == "/api/profile":
+            self._send_json(profile_payload())
+            return
         if parsed.path == "/api/db-dirs":
             self._send_json(db_dir_candidates_payload())
             return
@@ -450,6 +562,18 @@ class WeChatWebHandler(BaseHTTPRequestHandler):
                 self.send_error(HTTPStatus.FORBIDDEN)
             except FileNotFoundError:
                 self.send_error(HTTPStatus.NOT_FOUND)
+            return
+        if parsed.path == "/api/avatar":
+            url = parse_qs(parsed.query).get("url", [""])[0]
+            try:
+                payload = avatar_remote_payload(url)
+                self._send_bytes(payload["body"], payload["content_type"])
+            except PermissionError:
+                self.send_error(HTTPStatus.FORBIDDEN)
+            except ValueError:
+                self.send_error(HTTPStatus.BAD_REQUEST)
+            except (URLError, OSError):
+                self.send_error(HTTPStatus.BAD_GATEWAY)
             return
         if parsed.path.startswith("/static/"):
             name = os.path.basename(parsed.path)

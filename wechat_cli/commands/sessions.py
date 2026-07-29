@@ -7,7 +7,7 @@ from datetime import datetime
 
 import click
 
-from ..core.contacts import get_contact_names
+from ..core.contacts import get_contact_avatars, get_contact_names
 from ..core.messages import decompress_content, format_msg_type
 from ..output.formatter import output
 
@@ -33,6 +33,7 @@ def sessions(ctx, limit, fmt):
         ctx.exit(3)
 
     names = get_contact_names(app.cache, app.decrypted_dir)
+    avatars = get_contact_avatars(app.cache, app.decrypted_dir)
     with closing(sqlite3.connect(path)) as conn:
         rows = conn.execute("""
             SELECT username, unread_count, summary, last_timestamp,
@@ -62,6 +63,7 @@ def sessions(ctx, limit, fmt):
             'chat': display,
             'username': username,
             'is_group': is_group,
+            'avatar_url': avatars.get(username, ''),
             'unread': unread or 0,
             'last_message': str(summary or ''),
             'msg_type': format_msg_type(msg_type),

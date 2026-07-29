@@ -4,16 +4,16 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>WeChat CLI Web</title>
-  <link rel="stylesheet" href="/static/app.css?v=20260729-web-simplify">
+  <link rel="stylesheet" href="/static/app.css?v=20260729-avatar-picker">
 </head>
 <body>
   <div class="app-shell">
     <aside class="sidebar">
       <div class="brand">
-        <span class="brand-mark">W</span>
+        <span id="profile-avatar" class="brand-mark"><span aria-hidden="true">W</span></span>
         <div>
           <strong>WeChat CLI Web</strong>
-          <small>localhost</small>
+          <small id="profile-name">正在读取账号…</small>
         </div>
       </div>
       <nav id="nav" class="nav">
@@ -205,14 +205,24 @@
             <p><b>统计范围：从微信数据库记载的日子开始。</b>读取当前可见的全部群系统提示；二维码入群归属于二维码分享者。</p>
           </div>
           <div class="form-grid">
-            <label>群名称
-              <input data-param="group_name" required placeholder="输入群聊名称">
+            <label class="full">选择群聊
+              <div id="invite-group-combobox" class="summary-combobox">
+                <input id="invite-group-search" type="search" role="combobox"
+                  aria-autocomplete="list" aria-controls="invite-group-options"
+                  aria-expanded="false" aria-activedescendant="" autocomplete="off"
+                  placeholder="输入群名称或群账号进行搜索">
+                <input id="invite-group-value" data-param="group_name" type="hidden">
+                <div id="invite-group-options" class="summary-chat-options"
+                  role="listbox" hidden></div>
+              </div>
+              <small id="invite-group-hint">正在读取群聊列表…</small>
+              <button id="invite-group-retry" class="summary-retry hidden" type="button">重新读取群聊</button>
             </label>
-            <label>开始时间
-              <input data-param="start_time" placeholder="2026-07-23">
+            <label>开始日期（可不选）
+              <input class="invite-date" data-param="start_time" type="date">
             </label>
-            <label>结束时间
-              <input data-param="end_time" placeholder="2026-07-28">
+            <label>结束日期（可不选）
+              <input class="invite-date" data-param="end_time" type="date">
             </label>
             <label class="full">历史昵称绑定
               <textarea data-param="bind_identity" rows="4"
@@ -240,6 +250,6 @@
       </section>
     </main>
   </div>
-  <script src="/static/app.js?v=20260729-web-simplify"></script>
+  <script src="/static/app.js?v=20260729-avatar-picker"></script>
 </body>
 </html>

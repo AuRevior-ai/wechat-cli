@@ -7,10 +7,127 @@ from pathlib import Path
 from subprocess import CompletedProcess
 from unittest.mock import patch
 
-from wechat_cli.web.server import _decode_media_bytes, build_cli_args, db_dir_candidates_payload, media_file_payload, run_cli_command
+from wechat_cli.web import server as web_server
+from wechat_cli.web.server import (
+    _decode_media_bytes,
+    build_cli_args,
+    db_dir_candidates_payload,
+    media_file_payload,
+    run_cli_command,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+class FakeAvatarResponse:
+    def __init__(
+        self,
+        body=b"\x89PNG\r\n\x1a\navatar",
+        content_type="image/png",
+        final_url="https://wx.qlogo.cn/avatar/132",
+        content_length=None,
+    ):
+        self.body = body
+        self.headers = {
+            "Content-Type": content_type,
+            "Content-Length": str(
+                len(body) if content_length is None else content_length
+            ),
+        }
+        self.final_url = final_url
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        return False
+
+    def geturl(self):
+        return self.final_url
+
+    def read(self, limit=-1):
+        return self.body if limit < 0 else self.body[:limit]
+
+
+class AvatarApiTests(unittest.TestCase):
+    @patch("wechat_cli.web.server.urlopen")
+    def test_avatar_proxy_returns_allowed_image(self, urlopen_mock):
+        urlopen_mock.return_value = FakeAvatarResponse()
+
+        payload = web_server.avatar_remote_payload(
+            "https://wx.qlogo.cn/avatar/132?case=allowed"
+        )
+
+        self.assertEqual(payload["content_type"], "image/png")
+        self.assertTrue(payload["body"].startswith(b"\x89PNG"))
+
+    def test_avatar_proxy_rejects_non_wechat_host(self):
+        with self.assertRaises(PermissionError):
+            web_server.avatar_remote_payload(
+                "https://example.com/avatar.png"
+            )
+
+    @patch("wechat_cli.web.server.urlopen")
+    def test_avatar_proxy_rejects_non_image_response(self, urlopen_mock):
+        urlopen_mock.return_value = FakeAvatarResponse(
+            body=b"<html>no</html>",
+            content_type="text/html",
+        )
+
+        with self.assertRaises(ValueError):
+            web_server.avatar_remote_payload(
+                "https://wx.qlogo.cn/avatar/132?case=not-image"
+            )
+
+    @patch("wechat_cli.web.server.urlopen")
+    def test_avatar_proxy_rejects_oversized_response(self, urlopen_mock):
+        urlopen_mock.return_value = FakeAvatarResponse(
+            content_length=2 * 1024 * 1024 + 1,
+        )
+
+        with self.assertRaises(ValueError):
+            web_server.avatar_remote_payload(
+                "https://wx.qlogo.cn/avatar/132?case=too-large"
+            )
+
+    @patch("wechat_cli.web.server.run_cli_command")
+    @patch("wechat_cli.web.server.status_payload")
+    def test_profile_uses_account_username_from_configured_directory(
+        self,
+        status_mock,
+        run_mock,
+    ):
+        status_mock.return_value = {
+            "db_dir": str(
+                Path("root")
+                / "xwechat_files"
+                / "wxid_owner_fc40"
+                / "db_storage"
+            )
+        }
+        run_mock.return_value = {
+            "ok": True,
+            "data": {
+                "username": "wxid_owner",
+                "nick_name": "主人",
+                "remark": "",
+                "avatar": "https://wx.qlogo.cn/owner/132",
+            },
+        }
+
+        payload = web_server.profile_payload()
+
+        self.assertEqual(payload["display_name"], "主人")
+        self.assertEqual(payload["username"], "wxid_owner")
+        self.assertEqual(
+            payload["avatar_url"],
+            "https://wx.qlogo.cn/owner/132",
+        )
+        run_mock.assert_called_once_with({
+            "command": "contacts",
+            "params": {"detail": "wxid_owner"},
+        })
 
 
 class BuildCliArgsTests(unittest.TestCase):
@@ -51,6 +168,45 @@ class BuildCliArgsTests(unittest.TestCase):
         self.assertIn('data-param="bind_identity"', html)
         self.assertIn("function renderInviteStats", js)
         self.assertIn("invite-ranking-table", css)
+
+    def test_invite_stats_uses_searchable_group_picker_and_day_inputs(self):
+        html = (
+            ROOT / "wechat_cli" / "web" / "static" / "index.html"
+        ).read_text(encoding="utf-8")
+        js = (
+            ROOT / "wechat_cli" / "web" / "static" / "app.js"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn('id="invite-group-search"', html)
+        self.assertIn('id="invite-group-options"', html)
+        self.assertIn(
+            'id="invite-group-value" data-param="group_name" type="hidden"',
+            html,
+        )
+        self.assertEqual(
+            html.count('class="invite-date" data-param='),
+            2,
+        )
+        self.assertIn("function renderInviteGroupOptions", js)
+        self.assertIn(".filter(({ session }) => session.is_group)", js)
+        self.assertIn("function selectInviteGroup", js)
+
+    def test_web_uses_local_avatar_proxy_for_profile_sessions_and_messages(self):
+        html = (
+            ROOT / "wechat_cli" / "web" / "static" / "index.html"
+        ).read_text(encoding="utf-8")
+        js = (
+            ROOT / "wechat_cli" / "web" / "static" / "app.js"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn('id="profile-avatar"', html)
+        self.assertIn('id="profile-name"', html)
+        self.assertIn('fetchJson("/api/profile")', js)
+        self.assertIn('`/api/avatar?url=${encodeURIComponent(url)}`', js)
+        self.assertIn("session.avatar_url", js)
+        self.assertIn("avatar_url: payload.data.avatar_url || \"\"", js)
+        self.assertIn("allowRemoteAvatars: true", js)
+        self.assertIn("allowRemoteMedia: false", js)
 
     def test_results_are_saved_and_restored_per_screen(self):
         js = (
@@ -125,7 +281,7 @@ class BuildCliArgsTests(unittest.TestCase):
         self.assertNotIn("`聊天总结 · ${summaryData.chat", js)
         self.assertIn("const SUMMARY_PREVIEW_LIMIT = 200;", js)
         self.assertIn("共 ${items.length} 条，仅在网页预览前 ${previewItems.length} 条", js)
-        self.assertIn("allowRemoteAvatars: false", js)
+        self.assertIn("allowRemoteAvatars: true", js)
         self.assertIn("allowRemoteMedia: false", js)
         self.assertIn("function renderMessageMedia(item, { allowRemote = true } = {})", js)
         self.assertIn('id="summary-chat-retry"', html)
