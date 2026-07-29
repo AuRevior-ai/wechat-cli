@@ -11,11 +11,22 @@ const statusList = document.querySelector("#status-list");
 const dbDirSelect = document.querySelector("#db-dir-candidates");
 const detectDbDirsButton = document.querySelector("#detect-db-dirs");
 const setupDbDirInput = document.querySelector("#setup-db-dir");
+const summaryChatSearch = document.querySelector("#summary-chat-search");
+const summaryChatValue = document.querySelector("#summary-chat-value");
+const summaryChatOptions = document.querySelector("#summary-chat-options");
+const summaryChatHint = document.querySelector("#summary-chat-hint");
+const summaryDateInputs = [...document.querySelectorAll(".summary-date")];
 
 let lastText = "";
 let lastKeyText = "";
 let lastDownload = null;
 let dbDirCandidates = [];
+let summarySessions = [];
+let summarySessionsLoaded = false;
+let summaryVisibleSessionIndexes = [];
+let summaryActiveOption = -1;
+let currentScreenId = document.querySelector(".screen.active")?.id || "dashboard";
+const screenResultStates = new Map();
 
 const TYPE_LABELS = {
   text: "文本",
@@ -30,6 +41,68 @@ const TYPE_LABELS = {
   system: "系统",
 };
 
+const FIELD_LABELS = {
+  chat: "聊天名称",
+  username: "账号",
+  is_group: "是否群聊",
+  unread: "未读数量",
+  unread_count: "未读数量",
+  last_message: "最后一条消息",
+  msg_type: "消息类型",
+  sender: "发送者",
+  sender_name: "发送者",
+  timestamp: "时间戳",
+  time: "时间",
+  count: "数量",
+  type: "类型",
+  display_name: "显示名称",
+  nick_name: "昵称",
+  remark: "备注",
+  alias: "微信号",
+  description: "描述",
+  local_type: "联系人类型",
+  verify_flag: "认证标记",
+  is_subscription: "是否公众号",
+  avatar: "头像",
+  avatar_url: "头像地址",
+  chat_username: "聊天账号",
+  chat_avatar_url: "聊天头像",
+  sender_username: "发送者账号",
+  sender_avatar_url: "发送者头像",
+  is_self: "是否本人",
+  line: "消息文本",
+  text: "消息内容",
+  type_label: "消息类型",
+  group: "群聊名称",
+  member_count: "成员数量",
+  members: "群成员",
+  owner: "群主",
+  summary: "摘要",
+  source_chat: "来源会话",
+  from: "来源",
+  id: "记录编号",
+  first_call: "是否首次读取",
+  new_count: "新增数量",
+  keyword: "关键词",
+  scope: "查询范围",
+  results: "查询结果",
+  start_time: "开始日期",
+  end_time: "结束日期",
+  limit: "读取上限",
+  offset: "偏移数量",
+  messages: "聊天记录",
+  message_items: "消息详情",
+  saved_media: "已保存媒体",
+  save_dir: "保存目录",
+  failures: "读取失败",
+  total: "消息总数",
+  type_breakdown: "类型分布",
+  top_senders: "发言排行",
+  hourly: "时段分布",
+  query: "查询内容",
+  name: "名称",
+};
+
 function escapeHtml(value) {
   return String(value ?? "")
     .replaceAll("&", "&amp;")
@@ -38,7 +111,51 @@ function escapeHtml(value) {
     .replaceAll('"', "&quot;");
 }
 
+function emptyResultState(screenId) {
+  const screen = document.getElementById(screenId);
+  const screenTitle = screen?.dataset.title || "当前功能";
+  return {
+    className: "result empty",
+    html: `请在“${escapeHtml(screenTitle)}”中提交操作，结果只会显示在这里。`,
+    commandPreview: "等待操作",
+    lastText: "",
+    lastKeyText: "",
+    lastDownload: null,
+  };
+}
+
+function saveResultState(screenId) {
+  if (!screenId) return;
+  screenResultStates.set(screenId, {
+    className: result.className,
+    html: result.innerHTML,
+    commandPreview: commandPreview.textContent,
+    lastText,
+    lastKeyText,
+    lastDownload,
+  });
+}
+
+function applyResultState(state) {
+  result.className = state.className;
+  result.innerHTML = state.html;
+  commandPreview.textContent = state.commandPreview;
+  lastText = state.lastText || "";
+  lastKeyText = state.lastKeyText || "";
+  lastDownload = state.lastDownload || null;
+  copyKeyButton.classList.toggle("hidden", !lastKeyText);
+  downloadButton.classList.toggle("hidden", !lastDownload);
+}
+
+function restoreResultState(screenId) {
+  applyResultState(screenResultStates.get(screenId) || emptyResultState(screenId));
+}
+
 function setScreen(id) {
+  if (currentScreenId && currentScreenId !== id) {
+    saveResultState(currentScreenId);
+  }
+  currentScreenId = id;
   screens.forEach((screen) => screen.classList.toggle("active", screen.id === id));
   nav.querySelectorAll("button").forEach((button) => {
     button.classList.toggle("active", button.dataset.target === id);
@@ -47,6 +164,12 @@ function setScreen(id) {
   title.textContent = active?.dataset.title || "WeChat CLI Web";
   if (id === "setup" && dbDirCandidates.length === 0) {
     refreshDbDirs().catch(showTransientError);
+  }
+  restoreResultState(id);
+  if (id === "chat-summary" && !summarySessionsLoaded) {
+    loadSummarySessions().catch((error) => {
+      if (summaryChatHint) summaryChatHint.textContent = `会话读取失败：${error.message}`;
+    });
   }
 }
 
@@ -75,7 +198,11 @@ function readForm(form) {
     params[name] = value;
   });
   if (form.dataset.command === "history") {
-    params.media = true;
+    if (form.dataset.resultMode === "summary") {
+      params.media = false;
+    } else {
+      params.media = true;
+    }
   }
   if (form.dataset.command === "invite-stats") {
     params.bind_identity = String(params.bind_identity || "")
@@ -101,6 +228,13 @@ function validatePayload(payload) {
   return "关键词为空时，必须同时填写开始时间和结束时间。";
 }
 
+function validateSummaryPayload(params = {}) {
+  if (!params.chat_name) return "请先从下拉列表选择一个聊天。";
+  if (!params.start_time || !params.end_time) return "请选择完整的开始日期和结束日期。";
+  if (params.start_time > params.end_time) return "开始日期不能晚于结束日期。";
+  return "";
+}
+
 async function fetchJson(url, options = {}) {
   const response = await fetch(url, options);
   const payload = await response.json();
@@ -112,7 +246,7 @@ async function fetchJson(url, options = {}) {
 
 async function refreshStatus() {
   const status = await fetchJson("/api/status");
-  initPill.textContent = status.initialized ? `已初始化 · ${status.keys_count} keys` : "未初始化";
+  initPill.textContent = status.initialized ? `已初始化 · ${status.keys_count} 个密钥` : "未初始化";
   initPill.className = `pill ${status.initialized ? "ready" : "warn"}`;
   statusList.innerHTML = renderKeyValue({
     "初始化": status.initialized ? "是" : "否",
@@ -168,27 +302,139 @@ async function refreshDbDirs() {
   return payload;
 }
 
+function setSummaryOptionsOpen(open) {
+  if (!summaryChatOptions || !summaryChatSearch) return;
+  summaryChatOptions.hidden = !open;
+  summaryChatSearch.setAttribute("aria-expanded", String(open));
+}
+
+function renderSummarySessionOptions(query = "") {
+  if (!summaryChatOptions) return;
+  const normalizedQuery = query.trim().toLocaleLowerCase("zh-CN");
+  summaryVisibleSessionIndexes = summarySessions
+    .map((session, index) => ({ session, index }))
+    .filter(({ session }) => {
+      if (!normalizedQuery) return true;
+      return [session.chat, session.username, session.sender, session.last_message]
+        .some((value) => String(value || "").toLocaleLowerCase("zh-CN").includes(normalizedQuery));
+    })
+    .slice(0, 80)
+    .map(({ index }) => index);
+  summaryActiveOption = -1;
+
+  if (!summaryVisibleSessionIndexes.length) {
+    summaryChatOptions.innerHTML = '<div class="summary-option-empty">没有匹配的会话</div>';
+    return;
+  }
+  summaryChatOptions.innerHTML = summaryVisibleSessionIndexes.map((sessionIndex) => {
+    const session = summarySessions[sessionIndex];
+    const initial = String(session.chat || "聊").trim().slice(0, 1);
+    const meta = [
+      session.is_group ? "群聊" : "私聊",
+      session.time || "",
+      session.unread ? `${session.unread} 条未读` : "",
+    ].filter(Boolean).join(" · ");
+    return `<button type="button" role="option" data-session-index="${sessionIndex}">
+      <span class="summary-option-avatar">${escapeHtml(initial)}</span>
+      <span class="summary-option-main">
+        <strong>${escapeHtml(session.chat || session.username)}</strong>
+        <small>${escapeHtml(meta)}</small>
+      </span>
+      <code>${escapeHtml(session.username || "")}</code>
+    </button>`;
+  }).join("");
+}
+
+function selectSummarySession(sessionIndex) {
+  const session = summarySessions[sessionIndex];
+  if (!session || !summaryChatSearch || !summaryChatValue) return;
+  summaryChatSearch.value = session.chat || session.username;
+  summaryChatValue.value = session.username || session.chat;
+  summaryChatSearch.setAttribute("aria-activedescendant", "");
+  if (summaryChatHint) {
+    summaryChatHint.textContent = `已选择：${session.chat || session.username} · ${session.is_group ? "群聊" : "私聊"}`;
+  }
+  setSummaryOptionsOpen(false);
+}
+
+function moveSummaryActiveOption(direction) {
+  if (!summaryChatOptions || !summaryVisibleSessionIndexes.length) return;
+  const optionButtons = [...summaryChatOptions.querySelectorAll("button[data-session-index]")];
+  if (!optionButtons.length) return;
+  summaryActiveOption = (summaryActiveOption + direction + optionButtons.length) % optionButtons.length;
+  optionButtons.forEach((button, index) => button.classList.toggle("active", index === summaryActiveOption));
+  optionButtons[summaryActiveOption].scrollIntoView({ block: "nearest" });
+}
+
+async function loadSummarySessions() {
+  if (!summaryChatSearch || !summaryChatOptions) return [];
+  if (summaryChatHint) summaryChatHint.textContent = "正在读取最近会话…";
+  const payload = await fetchJson("/api/run", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      command: "sessions",
+      params: { limit: 500 },
+    }),
+  });
+  if (!payload.ok || !Array.isArray(payload.data)) {
+    throw new Error(payload.stderr || payload.error || "无法读取会话列表");
+  }
+  summarySessions = payload.data;
+  summarySessionsLoaded = true;
+  renderSummarySessionOptions("");
+  if (summaryChatHint) {
+    summaryChatHint.textContent = `已载入 ${summarySessions.length} 个会话，输入名称或账号可快速匹配`;
+  }
+  return summarySessions;
+}
+
 function showTransientError(error) {
-  lastKeyText = "";
-  copyKeyButton.classList.add("hidden");
-  result.className = "result error";
-  result.innerHTML = `<pre>${escapeHtml(error.message)}</pre>`;
+  const state = {
+    className: "result error",
+    html: `<pre>${escapeHtml(error.message)}</pre>`,
+    commandPreview: "操作失败",
+    lastText: error.message || "",
+    lastKeyText: "",
+    lastDownload: null,
+  };
+  screenResultStates.set(currentScreenId, state);
+  applyResultState(state);
+}
+
+function fieldLabel(key) {
+  return FIELD_LABELS[key] || String(key).replaceAll("_", " ");
 }
 
 function renderKeyValue(obj, mode = "div") {
   const entries = Object.entries(obj || {});
   if (mode === "dl") {
-    return entries.map(([key, value]) => `<dt>${escapeHtml(key)}</dt><dd>${escapeHtml(formatScalar(value))}</dd>`).join("");
+    return entries.map(([key, value]) => `<dt>${escapeHtml(fieldLabel(key))}</dt><dd>${escapeHtml(formatScalar(value))}</dd>`).join("");
   }
   return `<div class="kv">${entries.map(([key, value]) => (
-    `<div>${escapeHtml(key)}</div><div>${escapeHtml(formatScalar(value))}</div>`
+    `<div>${escapeHtml(fieldLabel(key))}</div><div>${escapeHtml(formatScalar(value))}</div>`
   )).join("")}</div>`;
 }
 
 function formatScalar(value) {
   if (value === null || value === undefined) return "";
-  if (typeof value === "object") return JSON.stringify(value, null, 2);
+  if (typeof value === "boolean") return value ? "是" : "否";
+  if (typeof value === "object") return JSON.stringify(localizeStructuredValue(value), null, 2);
   return String(value);
+}
+
+function localizeStructuredValue(value) {
+  if (Array.isArray(value)) return value.map(localizeStructuredValue);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, nestedValue]) => [
+        fieldLabel(key),
+        localizeStructuredValue(nestedValue),
+      ])
+    );
+  }
+  if (typeof value === "boolean") return value ? "是" : "否";
+  return value;
 }
 
 function formatMessagesForKeyCopy(messages) {
@@ -205,6 +451,75 @@ function keyCopyText(payload) {
     return formatMessagesForKeyCopy(payload.data.messages);
   }
   return "";
+}
+
+function summarySender(item) {
+  const sender = item?.sender || (item?.is_self ? "我" : "");
+  return sender === "me" ? "我" : (sender || "未知发送者");
+}
+
+function summaryMessageLine(item) {
+  const type = TYPE_LABELS[item?.type] || item?.type_label || item?.type || "消息";
+  const text = String(item?.text || "").trim() || `[${type}]`;
+  return `[${item?.time || "时间未知"}] ${summarySender(item)}（${type}）：${text}`;
+}
+
+function formatSummaryCopy(data) {
+  const items = Array.isArray(data?.message_items) ? data.message_items : [];
+  const lines = items.map(summaryMessageLine);
+  return [
+    "请总结下面这段微信聊天记录，并使用中文输出：",
+    "1. 核心主题与明确结论",
+    "2. 已确认的决定、承诺和分工",
+    "3. 待办事项（负责人、截止时间、下一步）",
+    "4. 重要数字、日期、链接和风险",
+    "5. 尚未解决的问题",
+    "",
+    `会话：${data?.chat || data?.username || "未知会话"}`,
+    `日期：${data?.start_time || "最早"} 至 ${data?.end_time || "最新"}`,
+    `消息数量：${items.length}`,
+    "",
+    "—— 聊天记录开始 ——",
+    ...(lines.length ? lines : ["（所选日期范围内没有聊天记录）"]),
+    "—— 聊天记录结束 ——",
+  ].join("\n");
+}
+
+function formatSummaryKeyCopy(data) {
+  const items = Array.isArray(data?.message_items) ? data.message_items : [];
+  return [
+    `会话：${data?.chat || data?.username || "未知会话"}`,
+    `日期：${data?.start_time || "最早"} 至 ${data?.end_time || "最新"}`,
+    `消息数量：${items.length}`,
+    "",
+    ...(items.length ? items.map(summaryMessageLine) : ["（所选日期范围内没有聊天记录）"]),
+  ].join("\n");
+}
+
+function renderSummaryResult(data) {
+  const items = Array.isArray(data?.message_items) ? data.message_items : [];
+  return `<div class="summary-result">
+    <section class="summary-result-hero">
+      <div>
+        <span>已整理，可交给 AI</span>
+        <h2>${escapeHtml(data?.chat || data?.username || "聊天记录")}</h2>
+        <code>${escapeHtml(data?.username || "")}</code>
+      </div>
+      <div class="summary-range">
+        <span>日期范围</span>
+        <strong>${escapeHtml(data?.start_time || "最早")} <i>→</i> ${escapeHtml(data?.end_time || "最新")}</strong>
+      </div>
+      <div class="summary-count">
+        <strong>${escapeHtml(items.length)}</strong>
+        <span>条消息</span>
+      </div>
+    </section>
+    <section class="summary-copy-guide">
+      <div><b>复制</b><span>包含总结要求与完整聊天记录，可直接粘贴给 AI。</span></div>
+      <div><b>复制关键信息</b><span>只保留范围、时间、发言人、类型和正文。</span></div>
+    </section>
+    ${renderChatMessages(items)}
+  </div>`;
 }
 
 function firstArray(data) {
@@ -227,7 +542,7 @@ function renderStats(data) {
     <div class="result-grid">
       <div class="item-row">${renderKeyValue({
         "消息总数": data.total,
-        "类型分布": Object.entries(data.type_breakdown || {}).map(([k, v]) => `${k}: ${v}`).join(" / "),
+        "类型分布": Object.entries(data.type_breakdown || {}).map(([k, v]) => `${TYPE_LABELS[k] || k}: ${v}`).join(" / "),
         "发言排行": (data.top_senders || []).map((item) => `${item.name}: ${item.count}`).join(" / "),
       })}</div>
       <div class="item-row"><strong>24 小时分布</strong><div class="bars">${bars}</div></div>
@@ -426,7 +741,7 @@ function renderMessageMedia(item) {
 function renderChatMessages(items) {
   if (!items.length) return `<div class="empty">没有消息。</div>`;
   return `<div class="chat-list">${items.map((item) => {
-    const sender = item.sender || item.chat || "消息";
+    const sender = item.sender === "me" ? "我" : (item.sender || item.chat || "消息");
     const type = TYPE_LABELS[item.type] || item.type_label || item.type || "消息";
     return `<article class="message-row ${item.is_self ? "mine" : ""}">
       ${renderAvatar(item, sender)}
@@ -455,7 +770,8 @@ function renderArray(items) {
       return `<div class="item-row">${escapeHtml(formatScalar(item))}</div>`;
     }
     const primary = item.chat || item.display_name || item.nick_name || item.summary || item.name || item.username || item.id || "记录";
-    const meta = [item.time, item.type, item.msg_type, item.is_group ? "群聊" : "", item.unread ? `${item.unread} 条未读` : ""]
+    const typeMeta = TYPE_LABELS[item.type] || item.msg_type || item.type || "";
+    const meta = [item.time, typeMeta, item.is_group ? "群聊" : "", item.unread ? `${item.unread} 条未读` : ""]
       .filter(Boolean).join(" · ");
     return `<article class="item-row">
       <strong>${escapeHtml(primary)}</strong>
@@ -489,73 +805,98 @@ function renderData(data) {
   return `<pre>${escapeHtml(formatScalar(data))}</pre>`;
 }
 
-function setResult(payload) {
+function buildResultState(payload, resultMode = "") {
   const output = payload.stdout || payload.stderr || payload.error || "";
   const text = payload.data ? JSON.stringify(payload.data, null, 2) : output;
-  lastText = text || JSON.stringify(payload, null, 2);
-  lastKeyText = keyCopyText(payload);
-  lastDownload = null;
-  copyKeyButton.classList.toggle("hidden", !lastKeyText);
-  result.className = `result ${payload.ok ? "" : "error"}`;
-  commandPreview.textContent = payload.command ? payload.command.join(" ") : "请求失败";
+  const state = {
+    className: `result ${payload.ok ? "" : "error"}`.trim(),
+    html: "",
+    commandPreview: payload.command ? payload.command.join(" ") : "请求失败",
+    lastText: text || JSON.stringify(payload, null, 2),
+    lastKeyText: keyCopyText(payload),
+    lastDownload: null,
+  };
 
   if (!payload.ok) {
-    result.innerHTML = `<pre>${escapeHtml(output || payload.error || "操作失败")}</pre>`;
-    downloadButton.classList.add("hidden");
-    return;
+    state.html = `<pre>${escapeHtml(output || payload.error || "操作失败")}</pre>`;
+    return state;
   }
 
   if (payload.data) {
-    result.innerHTML = renderData(payload.data);
+    if (resultMode === "summary" && Array.isArray(payload.data.message_items)) {
+      state.html = renderSummaryResult(payload.data);
+      state.lastText = formatSummaryCopy(payload.data);
+      state.lastKeyText = formatSummaryKeyCopy(payload.data);
+      state.commandPreview = `聊天总结 · ${payload.data.chat || payload.data.username || "会话"} · ${
+        payload.data.start_time || "最早"
+      } 至 ${payload.data.end_time || "最新"}`;
+      return state;
+    }
+    state.html = renderData(payload.data);
     if (payload.command?.[1] === "invite-stats") {
-      lastDownload = {
+      state.lastDownload = {
         text: inviteCsv(payload.data),
         filename: "wechat-invite-stats.csv",
       };
-      downloadButton.classList.remove("hidden");
-    } else {
-      downloadButton.classList.add("hidden");
     }
-    return;
+    return state;
   }
 
-  result.innerHTML = `<pre>${escapeHtml(output)}</pre>`;
+  state.html = `<pre>${escapeHtml(output)}</pre>`;
   if (payload.command?.[1] === "export" && output) {
-    lastDownload = {
+    state.lastDownload = {
       text: output,
       filename: payload.command.includes("txt") ? "wechat-export.txt" : "wechat-export.md",
     };
-    downloadButton.classList.remove("hidden");
-  } else {
-    downloadButton.classList.add("hidden");
+  }
+  return state;
+}
+
+function setResult(payload, screenId = currentScreenId, resultMode = "") {
+  const state = buildResultState(payload, resultMode);
+  screenResultStates.set(screenId, state);
+  if (currentScreenId === screenId) {
+    applyResultState(state);
   }
 }
 
 async function runForm(form) {
   if (!form.reportValidity()) return;
+  const screenId = form.closest(".screen")?.id || currentScreenId;
+  const resultMode = form.dataset.resultMode || "";
   const payload = readForm(form);
-  const validationError = validatePayload(payload);
+  const validationError = resultMode === "summary"
+    ? validateSummaryPayload(payload.params)
+    : validatePayload(payload);
   if (validationError) {
-    result.className = "result error";
-    result.innerHTML = `<pre>${escapeHtml(validationError)}</pre>`;
-    commandPreview.textContent = "表单校验失败";
-    lastKeyText = "";
-    copyKeyButton.classList.add("hidden");
-    downloadButton.classList.add("hidden");
+    const errorState = {
+      className: "result error",
+      html: `<pre>${escapeHtml(validationError)}</pre>`,
+      commandPreview: "表单校验失败",
+      lastText: validationError,
+      lastKeyText: "",
+      lastDownload: null,
+    };
+    screenResultStates.set(screenId, errorState);
+    if (currentScreenId === screenId) applyResultState(errorState);
     return;
   }
-  result.className = "result empty";
-  result.textContent = "执行中...";
-  commandPreview.textContent = `${payload.command} ${JSON.stringify(payload.params)}`;
-  lastKeyText = "";
-  copyKeyButton.classList.add("hidden");
-  downloadButton.classList.add("hidden");
+  const loadingState = {
+    className: "result empty",
+    html: "执行中...",
+    commandPreview: `${payload.command} ${JSON.stringify(payload.params)}`,
+    lastText: "",
+    lastKeyText: "",
+    lastDownload: null,
+  };
+  screenResultStates.set(screenId, loadingState);
+  if (currentScreenId === screenId) applyResultState(loadingState);
   const response = await fetchJson("/api/run", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
-  setResult(response);
+  setResult(response, screenId, resultMode);
   if (payload.command === "init") {
     await refreshStatus();
   }
@@ -594,6 +935,54 @@ if (dbDirSelect && setupDbDirInput) {
     }
   });
 }
+
+if (summaryChatSearch && summaryChatValue && summaryChatOptions) {
+  summaryChatSearch.addEventListener("focus", () => {
+    renderSummarySessionOptions(summaryChatSearch.value);
+    setSummaryOptionsOpen(true);
+  });
+  summaryChatSearch.addEventListener("input", () => {
+    summaryChatValue.value = "";
+    if (summaryChatHint) summaryChatHint.textContent = "请从匹配结果中选择一个会话";
+    renderSummarySessionOptions(summaryChatSearch.value);
+    setSummaryOptionsOpen(true);
+  });
+  summaryChatSearch.addEventListener("keydown", (event) => {
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      setSummaryOptionsOpen(true);
+      moveSummaryActiveOption(event.key === "ArrowDown" ? 1 : -1);
+    } else if (event.key === "Enter" && summaryActiveOption >= 0) {
+      event.preventDefault();
+      const sessionIndex = summaryVisibleSessionIndexes[summaryActiveOption];
+      selectSummarySession(sessionIndex);
+    } else if (event.key === "Escape") {
+      setSummaryOptionsOpen(false);
+    }
+  });
+  summaryChatOptions.addEventListener("mousedown", (event) => {
+    event.preventDefault();
+  });
+  summaryChatOptions.addEventListener("click", (event) => {
+    const option = event.target.closest("button[data-session-index]");
+    if (option) selectSummarySession(Number(option.dataset.sessionIndex));
+  });
+  document.addEventListener("click", (event) => {
+    if (!event.target.closest("#summary-chat-combobox")) {
+      setSummaryOptionsOpen(false);
+    }
+  });
+}
+
+const localDate = new Date();
+const localToday = [
+  localDate.getFullYear(),
+  String(localDate.getMonth() + 1).padStart(2, "0"),
+  String(localDate.getDate()).padStart(2, "0"),
+].join("-");
+summaryDateInputs.forEach((input) => {
+  if (!input.value) input.value = localToday;
+});
 
 copyButton.addEventListener("click", async () => {
   if (!lastText) return;

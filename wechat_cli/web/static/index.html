@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>WeChat CLI Web</title>
-  <link rel="stylesheet" href="/static/app.css?v=20260728-invite-stats">
+  <link rel="stylesheet" href="/static/app.css?v=20260729-chat-summary">
 </head>
 <body>
   <div class="app-shell">
@@ -21,6 +21,7 @@
         <button data-target="setup">初始化</button>
         <button data-target="sessions">最近会话</button>
         <button data-target="history">聊天记录</button>
+        <button data-target="chat-summary">聊天总结</button>
         <button data-target="search">消息搜索</button>
         <button data-target="contacts">联系人</button>
         <button data-target="members">群成员</button>
@@ -140,6 +141,41 @@
             </label>
           </div>
           <button class="primary" type="submit">读取记录</button>
+        </form>
+      </section>
+
+      <section id="chat-summary" class="screen" data-title="聊天记录总结">
+        <form class="tool-form summary-form" data-command="history" data-result-mode="summary">
+          <div class="summary-form-intro">
+            <span>AI READY TRANSCRIPT</span>
+            <strong>把聊天整理成 AI 能直接理解的材料</strong>
+            <p>选择会话和日期后读取本机记录；网页不会把内容上传到任何外部服务。</p>
+          </div>
+          <div class="form-grid summary-form-grid">
+            <label class="full">选择聊天
+              <div id="summary-chat-combobox" class="summary-combobox">
+                <input id="summary-chat-search" type="search" role="combobox"
+                  aria-autocomplete="list" aria-controls="summary-chat-options"
+                  aria-expanded="false" autocomplete="off"
+                  placeholder="输入群名、联系人或账号进行搜索">
+                <input id="summary-chat-value" data-param="chat_name" type="hidden">
+                <div id="summary-chat-options" class="summary-chat-options"
+                  role="listbox" hidden></div>
+              </div>
+              <small id="summary-chat-hint">正在读取最近会话…</small>
+            </label>
+            <label>开始日期
+              <input class="summary-date" data-param="start_time" type="date" required>
+            </label>
+            <label>结束日期
+              <input class="summary-date" data-param="end_time" type="date" required>
+            </label>
+            <input data-param="limit" type="hidden" value="50000">
+          </div>
+          <div class="summary-submit-row">
+            <p>结果生成后，可复制完整材料，或只复制时间、发言人和消息正文。</p>
+            <button class="primary" type="submit">整理聊天记录</button>
+          </div>
         </form>
       </section>
 
@@ -341,6 +377,6 @@
       </section>
     </main>
   </div>
-  <script src="/static/app.js?v=20260728-invite-stats"></script>
+  <script src="/static/app.js?v=20260729-chat-summary"></script>
 </body>
 </html>

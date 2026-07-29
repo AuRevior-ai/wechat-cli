@@ -51,6 +51,64 @@ class BuildCliArgsTests(unittest.TestCase):
         self.assertIn("function renderInviteStats", js)
         self.assertIn("invite-ranking-table", css)
 
+    def test_results_are_saved_and_restored_per_screen(self):
+        js = (
+            ROOT / "wechat_cli" / "web" / "static" / "app.js"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("const screenResultStates = new Map();", js)
+        self.assertIn("function saveResultState(screenId)", js)
+        self.assertIn("function restoreResultState(screenId)", js)
+        self.assertIn("function setResult(payload, screenId", js)
+        self.assertIn("restoreResultState(id)", js)
+
+    def test_generic_result_fields_are_localized_to_chinese(self):
+        js = (
+            ROOT / "wechat_cli" / "web" / "static" / "app.js"
+        ).read_text(encoding="utf-8")
+        expected_labels = {
+            "chat": "聊天名称",
+            "username": "账号",
+            "is_group": "是否群聊",
+            "unread": "未读数量",
+            "last_message": "最后一条消息",
+            "msg_type": "消息类型",
+            "sender": "发送者",
+            "timestamp": "时间戳",
+            "time": "时间",
+        }
+
+        self.assertIn("const FIELD_LABELS = {", js)
+        for key, label in expected_labels.items():
+            self.assertIn(f'{key}: "{label}"', js)
+        self.assertIn("fieldLabel(key)", js)
+        self.assertIn('if (typeof value === "boolean") return value ? "是" : "否";', js)
+
+    def test_chat_summary_page_has_searchable_chat_picker_and_day_inputs(self):
+        html = (
+            ROOT / "wechat_cli" / "web" / "static" / "index.html"
+        ).read_text(encoding="utf-8")
+        js = (
+            ROOT / "wechat_cli" / "web" / "static" / "app.js"
+        ).read_text(encoding="utf-8")
+        css = (
+            ROOT / "wechat_cli" / "web" / "static" / "app.css"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn('data-target="chat-summary"', html)
+        self.assertIn('id="chat-summary"', html)
+        self.assertIn('data-result-mode="summary"', html)
+        self.assertIn('id="summary-chat-search"', html)
+        self.assertIn('id="summary-chat-options"', html)
+        self.assertEqual(html.count('class="summary-date" data-param='), 2)
+        self.assertIn('type="date"', html)
+        self.assertIn('data-param="limit" type="hidden" value="50000"', html)
+        self.assertIn("async function loadSummarySessions()", js)
+        self.assertIn("function formatSummaryCopy(data)", js)
+        self.assertIn("function formatSummaryKeyCopy(data)", js)
+        self.assertIn(".summary-combobox", css)
+        self.assertIn(".summary-result-hero", css)
+
     def test_builds_sessions_with_json_format(self):
         args = build_cli_args({
             "command": "sessions",
