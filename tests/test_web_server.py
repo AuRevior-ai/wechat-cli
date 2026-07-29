@@ -106,15 +106,21 @@ class AvatarApiTests(unittest.TestCase):
                 / "db_storage"
             )
         }
-        run_mock.return_value = {
-            "ok": True,
-            "data": {
-                "username": "wxid_owner",
-                "nick_name": "主人",
-                "remark": "",
-                "avatar": "https://wx.qlogo.cn/owner/132",
-            },
-        }
+        def contact_result(payload):
+            username = payload["params"]["detail"]
+            if username == "wxid_owner_fc40":
+                return {"ok": True, "data": None}
+            return {
+                "ok": True,
+                "data": {
+                    "username": "wxid_owner",
+                    "nick_name": "主人",
+                    "remark": "",
+                    "avatar": "https://wx.qlogo.cn/owner/132",
+                },
+            }
+
+        run_mock.side_effect = contact_result
 
         payload = web_server.profile_payload()
 
@@ -124,9 +130,43 @@ class AvatarApiTests(unittest.TestCase):
             payload["avatar_url"],
             "https://wx.qlogo.cn/owner/132",
         )
+        self.assertEqual(
+            [call.args[0]["params"]["detail"] for call in run_mock.call_args_list],
+            ["wxid_owner_fc40", "wxid_owner"],
+        )
+
+    @patch("wechat_cli.web.server.run_cli_command")
+    @patch("wechat_cli.web.server.status_payload")
+    def test_profile_preserves_real_username_that_looks_like_a_suffix(
+        self,
+        status_mock,
+        run_mock,
+    ):
+        status_mock.return_value = {
+            "db_dir": str(
+                Path("root")
+                / "xwechat_files"
+                / "wxid_abcd"
+                / "db_storage"
+            )
+        }
+        run_mock.return_value = {
+            "ok": True,
+            "data": {
+                "username": "wxid_abcd",
+                "nick_name": "完整账号",
+                "remark": "",
+                "avatar": "https://wx.qlogo.cn/full/132",
+            },
+        }
+
+        payload = web_server.profile_payload()
+
+        self.assertEqual(payload["username"], "wxid_abcd")
+        self.assertEqual(payload["display_name"], "完整账号")
         run_mock.assert_called_once_with({
             "command": "contacts",
-            "params": {"detail": "wxid_owner"},
+            "params": {"detail": "wxid_abcd"},
         })
 
 
@@ -207,6 +247,18 @@ class BuildCliArgsTests(unittest.TestCase):
         self.assertIn("avatar_url: payload.data.avatar_url || \"\"", js)
         self.assertIn("allowRemoteAvatars: true", js)
         self.assertIn("allowRemoteMedia: false", js)
+
+    def test_successful_initialization_refreshes_profile_and_session_choices(self):
+        js = (
+            ROOT / "wechat_cli" / "web" / "static" / "app.js"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("async function refreshAccountData()", js)
+        self.assertIn("summarySessionsLoaded = false;", js)
+        self.assertIn("await refreshAccountData();", js)
+        self.assertIn("loadProfile()", js)
+        self.assertIn("loadSummarySessions()", js)
+        self.assertIn("inviteGroupRetry.classList.add(\"hidden\")", js)
 
     def test_results_are_saved_and_restored_per_screen(self):
         js = (

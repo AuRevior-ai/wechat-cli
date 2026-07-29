@@ -406,23 +406,33 @@ def profile_payload() -> dict[str, str]:
 
     account_dir = os.path.basename(os.path.dirname(os.path.normpath(db_dir)))
     match = re.fullmatch(r"(.+?)_[0-9a-fA-F]{4,}", account_dir)
-    username = match.group(1) if match else account_dir
-    if not username:
+    candidates = [account_dir]
+    if match and match.group(1) != account_dir:
+        candidates.append(match.group(1))
+    if not account_dir:
         return {"username": "", "display_name": "", "avatar_url": ""}
 
-    result = run_cli_command({
-        "command": "contacts",
-        "params": {"detail": username},
-    })
-    data = result.get("data") if result.get("ok") else {}
-    if not isinstance(data, dict):
-        data = {}
-    display_name = str(data.get("remark") or data.get("nick_name") or username)
-    avatar_url = str(data.get("avatar") or data.get("avatar_url") or "")
+    for candidate in candidates:
+        result = run_cli_command({
+            "command": "contacts",
+            "params": {"detail": candidate},
+        })
+        data = result.get("data") if result.get("ok") else {}
+        if not isinstance(data, dict) or data.get("username") != candidate:
+            continue
+        return {
+            "username": candidate,
+            "display_name": str(
+                data.get("remark") or data.get("nick_name") or candidate
+            ),
+            "avatar_url": str(
+                data.get("avatar") or data.get("avatar_url") or ""
+            ),
+        }
     return {
-        "username": username,
-        "display_name": display_name,
-        "avatar_url": avatar_url,
+        "username": account_dir,
+        "display_name": account_dir,
+        "avatar_url": "",
     }
 
 

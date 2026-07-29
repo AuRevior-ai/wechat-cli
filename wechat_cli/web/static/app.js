@@ -356,6 +356,25 @@ async function loadProfile() {
   );
 }
 
+async function refreshAccountData() {
+  summarySessionsLoaded = false;
+  summarySessions = [];
+  summaryVisibleSessionIndexes = [];
+  inviteVisibleSessionIndexes = [];
+  if (summaryChatSearch) summaryChatSearch.value = "";
+  if (summaryChatValue) summaryChatValue.value = "";
+  if (summaryChatOptions) summaryChatOptions.innerHTML = "";
+  if (inviteGroupSearch) inviteGroupSearch.value = "";
+  if (inviteGroupValue) inviteGroupValue.value = "";
+  if (inviteGroupOptions) inviteGroupOptions.innerHTML = "";
+  if (summaryChatHint) summaryChatHint.textContent = "正在读取最近会话…";
+  if (inviteGroupHint) inviteGroupHint.textContent = "正在读取群聊列表…";
+  await Promise.allSettled([
+    loadProfile(),
+    loadSummarySessions(),
+  ]);
+}
+
 function setSummaryOptionsOpen(open) {
   if (!summaryChatOptions || !summaryChatSearch) return;
   summaryChatOptions.hidden = !open;
@@ -375,6 +394,7 @@ function renderSummarySessionOptions(query = "") {
     .slice(0, 80)
     .map(({ index }) => index);
   summaryActiveOption = -1;
+  summaryChatSearch?.setAttribute("aria-activedescendant", "");
 
   if (!summaryVisibleSessionIndexes.length) {
     summaryChatOptions.innerHTML = '<div class="summary-option-empty">没有匹配的会话</div>';
@@ -446,6 +466,7 @@ function renderInviteGroupOptions(query = "") {
     .slice(0, 80)
     .map(({ index }) => index);
   inviteActiveOption = -1;
+  inviteGroupSearch?.setAttribute("aria-activedescendant", "");
 
   if (!inviteVisibleSessionIndexes.length) {
     inviteGroupOptions.innerHTML = '<div class="summary-option-empty">没有匹配的群聊</div>';
@@ -496,6 +517,7 @@ async function loadSummarySessions() {
   if (!summaryChatSearch || !summaryChatOptions) return [];
   if (summaryChatHint) summaryChatHint.textContent = "正在读取最近会话…";
   if (summaryChatRetry) summaryChatRetry.classList.add("hidden");
+  if (inviteGroupRetry) inviteGroupRetry.classList.add("hidden");
   const payload = await fetchJson("/api/run", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -1091,6 +1113,8 @@ async function runForm(form) {
   if (payload.command === "init") {
     try {
       await refreshStatus(() => screenRequestVersions.get(screenId) === requestVersion);
+      if (screenRequestVersions.get(screenId) !== requestVersion) return;
+      await refreshAccountData();
       if (screenRequestVersions.get(screenId) !== requestVersion) return;
     } catch (error) {
       if (screenRequestVersions.get(screenId) !== requestVersion) return;
