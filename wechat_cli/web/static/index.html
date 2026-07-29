@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>WeChat CLI Web</title>
-  <link rel="stylesheet" href="/static/app.css?v=20260729-ai-package">
+  <link rel="stylesheet" href="/static/app.css?v=20260729-author-support">
 </head>
 <body>
   <div class="app-shell">
@@ -14,6 +14,7 @@
         <div>
           <strong>WeChat CLI Web</strong>
           <small id="profile-name">正在读取账号…</small>
+          <span class="brand-author">作者 Au Revior</span>
         </div>
       </div>
       <nav id="nav" class="nav">
@@ -25,6 +26,9 @@
         <button data-target="members">群聊成员统计和导出</button>
         <button data-target="stats">单个聊天数据统计</button>
         <button data-target="invite-stats">群聊成员邀请统计</button>
+        <button class="about-nav" data-target="about-support"><span>关于与支持</span>
+          <small>作者 Au Revior</small>
+        </button>
       </nav>
     </aside>
 
@@ -277,6 +281,42 @@
         </form>
       </section>
 
+      <section id="about-support" class="screen" data-title="关于与支持">
+        <div class="about-support">
+          <header class="about-support-hero">
+            <span>AUTHOR &amp; SUPPORT</span>
+            <h2>由 Au Revior 制作</h2>
+            <p>感谢使用 WeChat CLI Web。二维码仅在本机展示，不会上传网络。</p>
+          </header>
+          <div class="about-support-grid">
+            <article class="about-support-card contact">
+              <div>
+                <span class="about-card-kicker">CONTACT</span>
+                <h3>添加作者微信</h3>
+                <p>交流使用体验、问题反馈与功能建议。</p>
+              </div>
+              <a href="/static/au-revior-wechat.jpg" target="_blank" rel="noopener"
+                aria-label="查看 Au Revior 的微信二维码原图">
+                <img src="/static/au-revior-wechat.jpg"
+                  alt="Au Revior 的微信二维码" loading="lazy">
+              </a>
+            </article>
+            <article class="about-support-card payment">
+              <div>
+                <span class="about-card-kicker">SUPPORT</span>
+                <h3>支持作者</h3>
+                <p>如果这个工具帮助了你，可以自愿支持后续维护。</p>
+              </div>
+              <a href="/static/au-revior-payment.jpg" target="_blank" rel="noopener"
+                aria-label="查看 Au Revior 的微信收款码原图">
+                <img src="/static/au-revior-payment.jpg"
+                  alt="Au Revior 的微信收款码" loading="lazy">
+              </a>
+            </article>
+          </div>
+        </div>
+      </section>
+
       <section class="result-area">
         <div class="result-head">
           <div>
@@ -293,6 +333,6 @@
       </section>
     </main>
   </div>
-  <script src="/static/app.js?v=20260729-ai-package"></script>
+  <script src="/static/app.js?v=20260729-author-support"></script>
 </body>
 </html>

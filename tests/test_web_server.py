@@ -627,7 +627,7 @@ class BuildCliArgsTests(unittest.TestCase):
         self.assertIn(".session-picker", css)
         self.assertIn(".summary-result-hero", css)
 
-    def test_web_navigation_is_reduced_to_eight_focused_entries(self):
+    def test_web_navigation_has_eight_tools_and_author_support(self):
         html = (
             ROOT / "wechat_cli" / "web" / "static" / "index.html"
         ).read_text(encoding="utf-8")
@@ -640,6 +640,10 @@ class BuildCliArgsTests(unittest.TestCase):
             '<button data-target="members">群聊成员统计和导出</button>',
             '<button data-target="stats">单个聊天数据统计</button>',
             '<button data-target="invite-stats">群聊成员邀请统计</button>',
+            (
+                '<button class="about-nav" data-target="about-support">'
+                '<span>关于与支持</span>'
+            ),
         ]
 
         self.assertEqual(html.count("data-target="), len(expected_buttons))
@@ -649,6 +653,36 @@ class BuildCliArgsTests(unittest.TestCase):
             self.assertNotIn(f'id="{removed_id}" class="screen', html)
         self.assertNotIn("快捷操作", html)
         self.assertIn("统计范围：从微信数据库记载的日子开始", html)
+        self.assertLess(
+            html.index('data-target="invite-stats"'),
+            html.index('data-target="about-support"'),
+        )
+
+    def test_web_has_author_credit_and_support_screen(self):
+        html = (
+            ROOT / "wechat_cli" / "web" / "static" / "index.html"
+        ).read_text(encoding="utf-8")
+        css = (
+            ROOT / "wechat_cli" / "web" / "static" / "app.css"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn(
+            'class="brand-author">作者 Au Revior</span>',
+            html,
+        )
+        self.assertIn('data-target="about-support"', html)
+        self.assertIn(
+            'id="about-support" class="screen" data-title="关于与支持"',
+            html,
+        )
+        self.assertIn("/static/au-revior-wechat.jpg", html)
+        self.assertIn("/static/au-revior-payment.jpg", html)
+        self.assertIn('alt="Au Revior 的微信二维码"', html)
+        self.assertIn('alt="Au Revior 的微信收款码"', html)
+        self.assertIn('target="_blank" rel="noopener"', html)
+        self.assertIn(".about-support-grid", css)
+        self.assertIn(".about-support-card", css)
+        self.assertIn(".about-nav", css)
 
     def test_init_status_refresh_obeys_latest_request_version(self):
         js = (
