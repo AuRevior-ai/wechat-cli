@@ -14,6 +14,7 @@ import zstandard as zstd
 
 from .key_utils import key_path_variants
 from .media import export_media_file
+from .forwarded import format_forwarded_text, parse_forwarded_message
 
 _zstd_dctx = zstd.ZstdDecompressor()
 _XML_UNSAFE_RE = re.compile(r'<!DOCTYPE|<!ENTITY', re.IGNORECASE)
@@ -123,7 +124,9 @@ def _split_msg_type(t):
 
 
 def format_msg_type(t):
-    base_type, _ = _split_msg_type(t)
+    base_type, sub_type = _split_msg_type(t)
+    if base_type == 49 and sub_type == 19:
+        return "合并转发"
     return {
         1: '文本', 3: '图片', 34: '语音', 42: '名片',
         43: '视频', 47: '表情', 48: '位置', 49: '链接/文件',
@@ -196,6 +199,9 @@ def _format_app_message_text(content, local_type, is_group, chat_username, chat_
     title = _collapse_text(appmsg.findtext('title') or '')
     app_type = _parse_int((appmsg.findtext('type') or '').strip(), _parse_int(sub_type, 0))
 
+    if app_type == 19:
+        forwarded = parse_forwarded_message(content)
+        return format_forwarded_text(forwarded) if forwarded else "[合并转发]"
     if app_type == 57:
         ref = appmsg.find('.//refermsg')
         ref_content = ''
@@ -504,6 +510,8 @@ def _message_kind(local_type):
         return "location"
     if base_type == 49 and sub_type == 6:
         return "file"
+    if base_type == 49 and sub_type == 19:
+        return "forwarded"
     if base_type == 49:
         return "link"
     if base_type == 50:
@@ -771,8 +779,10 @@ def _build_history_item(row, ctx, names, id_to_username, display_name_fn, avatar
     sender_username, sender_label = _resolve_sender_identity(
         real_sender_id, sender_from_content, ctx['is_group'], ctx['username'], ctx['display_name'], names, id_to_username, display_name_fn
     )
-    media_payload = None
     base_type, _ = _split_msg_type(local_type)
+    media_payload = None
+    _, parsed_content = _parse_message_content(content, local_type, ctx['is_group'])
+    forwarded = parse_forwarded_message(parsed_content) if base_type == 49 else None
     if base_type == 47:
         media_payload = _extract_sticker_payload(content)
     if resolve_media and db_dir and content:
@@ -798,13 +808,15 @@ def _build_history_item(row, ctx, names, id_to_username, display_name_fn, avatar
         "sender_username": sender_username,
         "sender_avatar_url": avatars.get(sender_username, ''),
         "is_self": sender_label == 'me',
-        "type": _message_kind(local_type),
-        "type_label": format_msg_type(local_type),
+        "type": "forwarded" if forwarded else _message_kind(local_type),
+        "type_label": "合并转发" if forwarded else format_msg_type(local_type),
         "text": text,
         "line": line,
     }
     if media_payload:
         item["media"] = media_payload
+    if forwarded:
+        item["forwarded"] = forwarded
     return item
 
 
