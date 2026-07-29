@@ -44,6 +44,12 @@ AI_PACKAGE_DIR = os.path.join(STATE_DIR, "ai-packages")
 AI_PACKAGE_EXPIRES_SECONDS = 10 * 60
 _AI_PACKAGE_DOWNLOADS: dict[str, dict[str, Any]] = {}
 _AI_PACKAGE_DOWNLOADS_LOCK = Lock()
+STATIC_ASSET_NAMES = {
+    "app.css",
+    "app.js",
+    "au-revior-wechat.jpg",
+    "au-revior-payment.jpg",
+}
 
 
 class _AvatarRedirectHandler(HTTPRedirectHandler):
@@ -782,7 +788,7 @@ class WeChatWebHandler(BaseHTTPRequestHandler):
             return
         if parsed.path.startswith("/static/"):
             name = os.path.basename(parsed.path)
-            if name not in {"app.css", "app.js"}:
+            if name not in STATIC_ASSET_NAMES:
                 self.send_error(HTTPStatus.NOT_FOUND)
                 return
             content_type = mimetypes.guess_type(name)[0] or "application/octet-stream"

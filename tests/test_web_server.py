@@ -174,6 +174,40 @@ class AvatarApiTests(unittest.TestCase):
 
 
 class BuildCliArgsTests(unittest.TestCase):
+    def test_author_qr_assets_are_explicit_local_static_resources(self):
+        expected = {
+            "au-revior-wechat.jpg": (
+                ROOT
+                / "wechat_cli"
+                / "web"
+                / "static"
+                / "au-revior-wechat.jpg"
+            ),
+            "au-revior-payment.jpg": (
+                ROOT
+                / "wechat_cli"
+                / "web"
+                / "static"
+                / "au-revior-payment.jpg"
+            ),
+        }
+        for source in expected.values():
+            self.assertTrue(source.is_file())
+            self.assertGreater(source.stat().st_size, 10_000)
+            self.assertEqual(source.read_bytes()[:2], b"\xff\xd8")
+
+    def test_static_asset_whitelist_contains_only_known_web_files(self):
+        self.assertEqual(
+            web_server.STATIC_ASSET_NAMES,
+            {
+                "app.css",
+                "app.js",
+                "au-revior-wechat.jpg",
+                "au-revior-payment.jpg",
+            },
+        )
+        self.assertNotIn("README.md", web_server.STATIC_ASSET_NAMES)
+
     def test_local_request_source_rejects_dns_rebinding_and_foreign_origin(self):
         self.assertTrue(web_server._is_local_request_source(
             "127.0.0.1:8787", "", 8787, require_origin=False
