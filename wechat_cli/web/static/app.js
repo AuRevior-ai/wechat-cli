@@ -204,11 +204,7 @@ function readForm(form) {
     params[name] = value;
   });
   if (form.dataset.command === "history") {
-    if (form.dataset.resultMode === "summary") {
-      params.media = false;
-    } else {
-      params.media = true;
-    }
+    params.media = true;
   }
   if (form.dataset.command === "invite-stats") {
     params.bind_identity = String(params.bind_identity || "")
@@ -716,7 +712,14 @@ function summarySender(item) {
 function summaryMessageLine(item) {
   const type = TYPE_LABELS[item?.type] || item?.type_label || item?.type || "消息";
   const text = String(item?.text || "").trim() || `[${type}]`;
-  return `[${item?.time || "时间未知"}] ${summarySender(item)}（${type}）：${text}`;
+  const lines = [
+    `[${item?.time || "时间未知"}] ${summarySender(item)}（${type}）：${text}`,
+  ];
+  const transcript = String(item?.transcript || "").trim();
+  if (transcript) lines.push(`  语音转文字（机器识别）：${transcript}`);
+  const assetPath = String(item?.asset_path || "").trim();
+  if (assetPath.startsWith("素材/")) lines.push(`  素材：${assetPath}`);
+  return lines.join("\n");
 }
 
 function formatSummaryCopy(data) {

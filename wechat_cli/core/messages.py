@@ -274,6 +274,7 @@ def _extract_sticker_payload(content):
         "kind": "sticker",
         "url": emoji.attrib.get("cdnurl") or emoji.attrib.get("thumburl") or emoji.attrib.get("encrypturl") or "",
         "md5": emoji.attrib.get("md5") or emoji.attrib.get("androidmd5") or "",
+        "aes_key": emoji.attrib.get("aeskey") or "",
         "product_id": emoji.attrib.get("productid") or "",
     }
     return {key: value for key, value in payload.items() if value != ""}

@@ -1,4 +1,5 @@
 import json
+import hashlib
 import tempfile
 import unittest
 import wave
@@ -168,6 +169,53 @@ class AiPackageTests(unittest.TestCase):
             result.messages[1]["asset_path"],
         )
 
+    def test_packages_image_inside_nested_forward(self):
+        item = {
+            **_base_item(8, "forwarded", "[合并转发] 内层图片"),
+            "forwarded": {
+                "title": "内层图片",
+                "truncated": False,
+                "items": [{
+                    "kind": "forwarded",
+                    "datatype": 17,
+                    "sender": "小陶",
+                    "time": "2026-07-29 10:00",
+                    "text": "继续转发",
+                    "title": "",
+                    "children": [{
+                        "kind": "image",
+                        "datatype": 2,
+                        "sender": "陈子明",
+                        "time": "2026-07-29 10:01",
+                        "text": "图片",
+                        "title": "",
+                        "children": [],
+                        "media": {
+                            "kind": "image",
+                            "url": "https://wx.qlogo.cn/nested.png",
+                            "md5": hashlib.md5(PNG_BYTES).hexdigest(),
+                        },
+                    }],
+                }],
+            },
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            result = build_ai_package(
+                _chat(),
+                [item],
+                Path(tmp) / "nested-forward.zip",
+                remote_image_loader=lambda _url: (PNG_BYTES, "image/png"),
+                transcribe_voice=False,
+            )
+            with ZipFile(result.path) as archive:
+                transcript = archive.read("聊天记录.txt").decode("utf-8")
+                manifest = json.loads(archive.read("清单.json"))
+
+        nested = manifest["messages"][0]["forwarded"]["items"][0]["children"][0]
+        self.assertEqual(result.asset_count, 1)
+        self.assertTrue(nested["asset_path"].startswith("素材/"))
+        self.assertIn(nested["asset_path"], transcript)
+
     def test_keeps_package_when_one_asset_fails(self):
         item = {
             **_base_item(9, "sticker", "[表情] unavailable"),
@@ -197,6 +245,28 @@ class AiPackageTests(unittest.TestCase):
         self.assertIn("下载失败", result.failures[0]["error"])
         self.assertEqual(manifest["failures"], result.failures)
 
+    def test_initial_query_failures_are_saved_in_manifest(self):
+        initial = [{
+            "message_id": None,
+            "time": "",
+            "type": "",
+            "phase": "query",
+            "error": "message_1.db: 读取失败",
+        }]
+        with tempfile.TemporaryDirectory() as tmp:
+            result = build_ai_package(
+                _chat(),
+                [],
+                Path(tmp) / "query-failure.zip",
+                initial_failures=initial,
+                transcribe_voice=False,
+            )
+            with ZipFile(result.path) as archive:
+                manifest = json.loads(archive.read("清单.json"))
+
+        self.assertEqual(manifest["failures"], initial)
+        self.assertEqual(result.failures, initial)
+
     def test_rejects_non_wechat_sticker_host_before_network(self):
         with self.assertRaisesRegex(PermissionError, "微信官方"):
             download_remote_image("https://example.com/sticker.gif")
@@ -205,6 +275,64 @@ class AiPackageTests(unittest.TestCase):
         url = "http://wxapp.tc.qq.com/path/sticker.gif"
 
         self.assertEqual(_validate_remote_image_url(url), url)
+
+    def test_rejects_http_for_non_legacy_wechat_image_hosts(self):
+        with self.assertRaisesRegex(PermissionError, "HTTPS"):
+            _validate_remote_image_url("http://wx.qlogo.cn/sticker.gif")
+
+    def test_uses_local_sticker_cache_before_network(self):
+        md5 = "0123456789abcdef0123456789abcdef"
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            cached = root / "cache" / "2026-07" / "Emoticon" / "01" / md5
+            cached.parent.mkdir(parents=True)
+            cached.write_bytes(GIF_BYTES)
+            item = {
+                **_base_item(10, "sticker", f"[表情] {md5}"),
+                "media": {
+                    "kind": "sticker",
+                    "url": "https://wx.qlogo.cn/should-not-download.gif",
+                    "md5": md5,
+                },
+            }
+
+            result = build_ai_package(
+                _chat(),
+                [item],
+                root / "local-sticker.zip",
+                db_dir=str(root / "db_storage"),
+                remote_image_loader=lambda _url: self.fail("不应访问网络"),
+                transcribe_voice=False,
+            )
+            with ZipFile(result.path) as archive:
+                asset_name = next(
+                    name for name in archive.namelist() if name.startswith("素材/")
+                )
+
+        self.assertTrue(asset_name.endswith(".gif"))
+        self.assertEqual(result.asset_count, 1)
+
+    def test_rejects_downloaded_sticker_when_declared_md5_mismatches(self):
+        md5 = "0123456789abcdef0123456789abcdef"
+        item = {
+            **_base_item(11, "sticker", f"[表情] {md5}"),
+            "media": {
+                "kind": "sticker",
+                "url": "https://wx.qlogo.cn/sticker.gif",
+                "md5": md5,
+            },
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            result = build_ai_package(
+                _chat(),
+                [item],
+                Path(tmp) / "mismatch.zip",
+                remote_image_loader=lambda _url: (GIF_BYTES, "image/gif"),
+                transcribe_voice=False,
+            )
+
+        self.assertEqual(result.asset_count, 0)
+        self.assertIn("MD5", result.failures[0]["error"])
 
     def test_uses_jpeg_thumbnail_when_standard_image_is_wxgf(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -10,7 +10,15 @@ from wechat_cli.core.forwarded import (
 from wechat_cli.core.messages import _build_history_item
 
 
-def _record_item(datatype, sender, timestamp, text="", title="", recordxml=""):
+def _record_item(
+    datatype,
+    sender,
+    timestamp,
+    text="",
+    title="",
+    recordxml="",
+    extra="",
+):
     fields = [
         f'<sourcename>{html.escape(sender)}</sourcename>',
         f'<sourcetime>{html.escape(timestamp)}</sourcetime>',
@@ -20,6 +28,8 @@ def _record_item(datatype, sender, timestamp, text="", title="", recordxml=""):
         fields.append(f'<datatitle>{html.escape(title)}</datatitle>')
     if recordxml:
         fields.append(f'<recordxml>{html.escape(recordxml)}</recordxml>')
+    if extra:
+        fields.append(extra)
     return f'<dataitem datatype="{datatype}">{"".join(fields)}</dataitem>'
 
 
@@ -64,6 +74,32 @@ class ForwardedMessageTests(unittest.TestCase):
 
         self.assertEqual(parsed["items"][0]["kind"], "type_99")
         self.assertEqual(parsed["items"][0]["text"], "保留这个描述")
+
+    def test_preserves_nested_media_references(self):
+        content = _appmsg_type_19([
+            _record_item(
+                2,
+                "小陶",
+                "2026-07-29 10:03",
+                "一张图片",
+                extra=(
+                    "<cdndataurl>https://wx.qlogo.cn/nested.jpg</cdndataurl>"
+                    "<fullmd5>0123456789abcdef0123456789abcdef</fullmd5>"
+                    "<srcChatname>room@chatroom</srcChatname>"
+                    "<srcMsgLocalid>88</srcMsgLocalid>"
+                    "<srcMsgCreateTime>1785290580</srcMsgCreateTime>"
+                ),
+            ),
+        ])
+
+        parsed = parse_forwarded_message(content)
+        media = parsed["items"][0]["media"]
+
+        self.assertEqual(media["kind"], "image")
+        self.assertEqual(media["url"], "https://wx.qlogo.cn/nested.jpg")
+        self.assertEqual(media["md5"], "0123456789abcdef0123456789abcdef")
+        self.assertEqual(media["source_chat_username"], "room@chatroom")
+        self.assertEqual(media["source_local_id"], 88)
 
     def test_stops_at_depth_limit(self):
         deepest = _record_xml([_record_item(1, "甲", "2026-07-29 10:00", "最深层")])

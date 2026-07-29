@@ -18,6 +18,9 @@ from urllib.parse import urlparse, urlunparse
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 from zipfile import ZIP_DEFLATED, ZipFile
 
+from Crypto.Cipher import AES
+from Crypto.Util.Padding import unpad
+
 from .asr import OfflineAsrManager
 from .forwarded import format_forwarded_text
 from .media import image_content_type, read_media_file_payload
@@ -67,6 +70,10 @@ def _validate_remote_image_url(url: str) -> str:
     )
     if parsed.scheme not in {"http", "https"} or not allowed:
         raise PermissionError("表情素材不是允许的微信官方图片地址")
+    if parsed.scheme == "http" and not (
+        host == "tc.qq.com" or host.endswith(".tc.qq.com")
+    ):
+        raise PermissionError("该微信图片地址必须使用 HTTPS")
     if parsed.username or parsed.password or parsed.port not in {None, 80, 443}:
         raise PermissionError("表情素材地址包含不允许的连接信息")
     return urlunparse(parsed)
@@ -103,6 +110,65 @@ def download_remote_image(url: str) -> tuple[bytes, str]:
     if not detected:
         raise ValueError("微信表情内容无法识别为图片")
     return raw, detected
+
+
+def _decode_cached_sticker(
+    raw: bytes,
+    filename: str,
+    aes_key: str = "",
+) -> tuple[bytes, str] | None:
+    detected = image_content_type(raw, filename)
+    if detected:
+        return raw, detected
+    if (
+        len(raw) % 16
+        or not re.fullmatch(r"[0-9A-Fa-f]{32}", aes_key or "")
+    ):
+        return None
+    try:
+        clear = AES.new(bytes.fromhex(aes_key), AES.MODE_ECB).decrypt(raw)
+        try:
+            clear = unpad(clear, AES.block_size)
+        except ValueError:
+            pass
+    except (ValueError, TypeError):
+        return None
+    detected = image_content_type(clear, filename)
+    return (clear, detected) if detected else None
+
+
+def _find_local_sticker(
+    db_dir: str,
+    md5: str,
+    aes_key: str = "",
+) -> tuple[bytes, str] | None:
+    if not db_dir or not re.fullmatch(r"[0-9A-Fa-f]{32}", md5 or ""):
+        return None
+    account_root = Path(db_dir).resolve().parent
+    cache_root = account_root / "cache"
+    if not cache_root.is_dir():
+        return None
+    for target in cache_root.glob(
+        f"*/Emoticon/{md5[:2].lower()}/{md5.lower()}*"
+    ):
+        try:
+            resolved = target.resolve()
+            if (
+                resolved.parent.parent.parent.parent != cache_root.resolve()
+                or not resolved.is_file()
+                or resolved.stat().st_size > REMOTE_IMAGE_MAX_BYTES
+            ):
+                continue
+            decoded = _decode_cached_sticker(
+                resolved.read_bytes(),
+                resolved.name,
+                aes_key,
+            )
+            if decoded:
+                return decoded
+        except OSError:
+            continue
+    return None
 
 
 def _safe_error(exc: Exception, source: str = "") -> str:
@@ -319,6 +385,7 @@ def build_ai_package(
     start_time: str = "",
     end_time: str = "",
     transcribe_voice: bool = True,
+    initial_failures: list[dict[str, Any]] | None = None,
     image_aes_key=None,
     image_xor_key=None,
     remote_image_loader: Callable[[str], tuple[bytes, str]] = download_remote_image,
@@ -337,7 +404,7 @@ def build_ai_package(
     messages = copy.deepcopy(items)
     assets: list[dict[str, Any]] = []
     asset_by_hash: dict[str, dict[str, Any]] = {}
-    failures: list[dict[str, Any]] = []
+    failures: list[dict[str, Any]] = copy.deepcopy(initial_failures or [])
     transcription_count = 0
     asr_manager = None
 
@@ -384,6 +451,165 @@ def build_ai_package(
                     item["asset_path"] = relative
                     return relative
 
+                def materialize_forwarded_items(
+                    forwarded_items,
+                    parent_item,
+                    lineage="forward",
+                ):
+                    nonlocal asr_manager, transcription_count
+                    for nested_index, nested in enumerate(forwarded_items or [], 1):
+                        nested_kind = nested.get("kind") or ""
+                        media = nested.get("media") or {}
+                        nested_id = (
+                            media.get("data_id")
+                            or media.get("source_local_id")
+                            or f"{lineage}-{nested_index}"
+                        )
+                        proxy = {
+                            "id": f"{parent_item.get('id')}-{nested_id}",
+                            "timestamp": (
+                                media.get("source_create_time")
+                                or parent_item.get("timestamp")
+                                or 0
+                            ),
+                            "time": nested.get("time") or parent_item.get("time") or "",
+                            "type": nested_kind,
+                        }
+                        try:
+                            if nested_kind in {"image", "file", "video"}:
+                                if media.get("path"):
+                                    payload = _local_ai_media_payload(
+                                        str(media["path"]),
+                                        kind=nested_kind,
+                                        db_dir=db_dir,
+                                        image_aes_key=image_aes_key,
+                                        image_xor_key=image_xor_key,
+                                    )
+                                    add_asset(
+                                        proxy,
+                                        payload["body"],
+                                        f"forwarded_{nested_kind}",
+                                        payload["content_type"],
+                                        media.get("filename") or payload["filename"],
+                                    )
+                                elif nested_kind == "image" and media.get("url"):
+                                    raw, content_type = remote_image_loader(
+                                        str(media["url"])
+                                    )
+                                    declared_md5 = str(media.get("md5") or "")
+                                    if (
+                                        re.fullmatch(
+                                            r"[0-9A-Fa-f]{32}",
+                                            declared_md5,
+                                        )
+                                        and hashlib.md5(raw).hexdigest().lower()
+                                        != declared_md5.lower()
+                                    ):
+                                        raise ValueError(
+                                            "合并转发图片 MD5 校验失败"
+                                        )
+                                    add_asset(
+                                        proxy,
+                                        raw,
+                                        "forwarded_image",
+                                        content_type,
+                                        media.get("filename") or "forwarded-image",
+                                    )
+                                else:
+                                    raise FileNotFoundError(
+                                        "合并转发素材没有可用的本地文件"
+                                    )
+                            elif nested_kind == "sticker":
+                                cached = _find_local_sticker(
+                                    db_dir,
+                                    str(media.get("md5") or ""),
+                                    str(media.get("aes_key") or ""),
+                                )
+                                if cached:
+                                    raw, content_type = cached
+                                elif media.get("url"):
+                                    raw, content_type = remote_image_loader(
+                                        str(media["url"])
+                                    )
+                                else:
+                                    raise FileNotFoundError(
+                                        "合并转发表情没有可用素材"
+                                    )
+                                add_asset(
+                                    proxy,
+                                    raw,
+                                    "forwarded_sticker",
+                                    content_type,
+                                    media.get("filename") or "forwarded-sticker",
+                                )
+                            elif nested_kind == "voice":
+                                local_id = int(media.get("source_local_id") or 0)
+                                create_time = int(
+                                    media.get("source_create_time")
+                                    or proxy["timestamp"]
+                                    or 0
+                                )
+                                source_chat = (
+                                    media.get("source_chat_username")
+                                    or parent_item.get("chat_username")
+                                    or chat.get("username")
+                                    or ""
+                                )
+                                if not local_id:
+                                    raise FileNotFoundError(
+                                        "合并转发语音缺少本地消息编号"
+                                    )
+                                record = voice_finder(
+                                    media_db_paths or [],
+                                    source_chat,
+                                    local_id,
+                                    create_time,
+                                )
+                                if record is None:
+                                    raise FileNotFoundError(
+                                        "微信语音数据库中没有找到合并转发音频"
+                                    )
+                                wav_path = work_dir / (
+                                    f"forwarded-voice-{proxy['id']}.wav"
+                                )
+                                voice_decoder(record.data, wav_path)
+                                add_asset(
+                                    proxy,
+                                    wav_path.read_bytes(),
+                                    "forwarded_voice",
+                                    "audio/wav",
+                                    wav_path.name,
+                                )
+                                if transcribe_voice:
+                                    if transcriber is None:
+                                        if asr_manager is None:
+                                            asr_manager = OfflineAsrManager(
+                                                progress=progress
+                                            )
+                                        transcript = asr_manager.transcribe(
+                                            wav_path
+                                        )
+                                    else:
+                                        transcript = transcriber(wav_path)
+                                    nested["transcript"] = str(transcript).strip()
+                                    if nested["transcript"]:
+                                        transcription_count += 1
+                        except Exception as exc:
+                            record_failure(proxy, "forwarded_media", exc)
+                        if proxy.get("asset_path"):
+                            nested["asset_path"] = proxy["asset_path"]
+                        if media:
+                            nested["media"] = {
+                                key: value
+                                for key, value in media.items()
+                                if key not in {"url", "path", "aes_key"}
+                            }
+                        materialize_forwarded_items(
+                            nested.get("children") or [],
+                            parent_item,
+                            f"{lineage}-{nested_index}",
+                        )
+
                 for index, item in enumerate(messages, 1):
                     progress(f"正在准备第 {index}/{len(messages)} 条消息")
                     media = item.get("media") or {}
@@ -407,9 +633,33 @@ def build_ai_package(
                             )
                         except Exception as exc:
                             record_failure(item, "local_media", exc, source)
-                    elif kind == "sticker" and media.get("url"):
+                    elif kind == "sticker":
                         try:
-                            raw, content_type = remote_image_loader(str(media["url"]))
+                            cached = _find_local_sticker(
+                                db_dir,
+                                str(media.get("md5") or ""),
+                                str(media.get("aes_key") or ""),
+                            )
+                            if cached:
+                                raw, content_type = cached
+                            elif media.get("url"):
+                                raw, content_type = remote_image_loader(
+                                    str(media["url"])
+                                )
+                                declared_md5 = str(media.get("md5") or "")
+                                if (
+                                    re.fullmatch(
+                                        r"[0-9A-Fa-f]{32}",
+                                        declared_md5,
+                                    )
+                                    and hashlib.md5(raw).hexdigest().lower()
+                                    != declared_md5.lower()
+                                ):
+                                    raise ValueError("微信表情素材 MD5 校验失败")
+                            else:
+                                raise FileNotFoundError(
+                                    "本地缓存和微信素材地址均不可用"
+                                )
                             add_asset(
                                 item,
                                 raw,
@@ -418,7 +668,7 @@ def build_ai_package(
                                 media.get("md5") or "sticker",
                             )
                         except Exception as exc:
-                            record_failure(item, "remote_sticker", exc)
+                            record_failure(item, "sticker", exc)
 
                     if kind == "voice":
                         record = None
@@ -458,6 +708,11 @@ def build_ai_package(
                                     transcription_count += 1
                             except Exception as exc:
                                 record_failure(item, "voice_transcription", exc)
+                    if kind == "forwarded" and item.get("forwarded"):
+                        materialize_forwarded_items(
+                            item["forwarded"].get("items") or [],
+                            item,
+                        )
 
                 manifest_messages = [_manifest_message(item) for item in messages]
                 key_copy_text = format_key_copy_text(

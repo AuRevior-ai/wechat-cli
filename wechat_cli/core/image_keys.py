@@ -111,7 +111,7 @@ def scan_buffers_for_image_key(
 
 
 def derive_image_xor_key(paths: Iterable[str | os.PathLike[str]]) -> int | None:
-    pairs = []
+    keys = []
     for raw_path in paths:
         path = Path(raw_path)
         try:
@@ -123,14 +123,13 @@ def derive_image_xor_key(paths: Iterable[str | os.PathLike[str]]) -> int | None:
         except OSError:
             continue
         if len(tail) == 2:
-            pairs.append((tail[0], tail[1]))
-    if not pairs:
+            first_key = tail[0] ^ 0xFF
+            second_key = tail[1] ^ 0xD9
+            if first_key == second_key:
+                keys.append(first_key)
+    if not keys:
         return None
-    first, second = Counter(pairs).most_common(1)[0][0]
-    key = first ^ 0xFF
-    if second ^ 0xD9 != key:
-        return key
-    return key
+    return Counter(keys).most_common(1)[0][0]
 
 
 def find_v2_image_samples(
@@ -157,7 +156,10 @@ def find_v2_image_samples(
     return valid[:limit]
 
 
-def _ciphertext_templates(paths: Iterable[Path], limit: int = 4) -> list[bytes]:
+def _ciphertext_templates(
+    paths: Iterable[Path],
+    limit: int | None = None,
+) -> list[bytes]:
     templates = []
     seen = set()
     for path in paths:
@@ -170,9 +172,16 @@ def _ciphertext_templates(paths: Iterable[Path], limit: int = 4) -> list[bytes]:
         if len(block) == 16 and block not in seen:
             seen.add(block)
             templates.append(block)
-            if len(templates) >= limit:
+            if limit is not None and len(templates) >= limit:
                 break
     return templates
+
+
+def _memory_scan_phases():
+    return (
+        ("可写内存", {0x04, 0x40}),
+        ("其余可读内存", None),
+    )
 
 
 def _windows_regions(handle):
@@ -239,8 +248,7 @@ def scan_windows_image_keys(
             continue
         try:
             regions = list(_windows_regions(handle))
-            phases = (("可写内存", {0x04, 0x40}),)
-            for phase_name, protection_filter in phases:
+            for phase_name, protection_filter in _memory_scan_phases():
                 emit(f"正在扫描 Weixin.exe {phase_name}中的图片密钥")
                 for base, size, protection in regions:
                     if time.monotonic() - started >= max_seconds:

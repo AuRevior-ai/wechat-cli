@@ -79,6 +79,44 @@ def _record_items_root(value: str) -> ET.Element | None:
     return root.find(".//datalist")
 
 
+def _first_text(node: ET.Element, *names: str) -> str:
+    for name in names:
+        value = node.findtext(name)
+        if value:
+            return _collapse(value)
+    return ""
+
+
+def _media_payload(node: ET.Element, kind: str) -> dict[str, Any] | None:
+    if kind not in {"image", "voice", "file", "video", "sticker"}:
+        return None
+    payload: dict[str, Any] = {
+        "kind": kind,
+        "data_id": _collapse(node.attrib.get("dataid") or ""),
+        "url": _first_text(
+            node,
+            "cdndataurl",
+            "cdnthumburl",
+            "stream_data/stream_dataurl",
+        ),
+        "path": _first_text(node, "datasourcepath", "thumbsourcepath"),
+        "filename": _first_text(node, "datatitle", "filename"),
+        "md5": _first_text(node, "fullmd5", "thumbfullmd5"),
+        "aes_key": _first_text(node, "cdndatakey", "cdnthumbkey"),
+        "source_chat_username": _first_text(node, "srcChatname"),
+        "source_local_id": _parse_int(_first_text(node, "srcMsgLocalid"), 0),
+        "source_create_time": _parse_int(
+            _first_text(node, "srcMsgCreateTime"),
+            0,
+        ),
+    }
+    return {
+        key: value
+        for key, value in payload.items()
+        if value not in {"", 0, None}
+    }
+
+
 def _parse_items(
     datalist: ET.Element | None,
     depth: int,
@@ -111,6 +149,9 @@ def _parse_items(
             "title": title,
             "children": [],
         }
+        media = _media_payload(node, kind)
+        if media:
+            item["media"] = media
 
         if datatype == 17:
             record_node = node.find("recordxml")
@@ -174,6 +215,10 @@ def _format_item(item: dict[str, Any], depth: int) -> list[str]:
     label = _TYPE_LABELS.get(kind, f"类型 {item.get('datatype', 0)}")
     body = item.get("title") or item.get("text") or f"[{label}]"
     lines = [f"{indent}- [{time}] {sender}（{label}）：{body}"]
+    if item.get("transcript"):
+        lines.append(f"{indent}  语音转文字（机器识别）：{item['transcript']}")
+    if item.get("asset_path"):
+        lines.append(f"{indent}  素材：{item['asset_path']}")
     for child in item.get("children") or []:
         lines.extend(_format_item(child, depth + 1))
     return lines

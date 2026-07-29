@@ -12,6 +12,7 @@ from ..core.messages import (
     parse_time_range,
     resolve_chat_context,
 )
+from ..core.stickers import enrich_sticker_media, load_sticker_metadata
 from ..core.voice import decrypted_media_db_paths
 from ..output.formatter import output
 
@@ -28,7 +29,8 @@ from ..output.formatter import output
     help="AI 资料压缩包保存位置",
 )
 @click.option(
-    "--transcribe/--no-transcribe",
+    "--transcribe-voice/--no-transcribe-voice",
+    "transcribe",
     default=True,
     help="是否离线识别语音（默认识别）",
 )
@@ -83,6 +85,7 @@ def ai_package(
         db_dir=app.db_dir,
         media_db_paths=media_db_paths,
     )
+    enrich_sticker_media(items, load_sticker_metadata(app.cache))
 
     def progress(message):
         click.echo(message, err=True)
@@ -100,6 +103,13 @@ def ai_package(
         progress=progress,
     )
     image_aes_key, image_xor_key = image_keys or (None, None)
+    initial_failures = [{
+        "message_id": None,
+        "time": "",
+        "type": "",
+        "phase": "query",
+        "error": str(failure),
+    } for failure in query_failures]
     result = build_ai_package(
         chat_ctx,
         items,
@@ -109,16 +119,9 @@ def ai_package(
         start_time=start_time,
         end_time=end_time,
         transcribe_voice=transcribe,
+        initial_failures=initial_failures,
         image_aes_key=image_aes_key,
         image_xor_key=image_xor_key,
         progress=progress,
     )
-    if query_failures:
-        result.failures.extend({
-            "message_id": None,
-            "time": "",
-            "type": "",
-            "phase": "query",
-            "error": str(failure),
-        } for failure in query_failures)
     output(result.to_dict(include_messages=include_copy_data), "json")

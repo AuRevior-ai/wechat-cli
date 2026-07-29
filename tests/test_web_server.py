@@ -1,5 +1,6 @@
 import unittest
 import json
+import os
 import sys
 import subprocess
 import tempfile
@@ -173,6 +174,23 @@ class AvatarApiTests(unittest.TestCase):
 
 
 class BuildCliArgsTests(unittest.TestCase):
+    def test_local_request_source_rejects_dns_rebinding_and_foreign_origin(self):
+        self.assertTrue(web_server._is_local_request_source(
+            "127.0.0.1:8787", "", 8787, require_origin=False
+        ))
+        self.assertTrue(web_server._is_local_request_source(
+            "localhost:8787", "http://localhost:8787", 8787, require_origin=True
+        ))
+        self.assertFalse(web_server._is_local_request_source(
+            "attacker.example:8787", "", 8787, require_origin=False
+        ))
+        self.assertFalse(web_server._is_local_request_source(
+            "127.0.0.1:8787", "https://attacker.example", 8787, require_origin=True
+        ))
+        self.assertFalse(web_server._is_local_request_source(
+            "127.0.0.1:9999", "", 8787, require_origin=False
+        ))
+
     def test_web_ai_package_uses_server_owned_path_and_one_time_download(self):
         with tempfile.TemporaryDirectory() as tmp, patch.object(
             web_server,
@@ -222,6 +240,31 @@ class BuildCliArgsTests(unittest.TestCase):
         self.assertNotIn("path", payload)
         self.assertIsNotNone(claimed)
         self.assertIsNone(second_claim)
+
+    def test_expiry_removes_orphan_packages_left_by_previous_server(self):
+        with tempfile.TemporaryDirectory() as tmp, patch.object(
+            web_server,
+            "AI_PACKAGE_DIR",
+            tmp,
+        ):
+            old_package = Path(tmp) / ("a" * 32 + ".zip")
+            current_package = Path(tmp) / ("b" * 32 + ".zip")
+            unrelated = Path(tmp) / "keep.txt"
+            old_package.write_bytes(b"old")
+            current_package.write_bytes(b"current")
+            unrelated.write_text("keep", encoding="utf-8")
+            now = 10_000.0
+            os.utime(
+                old_package,
+                (now - web_server.AI_PACKAGE_EXPIRES_SECONDS - 1,) * 2,
+            )
+            os.utime(current_package, (now,) * 2)
+
+            web_server._expire_ai_package_downloads(now)
+
+            self.assertFalse(old_package.exists())
+            self.assertTrue(current_package.exists())
+            self.assertTrue(unrelated.exists())
 
     def test_web_ai_package_rejects_unknown_fields(self):
         with self.assertRaisesRegex(ValueError, "不支持"):
@@ -728,7 +771,7 @@ class BuildCliArgsTests(unittest.TestCase):
         self.assertIn('id="detect-db-dirs"', html)
         self.assertIn('id="setup-db-dir"', html)
 
-    def test_history_summary_does_not_request_remote_media(self):
+    def test_history_summary_requests_local_media_metadata_for_ai_copy(self):
         html = (ROOT / "wechat_cli" / "web" / "static" / "index.html").read_text(encoding="utf-8")
         js = (ROOT / "wechat_cli" / "web" / "static" / "app.js").read_text(encoding="utf-8")
 
@@ -736,7 +779,14 @@ class BuildCliArgsTests(unittest.TestCase):
         self.assertIn('id="history" class="screen" data-title="聊天记录"', html)
         self.assertIn('data-result-mode="summary"', html)
         self.assertIn('form.dataset.command === "history"', js)
-        self.assertIn('params.media = false', js)
+        self.assertIn('params.media = true', js)
+        summary_start = js.index("function summaryMessageLine")
+        summary_end = js.index("\n}\n", summary_start)
+        summary_block = js[summary_start:summary_end]
+        self.assertIn("item?.transcript", summary_block)
+        self.assertIn('startsWith("素材/")', summary_block)
+        self.assertNotIn("media.url", summary_block)
+        self.assertNotIn("media.path", summary_block)
 
     def test_history_result_has_key_info_copy_button(self):
         html = (ROOT / "wechat_cli" / "web" / "static" / "index.html").read_text(encoding="utf-8")

@@ -234,7 +234,7 @@ wechat-cli history "Alice" --format text
 
 ```bash
 wechat-cli ai-package "Team" --start-time "2026-07-29" --end-time "2026-07-29" --output team-ai.zip
-wechat-cli ai-package "Alice" --output alice-ai.zip --no-transcribe
+wechat-cli ai-package "Alice" --output alice-ai.zip --no-transcribe-voice
 ```
 
 The ZIP contains `聊天记录.txt`, `清单.json`, and a relative `素材/` directory.
@@ -247,7 +247,7 @@ opened full-size in WeChat. If a package reports an unavailable V2 image, open
 that image in WeChat and run the command again; verified keys are cached locally.
 
 **Options:** `--start-time`, `--end-time`, `--output`, `--transcribe`,
-`--no-transcribe`, `--include-copy-data`
+`--no-transcribe-voice`, `--include-copy-data`
 
 ### `search` — Search Messages
 

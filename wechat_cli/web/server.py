@@ -55,6 +55,34 @@ class _AvatarRedirectHandler(HTTPRedirectHandler):
 urlopen = build_opener(_AvatarRedirectHandler()).open
 
 
+def _is_local_request_source(
+    host_header: str,
+    origin_header: str,
+    server_port: int,
+    *,
+    require_origin: bool,
+) -> bool:
+    expected = {
+        f"127.0.0.1:{server_port}",
+        f"localhost:{server_port}",
+    }
+    if (host_header or "").strip().lower() not in expected:
+        return False
+    if not require_origin or not (origin_header or "").strip():
+        return True
+    parsed = urlparse(origin_header.strip())
+    return (
+        parsed.scheme == "http"
+        and not parsed.username
+        and not parsed.password
+        and (parsed.netloc or "").lower() in expected
+        and parsed.path in {"", "/"}
+        and not parsed.params
+        and not parsed.query
+        and not parsed.fragment
+    )
+
+
 @dataclass(frozen=True)
 class OptionSpec:
     flag: str
@@ -327,6 +355,21 @@ def _expire_ai_package_downloads(now: float | None = None) -> None:
                 expired.append(_AI_PACKAGE_DOWNLOADS.pop(token))
     for entry in expired:
         _remove_ai_package_file(entry["path"])
+    package_root = Path(AI_PACKAGE_DIR)
+    try:
+        entries = list(package_root.iterdir())
+    except FileNotFoundError:
+        return
+    for target in entries:
+        if target.suffix not in {".zip", ".part"}:
+            continue
+        try:
+            if target.resolve().parent != package_root.resolve():
+                continue
+            if now - target.stat().st_mtime >= AI_PACKAGE_EXPIRES_SECONDS:
+                target.unlink()
+        except (FileNotFoundError, OSError):
+            continue
 
 
 def run_ai_package_request(payload: dict[str, Any]) -> dict[str, Any]:
@@ -363,7 +406,7 @@ def run_ai_package_request(payload: dict[str, Any]) -> dict[str, Any]:
         args.extend(["--end-time", str(end_time)])
     args.extend(["--output", target, "--include-copy-data"])
     if not transcribe:
-        args.append("--no-transcribe")
+        args.append("--no-transcribe-voice")
 
     result = _execute_cli_args(args)
     data = result.get("data")
@@ -685,6 +728,8 @@ class WeChatWebHandler(BaseHTTPRequestHandler):
     server_version = "wechat-cli-web/0.1"
 
     def do_GET(self) -> None:  # noqa: N802
+        if not self._validate_request_source(require_origin=False):
+            return
         parsed = urlparse(self.path)
         if parsed.path in ("", "/"):
             self._send_bytes(_static_bytes("index.html"), "text/html; charset=utf-8")
@@ -750,6 +795,8 @@ class WeChatWebHandler(BaseHTTPRequestHandler):
         self.send_error(HTTPStatus.NOT_FOUND)
 
     def do_POST(self) -> None:  # noqa: N802
+        if not self._validate_request_source(require_origin=True):
+            return
         parsed = urlparse(self.path)
         if parsed.path not in {"/api/run", "/api/ai-package"}:
             self.send_error(HTTPStatus.NOT_FOUND)
@@ -781,6 +828,30 @@ class WeChatWebHandler(BaseHTTPRequestHandler):
         if not isinstance(payload, dict):
             raise ValueError("Request body must be an object")
         return payload
+
+    def _validate_request_source(self, *, require_origin: bool) -> bool:
+        server_port = int(self.server.server_address[1])
+        allowed = _is_local_request_source(
+            self.headers.get("Host", ""),
+            self.headers.get("Origin", ""),
+            server_port,
+            require_origin=require_origin,
+        )
+        if not allowed:
+            self.send_error(HTTPStatus.FORBIDDEN)
+        return allowed
+
+    def end_headers(self) -> None:
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Referrer-Policy", "no-referrer")
+        self.send_header(
+            "Content-Security-Policy",
+            "default-src 'self'; img-src 'self' data: blob:; "
+            "style-src 'self' 'unsafe-inline'; script-src 'self'; "
+            "connect-src 'self'; object-src 'none'; base-uri 'none'; "
+            "frame-ancestors 'none'",
+        )
+        super().end_headers()
 
     def _send_json(self, payload: dict[str, Any], status: HTTPStatus = HTTPStatus.OK) -> None:
         raw = json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
@@ -840,6 +911,7 @@ class WeChatWebHandler(BaseHTTPRequestHandler):
 def serve(host: str = "127.0.0.1", port: int = 8787, open_browser: bool = False) -> None:
     if host not in {"127.0.0.1", "localhost"}:
         raise ValueError("The web console is limited to localhost in this version")
+    _expire_ai_package_downloads()
     httpd = ThreadingHTTPServer((host, port), WeChatWebHandler)
     url = f"http://{host}:{httpd.server_address[1]}"
     print(f"WeChat CLI Web is running at {url}", flush=True)

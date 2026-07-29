@@ -91,7 +91,7 @@ class AiPackageCommandTests(unittest.TestCase):
 
         self.assertEqual(result.exit_code, 0, result.output)
         self.assertIn("--output", result.output)
-        self.assertIn("--no-transcribe", result.output)
+        self.assertIn("--no-transcribe-voice", result.output)
 
     def test_command_returns_json_and_optional_copy_data(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -157,11 +157,65 @@ class AiPackageCommandTests(unittest.TestCase):
                     "测试群",
                     "--output",
                     str(target),
-                    "--no-transcribe",
+                    "--no-transcribe-voice",
                 ])
 
         self.assertEqual(result.exit_code, 0, result.output)
         self.assertFalse(builder.call_args.kwargs["transcribe_voice"])
+
+    def test_query_failures_are_written_into_package_manifest(self):
+        query_failure = "message_1.db: 读取失败"
+        with tempfile.TemporaryDirectory() as tmp, patch(
+            "wechat_cli.main.AppContext", return_value=self.fake_app
+        ), patch(
+            "wechat_cli.commands.ai_package.resolve_chat_context",
+            return_value=self.chat_ctx,
+        ), patch(
+            "wechat_cli.commands.ai_package.get_contact_names",
+            return_value={},
+        ), patch(
+            "wechat_cli.commands.ai_package.get_contact_avatars",
+            return_value={},
+        ), patch(
+            "wechat_cli.commands.ai_package.decrypted_media_db_paths",
+            return_value=[],
+        ), patch(
+            "wechat_cli.commands.ai_package.collect_chat_history_items",
+            return_value=(self.items, [query_failure]),
+        ), patch(
+            "wechat_cli.commands.ai_package.ensure_image_keys",
+            return_value=(None, None),
+        ), patch(
+            "wechat_cli.commands.ai_package.build_ai_package",
+            return_value=AiPackageResult(
+                path=str(Path(tmp) / "result.zip"),
+                chat="测试群",
+                username="room@chatroom",
+                message_count=1,
+                assets=[],
+                transcription_count=0,
+                failures=[],
+                messages=[],
+                copy_text="",
+                key_copy_text="",
+            ),
+        ) as builder:
+            result = CliRunner().invoke(cli, [
+                "ai-package",
+                "测试群",
+                "--output",
+                str(Path(tmp) / "result.zip"),
+            ])
+
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertEqual(
+            builder.call_args.kwargs["initial_failures"][0]["phase"],
+            "query",
+        )
+        self.assertIn(
+            "读取失败",
+            builder.call_args.kwargs["initial_failures"][0]["error"],
+        )
 
 
 if __name__ == "__main__":

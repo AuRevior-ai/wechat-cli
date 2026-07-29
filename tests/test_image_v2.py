@@ -7,6 +7,8 @@ from Crypto.Cipher import AES
 from Crypto.Util.Padding import pad
 
 from wechat_cli.core.image_keys import (
+    _ciphertext_templates,
+    _memory_scan_phases,
     candidate_image_keys,
     derive_image_xor_key,
     scan_buffers_for_image_key,
@@ -176,6 +178,41 @@ class WeChatImageKeyTests(unittest.TestCase):
             key = derive_image_xor_key(paths)
 
         self.assertEqual(key, XOR_KEY)
+
+    def test_rejects_xor_key_when_jpeg_tail_bytes_disagree(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "broken_t.dat"
+            path.write_bytes(WECHAT_V2_DAT_MAGIC + b"x" * 32 + b"\x01\x02")
+
+            key = derive_image_xor_key([path])
+
+        self.assertIsNone(key)
+
+    def test_keeps_templates_for_more_than_four_sessions(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = []
+            for index in range(6):
+                path = Path(tmp) / f"{index}_t.dat"
+                path.write_bytes(
+                    WECHAT_V2_DAT_MAGIC
+                    + b"\x00" * 9
+                    + bytes([index + 1]) * 16
+                    + b"\x00" * 32
+                )
+                paths.append(path)
+
+            templates = _ciphertext_templates(paths)
+
+        self.assertEqual(len(templates), 6)
+
+    def test_memory_scan_has_read_only_fallback(self):
+        self.assertEqual(
+            _memory_scan_phases(),
+            (
+                ("可写内存", {0x04, 0x40}),
+                ("其余可读内存", None),
+            ),
+        )
 
 
 if __name__ == "__main__":
