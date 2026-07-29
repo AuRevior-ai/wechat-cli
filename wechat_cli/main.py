@@ -6,7 +6,7 @@ import click
 
 from .core.context import AppContext
 
-_VERSION = "0.2.6"
+_VERSION = "0.2.7"
 
 
 def _configure_utf8_stdio(stdout=None, stderr=None):
