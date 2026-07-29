@@ -4,7 +4,7 @@ import json
 
 import click
 
-from ..core.contacts import get_group_members
+from ..core.contacts import get_group_members, get_self_username
 from ..core.invite_stats import (
     collect_group_invite_stats,
     format_invite_stats_csv,
@@ -58,6 +58,11 @@ def invite_stats(
     members = get_group_members(
         chat_ctx["username"], app.cache, app.decrypted_dir
     )["members"]
+    chat_ctx["self_username"] = get_self_username(
+        getattr(app, "db_dir", ""),
+        app.cache,
+        app.decrypted_dir,
+    )
     result = collect_group_invite_stats(
         chat_ctx,
         members,

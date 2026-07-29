@@ -62,6 +62,32 @@ class InviteNoticeParserTests(unittest.TestCase):
             ["乙", "丙"],
         )
 
+    def test_parses_self_invitation_xml_with_stable_invitee_username(self):
+        events = parse_invite_notice(
+            """54539324941@chatroom:
+            <sysmsg type="delchatroommember">
+              <delchatroommember>
+                <plain><![CDATA[你邀请"陈子明"加入了群聊  ]]></plain>
+                <text><![CDATA[你邀请"陈子明"加入了群聊  ]]></text>
+                <link>
+                  <scene>invite</scene>
+                  <text><![CDATA[  撤销]]></text>
+                  <memberlist>
+                    <username><![CDATA[wxid_zipilqil46k022]]></username>
+                  </memberlist>
+                </link>
+              </delchatroommember>
+            </sysmsg>"""
+        )
+
+        self.assertEqual(events, [{
+            "method": "direct",
+            "inviter_name_raw": "你",
+            "inviter_is_self": True,
+            "invitee_name_raw": "陈子明",
+            "invitee_username": "wxid_zipilqil46k022",
+        }])
+
     def test_preserves_unattributed_self_qr_join(self):
         events = parse_invite_notice(
             "你通过扫描二维码加入群聊，群聊参与人还有：甲、乙"
@@ -152,6 +178,72 @@ class InviteIdentityTests(unittest.TestCase):
 
 
 class InviteAggregationTests(unittest.TestCase):
+    def test_attributes_self_invitation_xml_to_local_account(self):
+        table_name = "Msg_" + "f" * 32
+        notice = """54539324941@chatroom:
+        <sysmsg type="delchatroommember">
+          <delchatroommember>
+            <plain><![CDATA[你邀请"陈子明"加入了群聊  ]]></plain>
+            <text><![CDATA[你邀请"陈子明"加入了群聊  ]]></text>
+            <link>
+              <scene>invite</scene>
+              <text><![CDATA[  撤销]]></text>
+              <memberlist>
+                <username><![CDATA[wxid_zipilqil46k022]]></username>
+              </memberlist>
+            </link>
+          </delchatroommember>
+        </sysmsg>"""
+        members = [
+            {
+                "username": "wxid_meqnprcvjn0622",
+                "display_name": "Au Revior",
+                "nick_name": "Au Revior",
+                "remark": "",
+            },
+            {
+                "username": "wxid_zipilqil46k022",
+                "display_name": "陈子明",
+                "nick_name": "子明 | 05后OPC",
+                "remark": "陈子明",
+            },
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "message.db"
+            create_message_db(path, table_name, [
+                (1, 601, 10000, 1785295680, notice, 0),
+            ])
+            ctx = {
+                "display_name": "自己拉人功能测试",
+                "username": "54539324941@chatroom",
+                "self_username": "wxid_meqnprcvjn0622",
+                "is_group": True,
+                "message_tables": [{
+                    "db_path": str(path),
+                    "table_name": table_name,
+                }],
+            }
+
+            result = collect_group_invite_stats(ctx, members, {})
+
+        self.assertEqual(result["summary"]["invite_event_count"], 1)
+        self.assertEqual(result["summary"]["unparsed_count"], 0)
+        self.assertEqual(result["ranking"][0]["inviter_name"], "Au Revior")
+        self.assertEqual(
+            result["ranking"][0]["inviter_username"],
+            "wxid_meqnprcvjn0622",
+        )
+        self.assertEqual(result["ranking"][0]["unique_invitee_count"], 1)
+        event = result["events"][0]
+        self.assertEqual(event["inviter_name_raw"], "你")
+        self.assertEqual(event["invitee_name_raw"], "陈子明")
+        self.assertEqual(
+            event["invitee_username"],
+            "wxid_zipilqil46k022",
+        )
+        self.assertEqual(event["inviter_identity_status"], "resolved")
+        self.assertEqual(event["invitee_identity_status"], "resolved")
+
     def test_deduplicates_shards_and_ranks_unique_invitees(self):
         table_name = "Msg_" + "a" * 32
         with tempfile.TemporaryDirectory() as tmp:

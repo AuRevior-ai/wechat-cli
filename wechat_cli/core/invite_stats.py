@@ -6,6 +6,7 @@ import csv
 import io
 import re
 import sqlite3
+import xml.etree.ElementTree as ET
 from collections import defaultdict
 from contextlib import closing
 from datetime import datetime
@@ -35,8 +36,59 @@ def normalize_person_name(name: str) -> str:
     return (name or "").strip().strip('"“”').strip()
 
 
+def _parse_self_invite_xml(notice: str) -> list[dict] | None:
+    xml_start = notice.find("<sysmsg")
+    if xml_start < 0:
+        return None
+    try:
+        root = ET.fromstring(notice[xml_start:].strip())
+    except ET.ParseError:
+        return None
+    if root.get("type") != "delchatroommember":
+        return None
+    container = root.find("delchatroommember")
+    if container is None:
+        return None
+    scene = (container.findtext("./link/scene") or "").strip()
+    if scene != "invite":
+        return None
+    plain = (
+        container.findtext("plain")
+        or container.findtext("text")
+        or ""
+    )
+    invitee_names = [
+        normalize_person_name(value)
+        for value in _QUOTE_RE.findall(plain)
+    ]
+    invitee_usernames = [
+        (node.text or "").strip()
+        for node in container.findall("./link/memberlist/username")
+    ]
+    if not invitee_names or "你邀请" not in plain:
+        return None
+    return [
+        {
+            "method": "direct",
+            "inviter_name_raw": "你",
+            "inviter_is_self": True,
+            "invitee_name_raw": invitee_name,
+            "invitee_username": (
+                invitee_usernames[index]
+                if index < len(invitee_usernames)
+                else ""
+            ),
+        }
+        for index, invitee_name in enumerate(invitee_names)
+    ]
+
+
 def parse_invite_notice(text: str) -> list[dict] | None:
     notice = normalize_notice_text(text)
+    self_invites = _parse_self_invite_xml(notice)
+    if self_invites:
+        return self_invites
+
     qr_match = _QR_RE.fullmatch(notice)
     if qr_match:
         return [{
@@ -156,6 +208,27 @@ class IdentityResolver:
             "name": name,
             "status": "unresolved",
             "source": "ambiguous" if candidates else "unmatched",
+        }
+
+    def resolve_username(
+        self,
+        username: str,
+        raw_name: str,
+    ) -> dict:
+        username = (username or "").strip()
+        if not username:
+            return self.resolve(raw_name)
+        member = self._members_by_username.get(username, {})
+        return {
+            "key": f"user:{username}",
+            "username": username,
+            "name": (
+                member.get("display_name")
+                or normalize_person_name(raw_name)
+                or username
+            ),
+            "status": "resolved",
+            "source": "notice_username",
         }
 
 
@@ -283,8 +356,9 @@ def collect_group_invite_stats(
                     ),
                     "raw_text": notice,
                 }
-                invitee = resolver.resolve(
-                    relation["invitee_name_raw"]
+                invitee = resolver.resolve_username(
+                    relation.get("invitee_username", ""),
+                    relation["invitee_name_raw"],
                 )
                 event.update(_identity_fields("invitee", invitee))
 
@@ -298,8 +372,14 @@ def collect_group_invite_stats(
                     unattributed.append(event)
                     continue
 
-                inviter = resolver.resolve(
-                    relation["inviter_name_raw"]
+                inviter_username = (
+                    chat_ctx.get("self_username", "")
+                    if relation.get("inviter_is_self")
+                    else relation.get("inviter_username", "")
+                )
+                inviter = resolver.resolve_username(
+                    inviter_username,
+                    relation["inviter_name_raw"],
                 )
                 event.update(_identity_fields("inviter", inviter))
                 events.append(event)
@@ -322,8 +402,9 @@ def collect_group_invite_stats(
             event["timestamp"] for event in inviter_events
         )
         sample = inviter_events[0]
-        resolved_inviter = resolver.resolve(
-            sample["inviter_name_raw"]
+        resolved_inviter = resolver.resolve_username(
+            sample["inviter_username"],
+            sample["inviter_name_raw"],
         )
         ranking.append({
             "rank": 0,

@@ -129,6 +129,39 @@ class InviteStatsCommandTests(unittest.TestCase):
         self.assertIn('"ranking"', result.output)
         self.assertIn('"wxid_a"', result.output)
 
+    def test_command_adds_local_username_to_chat_context(self):
+        self.fake_app.db_dir = "db_storage"
+        with patch(
+            "wechat_cli.main.AppContext", return_value=self.fake_app
+        ), patch(
+            "wechat_cli.commands.invite_stats.resolve_chat_context",
+            return_value=self.chat_ctx,
+        ), patch(
+            "wechat_cli.commands.invite_stats.get_group_members",
+            return_value={"members": [], "owner": ""},
+        ), patch(
+            "wechat_cli.commands.invite_stats.get_self_username",
+            create=True,
+            return_value="wxid_me",
+        ) as get_self, patch(
+            "wechat_cli.commands.invite_stats.collect_group_invite_stats",
+            return_value=SAMPLE,
+        ) as collect:
+            result = CliRunner().invoke(
+                cli, ["invite-stats", "测试群"]
+            )
+
+        self.assertEqual(result.exit_code, 0, result.output)
+        get_self.assert_called_once_with(
+            "db_storage",
+            self.fake_app.cache,
+            self.fake_app.decrypted_dir,
+        )
+        self.assertEqual(
+            collect.call_args.args[0]["self_username"],
+            "wxid_me",
+        )
+
     def test_command_writes_csv_file(self):
         with tempfile.TemporaryDirectory() as tmp:
             target = Path(tmp) / "invite.csv"
