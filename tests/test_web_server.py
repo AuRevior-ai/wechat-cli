@@ -11,8 +11,10 @@ from wechat_cli.web import server as web_server
 from wechat_cli.web.server import (
     _decode_media_bytes,
     build_cli_args,
+    claim_ai_package_download,
     db_dir_candidates_payload,
     media_file_payload,
+    run_ai_package_request,
     run_cli_command,
 )
 
@@ -171,6 +173,82 @@ class AvatarApiTests(unittest.TestCase):
 
 
 class BuildCliArgsTests(unittest.TestCase):
+    def test_web_ai_package_uses_server_owned_path_and_one_time_download(self):
+        with tempfile.TemporaryDirectory() as tmp, patch.object(
+            web_server,
+            "AI_PACKAGE_DIR",
+            tmp,
+        ), patch(
+            "wechat_cli.web.server._execute_cli_args",
+        ) as execute:
+            def fake_execute(args):
+                output_path = Path(args[args.index("--output") + 1])
+                output_path.write_bytes(b"PK\x03\x04test")
+                return {
+                    "ok": True,
+                    "returncode": 0,
+                    "command": ["wechat-cli", *args],
+                    "stdout": "",
+                    "stderr": "",
+                    "data": {
+                        "path": str(output_path),
+                        "chat": "测试群",
+                        "message_count": 12,
+                        "asset_count": 3,
+                        "transcription_count": 1,
+                        "failures": None,
+                        "copy_text": "带素材引用的全文",
+                        "key_copy_text": "带素材引用的精简信息",
+                    },
+                }
+
+            execute.side_effect = fake_execute
+            payload = run_ai_package_request({
+                "chat_name": "测试群",
+                "start_time": "2026-07-29",
+                "end_time": "2026-07-29",
+                "transcribe_voice": True,
+            })
+            token = payload["download_url"].rsplit("/", 1)[-1]
+            claimed = claim_ai_package_download(token)
+            second_claim = claim_ai_package_download(token)
+
+        args = execute.call_args.args[0]
+        output_path = Path(args[args.index("--output") + 1]).resolve()
+        self.assertEqual(output_path.parent, Path(tmp).resolve())
+        self.assertIn("--include-copy-data", args)
+        self.assertNotIn("--no-transcribe", args)
+        self.assertEqual(payload["copy_text"], "带素材引用的全文")
+        self.assertNotIn("path", payload)
+        self.assertIsNotNone(claimed)
+        self.assertIsNone(second_claim)
+
+    def test_web_ai_package_rejects_unknown_fields(self):
+        with self.assertRaisesRegex(ValueError, "不支持"):
+            run_ai_package_request({
+                "chat_name": "测试群",
+                "output": r"C:\outside.zip",
+            })
+
+    def test_history_page_can_prepare_ai_material_package(self):
+        html = (
+            ROOT / "wechat_cli" / "web" / "static" / "index.html"
+        ).read_text(encoding="utf-8")
+        js = (
+            ROOT / "wechat_cli" / "web" / "static" / "app.js"
+        ).read_text(encoding="utf-8")
+        css = (
+            ROOT / "wechat_cli" / "web" / "static" / "app.css"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn('id="build-ai-package"', html)
+        self.assertIn('id="ai-package-transcribe"', html)
+        self.assertIn('fetchJson("/api/ai-package"', js)
+        self.assertIn("payload.download_url", js)
+        self.assertIn("payload.copy_text", js)
+        self.assertIn("payload.key_copy_text", js)
+        self.assertIn("package-button", css)
+
     def test_builds_invite_stats_with_repeated_identity_bindings(self):
         args = build_cli_args({
             "command": "invite-stats",

@@ -872,6 +872,67 @@ pre {
   font-size: 12px;
 }
 
+.summary-submit-row > div:first-child {
+  display: grid;
+  gap: 8px;
+}
+
+.package-transcribe {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--green);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.package-transcribe input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--green);
+}
+
+.summary-submit-actions {
+  display: flex;
+  align-items: stretch;
+  gap: 9px;
+}
+
+.package-button {
+  display: grid;
+  gap: 2px;
+  min-width: 224px;
+  border: 1px solid #a86a09;
+  border-radius: 8px;
+  background: #f6c775;
+  color: #38280d;
+  padding: 7px 13px;
+  text-align: left;
+  cursor: pointer;
+  box-shadow: 0 5px 0 #d49a3a;
+  transition: transform .15s ease, box-shadow .15s ease;
+}
+
+.package-button:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 7px 0 #d49a3a;
+}
+
+.package-button:disabled {
+  cursor: wait;
+  opacity: .72;
+  transform: none;
+}
+
+.package-button span {
+  font-weight: 900;
+}
+
+.package-button small {
+  color: #735019;
+  font-size: 10px;
+}
+
 .summary-result {
   display: grid;
   gap: 14px;
@@ -951,7 +1012,7 @@ pre {
 
 .summary-copy-guide {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 9px;
 }
 
@@ -986,6 +1047,143 @@ pre {
   color: #6c4a05;
   padding: 9px 12px;
   font-size: 12px;
+}
+
+.package-ready {
+  display: grid;
+  gap: 14px;
+}
+
+.package-ready-hero {
+  position: relative;
+  overflow: hidden;
+  border-radius: 11px;
+  background:
+    linear-gradient(120deg, rgba(246, 199, 117, .18), transparent 42%),
+    #0c4d45;
+  padding: 23px 25px;
+  color: #fffdf8;
+  box-shadow: 0 16px 35px rgba(17, 72, 64, .18);
+}
+
+.package-ready-hero::after {
+  content: "ZIP";
+  position: absolute;
+  top: -16px;
+  right: 18px;
+  color: rgba(255, 255, 255, .06);
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 96px;
+  font-weight: 900;
+}
+
+.package-ready-hero span {
+  color: #f6c775;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: .15em;
+}
+
+.package-ready-hero h2 {
+  margin: 5px 0 7px;
+  font-size: clamp(22px, 3vw, 34px);
+}
+
+.package-ready-hero p {
+  position: relative;
+  z-index: 1;
+  max-width: 720px;
+  margin: 0;
+  color: #cfe9e3;
+  font-size: 13px;
+}
+
+.package-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 9px;
+}
+
+.package-metrics > div {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: #fffaf0;
+  padding: 13px 15px;
+}
+
+.package-metrics strong {
+  color: var(--green);
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 28px;
+}
+
+.package-metrics span,
+.package-next-step span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.package-next-step {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 11px;
+  align-items: center;
+  border-left: 4px solid var(--ochre);
+  border-radius: 7px;
+  background: #fff6d7;
+  padding: 11px 13px;
+}
+
+.package-next-step b {
+  color: #684813;
+}
+
+.package-failures {
+  border: 1px solid #e5bcad;
+  border-radius: 8px;
+  background: #fff3ed;
+  padding: 10px 13px;
+  color: #773d2d;
+  font-size: 12px;
+}
+
+.package-failures summary {
+  cursor: pointer;
+  font-weight: 900;
+}
+
+.package-failures ul {
+  margin-bottom: 0;
+  padding-left: 20px;
+}
+
+.package-loading-card {
+  display: grid;
+  gap: 8px;
+  border: 1px dashed #80aa9e;
+  border-radius: 10px;
+  background: linear-gradient(90deg, #e6f2ee, #fffaf0, #e6f2ee);
+  background-size: 200% 100%;
+  padding: 22px;
+  animation: package-loading 1.8s linear infinite;
+}
+
+.package-loading-card b {
+  color: var(--green);
+  font-size: 18px;
+}
+
+.package-loading-card span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+@keyframes package-loading {
+  to { background-position: -200% 0; }
 }
 
 @media (max-width: 900px) {
@@ -1044,6 +1242,18 @@ pre {
   .summary-submit-row {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .summary-submit-actions {
+    flex-direction: column;
+  }
+
+  .package-button {
+    min-width: 0;
+  }
+
+  .package-metrics {
+    grid-template-columns: 1fr;
   }
 
   .session-picker-options button {

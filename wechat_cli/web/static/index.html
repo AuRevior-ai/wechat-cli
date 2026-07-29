@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>WeChat CLI Web</title>
-  <link rel="stylesheet" href="/static/app.css?v=20260729-reusable-picker">
+  <link rel="stylesheet" href="/static/app.css?v=20260729-ai-package">
 </head>
 <body>
   <div class="app-shell">
@@ -105,8 +105,20 @@
             <input data-param="limit" type="hidden" value="50000">
           </div>
           <div class="summary-submit-row">
-            <p>网页不会上传聊天内容；精简信息仅保留范围、时间、发言人、类型和正文。</p>
-            <button class="primary" type="submit">读取聊天记录</button>
+            <div>
+              <p>网页不会上传聊天内容；AI 资料包也只在本机生成。</p>
+              <label class="package-transcribe">
+                <input id="ai-package-transcribe" type="checkbox" checked>
+                <span>将语音离线识别为文字</span>
+              </label>
+            </div>
+            <div class="summary-submit-actions">
+              <button id="build-ai-package" class="package-button" type="button">
+                <span>生成 AI 资料包</span>
+                <small>图片、表情、语音与合并转发</small>
+              </button>
+              <button class="primary" type="submit">读取聊天记录</button>
+            </div>
           </div>
         </form>
       </section>
@@ -281,6 +293,6 @@
       </section>
     </main>
   </div>
-  <script src="/static/app.js?v=20260729-reusable-picker"></script>
+  <script src="/static/app.js?v=20260729-ai-package"></script>
 </body>
 </html>

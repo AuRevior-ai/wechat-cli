@@ -6,6 +6,8 @@ const commandPreview = document.querySelector("#command-preview");
 const downloadButton = document.querySelector("#download-result");
 const copyButton = document.querySelector("#copy-result");
 const copyKeyButton = document.querySelector("#copy-key-result");
+const aiPackageButton = document.querySelector("#build-ai-package");
+const aiPackageTranscribe = document.querySelector("#ai-package-transcribe");
 const initPill = document.querySelector("#init-pill");
 const statusList = document.querySelector("#status-list");
 const dbDirSelect = document.querySelector("#db-dir-candidates");
@@ -150,6 +152,7 @@ function applyResultState(state) {
   lastCopyData = state.copyData || null;
   copyKeyButton.classList.toggle("hidden", !lastKeyText && !lastCopyData);
   downloadButton.classList.toggle("hidden", !lastDownload);
+  downloadButton.textContent = lastDownload?.label || "下载";
 }
 
 function restoreResultState(screenId) {
@@ -776,12 +779,41 @@ function renderSummaryResult(data) {
     <section class="summary-copy-guide">
       <div><b>复制</b><span>包含总结要求与完整聊天记录，可直接粘贴给 AI。</span></div>
       <div><b>复制精简信息</b><span>只保留范围、时间、发言人、类型和正文。</span></div>
+      <div><b>AI 资料包</b><span>提取真实图片、表情与语音；生成后复制内容会自动引用素材文件名。</span></div>
     </section>
     ${previewNotice}
     ${renderChatMessages(previewItems, {
       allowRemoteAvatars: true,
       allowRemoteMedia: false,
     })}
+  </div>`;
+}
+
+function renderAiPackageResult(payload) {
+  const failures = Array.isArray(payload.failures) ? payload.failures : [];
+  const failureHtml = failures.length
+    ? `<details class="package-failures"><summary>${failures.length} 项素材未能处理</summary><ul>${
+      failures.map((failure) => `<li>${escapeHtml(
+        `${failure.time || "时间未知"} · ${failure.phase || "处理"} · ${failure.error || "未知原因"}`
+      )}</li>`).join("")
+    }</ul></details>`
+    : "";
+  return `<div class="package-ready">
+    <section class="package-ready-hero">
+      <span>AI MATERIAL PACKAGE</span>
+      <h2>${escapeHtml(payload.chat || "聊天记录")} 已准备完成</h2>
+      <p>复制内容中的“素材/文件名”与压缩包内文件一一对应，可将文字和 ZIP 一起交给 AI。</p>
+    </section>
+    <section class="package-metrics">
+      <div><strong>${escapeHtml(payload.message_count || 0)}</strong><span>条消息</span></div>
+      <div><strong>${escapeHtml(payload.asset_count || 0)}</strong><span>个素材</span></div>
+      <div><strong>${escapeHtml(payload.transcription_count || 0)}</strong><span>段语音文字</span></div>
+    </section>
+    <section class="package-next-step">
+      <b>接下来</b>
+      <span>点击右上角“下载 AI 资料包”，再使用“复制”或“复制精简信息”。下载链接为一次性本机链接。</span>
+    </section>
+    ${failureHtml}
   </div>`;
 }
 
@@ -1208,6 +1240,71 @@ async function runForm(form) {
   }
 }
 
+async function runAiPackage() {
+  const form = document.querySelector("#history .summary-form");
+  if (!form || !form.reportValidity()) return;
+  const screenId = "history";
+  const params = readForm(form).params;
+  const validationError = validateSummaryPayload(params);
+  if (validationError) {
+    showTransientError(new Error(validationError), screenId);
+    return;
+  }
+  const requestVersion = (screenRequestVersions.get(screenId) || 0) + 1;
+  screenRequestVersions.set(screenId, requestVersion);
+  const originalHtml = aiPackageButton.innerHTML;
+  aiPackageButton.disabled = true;
+  aiPackageButton.innerHTML = "<span>正在准备资料包…</span><small>首次语音识别会下载离线模型，请稍候</small>";
+  const loadingState = {
+    className: "result empty package-loading",
+    html: "<div class=\"package-loading-card\"><b>正在整理聊天与素材</b><span>合并转发会递归展开，图片与表情会转为真实文件，语音会解码并离线识别。</span></div>",
+    commandPreview: `AI 资料包 · ${params.chat_name} · ${params.start_time} 至 ${params.end_time}`,
+    lastText: "",
+    lastKeyText: "",
+    lastDownload: null,
+    copyData: null,
+  };
+  screenResultStates.set(screenId, loadingState);
+  if (currentScreenId === screenId) applyResultState(loadingState);
+  try {
+    const payload = await fetchJson("/api/ai-package", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        chat_name: params.chat_name,
+        start_time: params.start_time,
+        end_time: params.end_time,
+        transcribe_voice: aiPackageTranscribe?.checked !== false,
+      }),
+    });
+    if (screenRequestVersions.get(screenId) !== requestVersion) return;
+    if (!payload.ok) {
+      throw new Error(payload.error || "AI 资料包生成失败");
+    }
+    const readyState = {
+      className: "result",
+      html: renderAiPackageResult(payload),
+      commandPreview: `AI 资料包 · ${payload.chat || params.chat_name} · 已准备完成`,
+      lastText: payload.copy_text || "",
+      lastKeyText: payload.key_copy_text || "",
+      lastDownload: {
+        url: payload.download_url,
+        filename: payload.filename || "微信聊天-AI资料包.zip",
+        label: "下载 AI 资料包",
+      },
+      copyData: null,
+    };
+    screenResultStates.set(screenId, readyState);
+    if (currentScreenId === screenId) applyResultState(readyState);
+  } catch (error) {
+    if (screenRequestVersions.get(screenId) !== requestVersion) return;
+    showTransientError(error, screenId);
+  } finally {
+    aiPackageButton.disabled = false;
+    aiPackageButton.innerHTML = originalHtml;
+  }
+}
+
 nav.addEventListener("click", (event) => {
   const button = event.target.closest("button[data-target]");
   if (button) setScreen(button.dataset.target);
@@ -1219,6 +1316,8 @@ document.querySelectorAll(".tool-form").forEach((form) => {
     runForm(form);
   });
 });
+
+aiPackageButton?.addEventListener("click", runAiPackage);
 
 document.querySelectorAll("[data-action='refresh-status'], #refresh-status").forEach((button) => {
   button.addEventListener("click", () => {
@@ -1282,6 +1381,15 @@ copyKeyButton.addEventListener("click", async () => {
 
 downloadButton.addEventListener("click", () => {
   if (!lastDownload) return;
+  if (lastDownload.url) {
+    const link = document.createElement("a");
+    link.href = lastDownload.url;
+    link.download = lastDownload.filename;
+    link.click();
+    lastDownload = null;
+    downloadButton.classList.add("hidden");
+    return;
+  }
   const blob = new Blob([lastDownload.text], { type: "text/plain;charset=utf-8" });
   const link = document.createElement("a");
   link.href = URL.createObjectURL(blob);

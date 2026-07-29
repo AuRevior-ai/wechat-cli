@@ -10,13 +10,17 @@ import json
 import mimetypes
 import os
 import re
+import secrets
 import subprocess
 import sys
+import time
 import webbrowser
 from dataclasses import dataclass
+from datetime import datetime
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib import resources
+from pathlib import Path
 from threading import Lock
 from typing import Any
 from urllib.error import URLError
@@ -36,6 +40,10 @@ AVATAR_CACHE_MAX_BYTES = 32 * 1024 * 1024
 _AVATAR_CACHE: dict[str, dict[str, Any]] = {}
 _AVATAR_CACHE_LOCK = Lock()
 _AVATAR_CACHE_BYTES = 0
+AI_PACKAGE_DIR = os.path.join(STATE_DIR, "ai-packages")
+AI_PACKAGE_EXPIRES_SECONDS = 10 * 60
+_AI_PACKAGE_DOWNLOADS: dict[str, dict[str, Any]] = {}
+_AI_PACKAGE_DOWNLOADS_LOCK = Lock()
 
 
 class _AvatarRedirectHandler(HTTPRedirectHandler):
@@ -239,14 +247,11 @@ def _cli_subprocess_argv(args: list[str]) -> list[str]:
     return [sys.executable, "-m", "wechat_cli.main", *args]
 
 
-def run_cli_command(payload: dict[str, Any]) -> dict[str, Any]:
-    response_mode = payload.get("response_mode", "")
-    if response_mode not in {"", "summary"}:
-        raise ValueError(f"Unsupported response mode: {response_mode}")
-    if response_mode == "summary" and payload.get("command") != "history":
-        raise ValueError("Summary response mode is only available for history")
-
-    args = build_cli_args(payload)
+def _execute_cli_args(
+    args: list[str],
+    *,
+    response_mode: str = "",
+) -> dict[str, Any]:
     env = {
         **os.environ,
         "PYTHONIOENCODING": "utf-8",
@@ -283,6 +288,128 @@ def run_cli_command(payload: dict[str, Any]) -> dict[str, Any]:
         "stderr": proc.stderr,
         "data": data,
     }
+
+
+def run_cli_command(payload: dict[str, Any]) -> dict[str, Any]:
+    response_mode = payload.get("response_mode", "")
+    if response_mode not in {"", "summary"}:
+        raise ValueError(f"Unsupported response mode: {response_mode}")
+    if response_mode == "summary" and payload.get("command") != "history":
+        raise ValueError("Summary response mode is only available for history")
+
+    args = build_cli_args(payload)
+    return _execute_cli_args(args, response_mode=response_mode)
+
+
+def _safe_ai_package_download_name(chat_name: str) -> str:
+    safe = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", chat_name).strip(" ._")
+    safe = (safe or "微信聊天")[:80]
+    return f"{safe}-AI资料包.zip"
+
+
+def _remove_ai_package_file(path: str) -> None:
+    target = Path(path).resolve()
+    package_root = Path(AI_PACKAGE_DIR).resolve()
+    if target.parent != package_root:
+        return
+    try:
+        target.unlink()
+    except FileNotFoundError:
+        pass
+
+
+def _expire_ai_package_downloads(now: float | None = None) -> None:
+    now = time.time() if now is None else now
+    expired = []
+    with _AI_PACKAGE_DOWNLOADS_LOCK:
+        for token, entry in list(_AI_PACKAGE_DOWNLOADS.items()):
+            if now - entry["created_at"] >= AI_PACKAGE_EXPIRES_SECONDS:
+                expired.append(_AI_PACKAGE_DOWNLOADS.pop(token))
+    for entry in expired:
+        _remove_ai_package_file(entry["path"])
+
+
+def run_ai_package_request(payload: dict[str, Any]) -> dict[str, Any]:
+    """Run the CLI with a server-owned output path and issue a one-time URL."""
+    allowed = {"chat_name", "start_time", "end_time", "transcribe_voice"}
+    unknown = sorted(set(payload) - allowed)
+    if unknown:
+        raise ValueError(f"不支持的 AI 资料包参数: {', '.join(unknown)}")
+    chat_name = payload.get("chat_name")
+    if not isinstance(chat_name, str) or not chat_name.strip():
+        raise ValueError("请先选择一个聊天")
+    start_time = payload.get("start_time") or ""
+    end_time = payload.get("end_time") or ""
+    for label, value in (("开始日期", start_time), ("结束日期", end_time)):
+        if value:
+            try:
+                datetime.strptime(str(value), "%Y-%m-%d")
+            except ValueError as exc:
+                raise ValueError(f"{label}必须为 YYYY-MM-DD") from exc
+    if start_time and end_time and start_time > end_time:
+        raise ValueError("开始日期不能晚于结束日期")
+    transcribe = payload.get("transcribe_voice", True)
+    if not isinstance(transcribe, bool):
+        raise ValueError("语音转文字选项必须为布尔值")
+
+    _expire_ai_package_downloads()
+    Path(AI_PACKAGE_DIR).mkdir(parents=True, exist_ok=True)
+    token = secrets.token_urlsafe(24)
+    target = str((Path(AI_PACKAGE_DIR) / f"{token}.zip").resolve())
+    args = ["ai-package", chat_name.strip()]
+    if start_time:
+        args.extend(["--start-time", str(start_time)])
+    if end_time:
+        args.extend(["--end-time", str(end_time)])
+    args.extend(["--output", target, "--include-copy-data"])
+    if not transcribe:
+        args.append("--no-transcribe")
+
+    result = _execute_cli_args(args)
+    data = result.get("data")
+    if not result.get("ok") or not isinstance(data, dict):
+        _remove_ai_package_file(target)
+        return {
+            "ok": False,
+            "error": result.get("stderr") or result.get("stdout") or "AI 资料包生成失败",
+        }
+    if not Path(target).is_file():
+        return {"ok": False, "error": "AI 资料包生成后未找到压缩文件"}
+
+    filename = _safe_ai_package_download_name(
+        str(data.get("chat") or chat_name)
+    )
+    with _AI_PACKAGE_DOWNLOADS_LOCK:
+        _AI_PACKAGE_DOWNLOADS[token] = {
+            "path": target,
+            "filename": filename,
+            "created_at": time.time(),
+        }
+    return {
+        "ok": True,
+        "chat": data.get("chat") or chat_name,
+        "username": data.get("username") or "",
+        "message_count": int(data.get("message_count") or 0),
+        "asset_count": int(data.get("asset_count") or 0),
+        "transcription_count": int(data.get("transcription_count") or 0),
+        "failures": data.get("failures"),
+        "copy_text": str(data.get("copy_text") or ""),
+        "key_copy_text": str(data.get("key_copy_text") or ""),
+        "download_url": f"/api/ai-package/{token}",
+        "filename": filename,
+    }
+
+
+def claim_ai_package_download(token: str) -> dict[str, Any] | None:
+    """Claim a prepared download exactly once."""
+    if not re.fullmatch(r"[A-Za-z0-9_-]{20,80}", token or ""):
+        return None
+    _expire_ai_package_downloads()
+    with _AI_PACKAGE_DOWNLOADS_LOCK:
+        entry = _AI_PACKAGE_DOWNLOADS.pop(token, None)
+    if entry is None or not Path(entry["path"]).is_file():
+        return None
+    return entry
 
 
 def _account_name_from_db_dir(path: str) -> str:
@@ -443,11 +570,22 @@ def _static_bytes(name: str) -> bytes:
 
 def media_file_payload(path: str) -> dict[str, Any]:
     """Return local media bytes if path is inside the configured WeChat data root."""
-    cfg = status_payload()
-    db_dir = cfg.get("db_dir", "")
+    status = status_payload()
+    db_dir = status.get("db_dir", "")
     if not db_dir:
         raise PermissionError("wechat db_dir is not configured")
-    return read_media_file_payload(path, db_dir=db_dir)
+    cfg = {}
+    try:
+        with open(CONFIG_FILE, encoding="utf-8") as source:
+            cfg = json.load(source)
+    except (OSError, json.JSONDecodeError):
+        pass
+    return read_media_file_payload(
+        path,
+        db_dir=db_dir,
+        image_aes_key=cfg.get("image_aes_keys") or cfg.get("image_aes_key"),
+        image_xor_key=cfg.get("image_xor_key"),
+    )
 
 
 def _decode_media_bytes(raw: bytes, path: str) -> tuple[bytes, str]:
@@ -563,6 +701,18 @@ class WeChatWebHandler(BaseHTTPRequestHandler):
         if parsed.path == "/api/health":
             self._send_json({"ok": True})
             return
+        if parsed.path.startswith("/api/ai-package/"):
+            token = parsed.path.rsplit("/", 1)[-1]
+            entry = claim_ai_package_download(token)
+            if entry is None:
+                self.send_error(HTTPStatus.NOT_FOUND)
+                return
+            self._send_file_once(
+                entry["path"],
+                "application/zip",
+                entry["filename"],
+            )
+            return
         if parsed.path == "/api/media":
             path = parse_qs(parsed.query).get("path", [""])[0]
             try:
@@ -601,12 +751,16 @@ class WeChatWebHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
-        if parsed.path != "/api/run":
+        if parsed.path not in {"/api/run", "/api/ai-package"}:
             self.send_error(HTTPStatus.NOT_FOUND)
             return
         try:
             payload = self._read_json()
-            result = run_cli_command(payload)
+            result = (
+                run_ai_package_request(payload)
+                if parsed.path == "/api/ai-package"
+                else run_cli_command(payload)
+            )
             self._send_json(result, HTTPStatus.OK if result["ok"] else HTTPStatus.BAD_REQUEST)
         except ValueError as exc:
             self._send_json({"ok": False, "error": str(exc)}, HTTPStatus.BAD_REQUEST)
@@ -647,6 +801,37 @@ class WeChatWebHandler(BaseHTTPRequestHandler):
             self.send_header("Content-Disposition", f"inline; filename=\"{ascii_name}\"; filename*=UTF-8''{quote(filename)}")
         self.end_headers()
         self.wfile.write(raw)
+
+    def _send_file_once(
+        self,
+        path: str,
+        content_type: str,
+        filename: str,
+    ) -> None:
+        target = Path(path)
+        try:
+            size = target.stat().st_size
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(size))
+            self.send_header("Cache-Control", "no-store")
+            ascii_name = (
+                filename.encode("ascii", "ignore").decode("ascii")
+                or "wechat-ai-package.zip"
+            )
+            self.send_header(
+                "Content-Disposition",
+                f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{quote(filename)}",
+            )
+            self.end_headers()
+            with target.open("rb") as source:
+                while True:
+                    chunk = source.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    self.wfile.write(chunk)
+        finally:
+            _remove_ai_package_file(str(target))
 
     def log_message(self, fmt: str, *args: Any) -> None:
         sys.stderr.write("[wechat-web] " + fmt % args + "\n")
