@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>WeChat CLI Web</title>
-  <link rel="stylesheet" href="/static/app.css?v=20260729-avatar-picker">
+  <link rel="stylesheet" href="/static/app.css?v=20260729-reusable-picker">
 </head>
 <body>
   <div class="app-shell">
@@ -84,23 +84,23 @@
           </div>
           <div class="form-grid summary-form-grid">
             <label class="full">选择聊天
-              <div id="summary-chat-combobox" class="summary-combobox">
-                <input id="summary-chat-search" type="search" role="combobox"
-                  aria-autocomplete="list" aria-controls="summary-chat-options"
+              <div id="history-chat-picker" class="session-picker" data-session-picker data-filter="all" data-multiple="false">
+                <input class="session-picker-search" type="search" role="combobox"
+                  aria-autocomplete="list" aria-controls="history-chat-options"
                   aria-expanded="false" aria-activedescendant="" autocomplete="off"
                   placeholder="输入群名、联系人或账号进行搜索">
-                <input id="summary-chat-value" data-param="chat_name" type="hidden">
-                <div id="summary-chat-options" class="summary-chat-options"
+                <input class="session-picker-value" data-param="chat_name" type="hidden">
+                <div id="history-chat-options" class="session-picker-options"
                   role="listbox" hidden></div>
+                <small class="session-picker-hint">正在读取会话列表…</small>
+                <button class="session-picker-retry hidden" type="button">重新读取会话</button>
               </div>
-              <small id="summary-chat-hint">正在读取最近会话…</small>
-              <button id="summary-chat-retry" class="summary-retry hidden" type="button">重新读取会话</button>
             </label>
             <label>开始日期
-              <input class="summary-date" data-param="start_time" type="date" required>
+              <input class="date-input" data-param="start_time" type="date" data-default-today required>
             </label>
             <label>结束日期
-              <input class="summary-date" data-param="end_time" type="date" required>
+              <input class="date-input" data-param="end_time" type="date" data-default-today required>
             </label>
             <input data-param="limit" type="hidden" value="50000">
           </div>
@@ -117,14 +117,25 @@
             <label>关键词
               <input data-param="keyword" placeholder="留空时必须填写开始和结束时间">
             </label>
-            <label>限定聊天
-              <textarea data-param="chat" data-list="lines" rows="3" placeholder="每行一个聊天对象"></textarea>
+            <label class="full">限定聊天（可多选）
+              <div id="search-chat-picker" class="session-picker" data-session-picker data-filter="all" data-multiple="true">
+                <input class="session-picker-search" type="search" role="combobox"
+                  aria-autocomplete="list" aria-controls="search-chat-options"
+                  aria-expanded="false" aria-activedescendant="" autocomplete="off"
+                  placeholder="搜索后选择多个群聊或联系人">
+                <div class="session-picker-chips" hidden></div>
+                <input class="session-picker-value" data-param="chat" data-list="lines" type="hidden">
+                <div id="search-chat-options" class="session-picker-options"
+                  role="listbox" aria-multiselectable="true" hidden></div>
+                <small class="session-picker-hint">可不选择；默认搜索全部聊天</small>
+                <button class="session-picker-retry hidden" type="button">重新读取会话</button>
+              </div>
             </label>
             <label>开始时间
-              <input data-param="start_time" placeholder="YYYY-MM-DD">
+              <input class="date-input" data-param="start_time" type="date">
             </label>
             <label>结束时间
-              <input data-param="end_time" placeholder="YYYY-MM-DD">
+              <input class="date-input" data-param="end_time" type="date">
             </label>
             <label>数量
               <input data-param="limit" type="number" min="1" max="500" value="20">
@@ -172,8 +183,18 @@
       <section id="members" class="screen" data-title="群聊成员统计和导出">
         <form class="tool-form" data-command="members">
           <div class="form-grid compact">
-            <label>群名
-              <input data-param="group_name" required>
+            <label class="full">选择群聊
+              <div id="members-group-picker" class="session-picker" data-session-picker data-filter="group" data-multiple="false">
+                <input class="session-picker-search" type="search" role="combobox"
+                  aria-autocomplete="list" aria-controls="members-group-options"
+                  aria-expanded="false" aria-activedescendant="" autocomplete="off"
+                  placeholder="输入群名称或群账号进行搜索">
+                <input class="session-picker-value" data-param="group_name" type="hidden">
+                <div id="members-group-options" class="session-picker-options"
+                  role="listbox" hidden></div>
+                <small class="session-picker-hint">正在读取群聊列表…</small>
+                <button class="session-picker-retry hidden" type="button">重新读取群聊</button>
+              </div>
             </label>
           </div>
           <button class="primary" type="submit">列出成员</button>
@@ -183,14 +204,24 @@
       <section id="stats" class="screen" data-title="单个聊天数据统计">
         <form class="tool-form" data-command="stats">
           <div class="form-grid">
-            <label>聊天对象
-              <input data-param="chat_name" required>
+            <label class="full">选择聊天
+              <div id="stats-chat-picker" class="session-picker" data-session-picker data-filter="all" data-multiple="false">
+                <input class="session-picker-search" type="search" role="combobox"
+                  aria-autocomplete="list" aria-controls="stats-chat-options"
+                  aria-expanded="false" aria-activedescendant="" autocomplete="off"
+                  placeholder="输入群名、联系人或账号进行搜索">
+                <input class="session-picker-value" data-param="chat_name" type="hidden">
+                <div id="stats-chat-options" class="session-picker-options"
+                  role="listbox" hidden></div>
+                <small class="session-picker-hint">正在读取会话列表…</small>
+                <button class="session-picker-retry hidden" type="button">重新读取会话</button>
+              </div>
             </label>
             <label>开始时间
-              <input data-param="start_time" placeholder="YYYY-MM-DD">
+              <input class="date-input" data-param="start_time" type="date">
             </label>
             <label>结束时间
-              <input data-param="end_time" placeholder="YYYY-MM-DD">
+              <input class="date-input" data-param="end_time" type="date">
             </label>
           </div>
           <button class="primary" type="submit">生成统计</button>
@@ -206,23 +237,23 @@
           </div>
           <div class="form-grid">
             <label class="full">选择群聊
-              <div id="invite-group-combobox" class="summary-combobox">
-                <input id="invite-group-search" type="search" role="combobox"
+              <div id="invite-group-picker" class="session-picker" data-session-picker data-filter="group" data-multiple="false">
+                <input class="session-picker-search" type="search" role="combobox"
                   aria-autocomplete="list" aria-controls="invite-group-options"
                   aria-expanded="false" aria-activedescendant="" autocomplete="off"
                   placeholder="输入群名称或群账号进行搜索">
-                <input id="invite-group-value" data-param="group_name" type="hidden">
-                <div id="invite-group-options" class="summary-chat-options"
+                <input class="session-picker-value" data-param="group_name" type="hidden">
+                <div id="invite-group-options" class="session-picker-options"
                   role="listbox" hidden></div>
+                <small class="session-picker-hint">正在读取群聊列表…</small>
+                <button class="session-picker-retry hidden" type="button">重新读取群聊</button>
               </div>
-              <small id="invite-group-hint">正在读取群聊列表…</small>
-              <button id="invite-group-retry" class="summary-retry hidden" type="button">重新读取群聊</button>
             </label>
             <label>开始日期（可不选）
-              <input class="invite-date" data-param="start_time" type="date">
+              <input class="date-input" data-param="start_time" type="date">
             </label>
             <label>结束日期（可不选）
-              <input class="invite-date" data-param="end_time" type="date">
+              <input class="date-input" data-param="end_time" type="date">
             </label>
             <label class="full">历史昵称绑定
               <textarea data-param="bind_identity" rows="4"
@@ -250,6 +281,6 @@
       </section>
     </main>
   </div>
-  <script src="/static/app.js?v=20260729-avatar-picker"></script>
+  <script src="/static/app.js?v=20260729-reusable-picker"></script>
 </body>
 </html>

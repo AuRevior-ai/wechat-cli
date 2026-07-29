@@ -11,35 +11,24 @@ const statusList = document.querySelector("#status-list");
 const dbDirSelect = document.querySelector("#db-dir-candidates");
 const detectDbDirsButton = document.querySelector("#detect-db-dirs");
 const setupDbDirInput = document.querySelector("#setup-db-dir");
-const summaryChatSearch = document.querySelector("#summary-chat-search");
-const summaryChatValue = document.querySelector("#summary-chat-value");
-const summaryChatOptions = document.querySelector("#summary-chat-options");
-const summaryChatHint = document.querySelector("#summary-chat-hint");
-const summaryChatRetry = document.querySelector("#summary-chat-retry");
-const summaryDateInputs = [...document.querySelectorAll(".summary-date")];
-const inviteGroupSearch = document.querySelector("#invite-group-search");
-const inviteGroupValue = document.querySelector("#invite-group-value");
-const inviteGroupOptions = document.querySelector("#invite-group-options");
-const inviteGroupHint = document.querySelector("#invite-group-hint");
-const inviteGroupRetry = document.querySelector("#invite-group-retry");
 const profileAvatar = document.querySelector("#profile-avatar");
 const profileName = document.querySelector("#profile-name");
+const defaultTodayInputs = [...document.querySelectorAll("[data-default-today]")];
 
 let lastText = "";
 let lastKeyText = "";
 let lastDownload = null;
 let lastCopyData = null;
 let dbDirCandidates = [];
-let summarySessions = [];
-let summarySessionsLoaded = false;
-let summaryVisibleSessionIndexes = [];
-let summaryActiveOption = -1;
-let inviteVisibleSessionIndexes = [];
-let inviteActiveOption = -1;
+let sessions = [];
+let sessionsLoaded = false;
+let sessionsRequestVersion = 0;
 let currentScreenId = document.querySelector(".screen.active")?.id || "dashboard";
 const screenResultStates = new Map();
 const screenRequestVersions = new Map();
 const SUMMARY_PREVIEW_LIMIT = 200;
+const sessionPickers = [...document.querySelectorAll("[data-session-picker]")]
+  .map(createSessionPicker);
 
 const TYPE_LABELS = {
   text: "文本",
@@ -176,14 +165,14 @@ function setScreen(id) {
   nav.querySelectorAll("button").forEach((button) => {
     button.classList.toggle("active", button.dataset.target === id);
   });
-  const active = document.getElementById(id);
-  title.textContent = active?.dataset.title || "WeChat CLI Web";
+  const activeScreen = document.getElementById(id);
+  title.textContent = activeScreen?.dataset.title || "WeChat CLI Web";
   if (id === "setup" && dbDirCandidates.length === 0) {
     refreshDbDirs().catch((error) => showTransientError(error, "setup"));
   }
   restoreResultState(id);
-  if ((id === "history" || id === "invite-stats") && !summarySessionsLoaded) {
-    loadSummarySessions().catch(showSummarySessionsError);
+  if (activeScreen?.querySelector("[data-session-picker]") && !sessionsLoaded) {
+    loadSessions().catch(showSessionsError);
   }
 }
 
@@ -236,11 +225,18 @@ function validatePayload(payload) {
     return "";
   }
   const params = payload.params || {};
-  if (payload.command === "invite-stats") {
+  if (payload.command === "members" || payload.command === "invite-stats") {
     if (!params.group_name) return "请先从下拉列表选择一个群聊。";
+  }
+  if (payload.command === "stats" && !params.chat_name) {
+    return "请先从下拉列表选择一个聊天。";
+  }
+  if (["search", "stats", "invite-stats"].includes(payload.command)) {
     if (params.start_time && params.end_time && params.start_time > params.end_time) {
       return "开始日期不能晚于结束日期。";
     }
+  }
+  if (payload.command === "invite-stats") {
     return "";
   }
   if (payload.command !== "search") return "";
@@ -334,7 +330,7 @@ function avatarProxyUrl(url) {
   return "";
 }
 
-function avatarMarkup(url, label, className = "summary-option-avatar") {
+function avatarMarkup(url, label, className = "session-picker-option-avatar") {
   const initial = String(label || "W").trim().slice(0, 1).toUpperCase() || "W";
   const src = avatarProxyUrl(url);
   return `<span class="${escapeHtml(className)} avatar-shell">
@@ -358,27 +354,222 @@ async function loadProfile(shouldApply = () => true) {
   return profile;
 }
 
+function createSessionPicker(root) {
+  const picker = {
+    root,
+    filter: root.dataset.filter || "all",
+    multiple: root.dataset.multiple === "true",
+    search: root.querySelector(".session-picker-search"),
+    value: root.querySelector(".session-picker-value"),
+    chips: root.querySelector(".session-picker-chips"),
+    options: root.querySelector(".session-picker-options"),
+    hint: root.querySelector(".session-picker-hint"),
+    retry: root.querySelector(".session-picker-retry"),
+    selectedUsernames: new Set(),
+    visibleSessionIndexes: [],
+    activeOption: -1,
+  };
+
+  picker.search.addEventListener("focus", () => {
+    renderSessionPickerOptions(picker, picker.search.value);
+    setSessionPickerOpen(picker, true);
+  });
+  picker.search.addEventListener("input", () => {
+    if (!picker.multiple) {
+      picker.selectedUsernames.clear();
+      picker.value.value = "";
+    }
+    picker.hint.textContent = picker.multiple
+      ? selectedSessionHint(picker)
+      : `请从匹配结果中选择一个${picker.filter === "group" ? "群聊" : "会话"}`;
+    renderSessionPickerOptions(picker, picker.search.value);
+    setSessionPickerOpen(picker, true);
+  });
+  picker.search.addEventListener("keydown", (event) => {
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      setSessionPickerOpen(picker, true);
+      moveSessionPickerActiveOption(picker, event.key === "ArrowDown" ? 1 : -1);
+    } else if (event.key === "Enter" && picker.activeOption >= 0) {
+      event.preventDefault();
+      const sessionIndex = picker.visibleSessionIndexes[picker.activeOption];
+      selectSessionPickerOption(picker, sessionIndex);
+    } else if (event.key === "Escape") {
+      setSessionPickerOpen(picker, false);
+    }
+  });
+  picker.options.addEventListener("mousedown", (event) => {
+    event.preventDefault();
+  });
+  picker.options.addEventListener("click", (event) => {
+    const option = event.target.closest("button[data-session-index]");
+    if (option) selectSessionPickerOption(picker, Number(option.dataset.sessionIndex));
+  });
+  picker.chips?.addEventListener("click", (event) => {
+    const removeButton = event.target.closest("button[data-remove-username]");
+    if (removeButton) {
+      removeSessionPickerSelection(picker, removeButton.dataset.removeUsername);
+    }
+  });
+  picker.retry.addEventListener("click", () => {
+    loadSessions().catch(showSessionsError);
+  });
+  return picker;
+}
+
+function setSessionPickerOpen(picker, open) {
+  picker.options.hidden = !open;
+  picker.search.setAttribute("aria-expanded", String(open));
+  if (!open) {
+    picker.activeOption = -1;
+    picker.search.setAttribute("aria-activedescendant", "");
+  }
+}
+
+function sessionValue(session) {
+  return session.username || session.chat || "";
+}
+
+function selectedSessionHint(picker) {
+  const count = picker.selectedUsernames.size;
+  if (count) return `已选择 ${count} 个聊天，可继续搜索添加`;
+  return "可不选择；默认搜索全部聊天";
+}
+
+function renderSessionPickerChips(picker) {
+  if (!picker.multiple || !picker.chips) return;
+  const selectedSessions = [...picker.selectedUsernames]
+    .map((username) => sessions.find((session) => sessionValue(session) === username))
+    .filter(Boolean);
+  picker.chips.hidden = selectedSessions.length === 0;
+  picker.chips.innerHTML = selectedSessions.map((session) => `
+    <span class="session-picker-chip">
+      <span>${escapeHtml(session.chat || session.username)}</span>
+      <button type="button" data-remove-username="${escapeHtml(sessionValue(session))}"
+        aria-label="移除 ${escapeHtml(session.chat)}">×</button>
+    </span>
+  `).join("");
+}
+
+function renderSessionPickerOptions(picker, query = "") {
+  const normalizedQuery = query.trim().toLocaleLowerCase("zh-CN");
+  picker.visibleSessionIndexes = sessions
+    .map((session, index) => ({ session, index }))
+    .filter(({ session }) => {
+      if (picker.filter === "group" && !session.is_group) return false;
+      if (!normalizedQuery) return true;
+      return [session.chat, session.username]
+        .some((value) => String(value || "").toLocaleLowerCase("zh-CN").includes(normalizedQuery));
+    })
+    .slice(0, 80)
+    .map(({ index }) => index);
+  picker.activeOption = -1;
+  picker.search.setAttribute("aria-activedescendant", "");
+
+  if (!picker.visibleSessionIndexes.length) {
+    const label = picker.filter === "group" ? "群聊" : "会话";
+    picker.options.innerHTML = `<div class="session-picker-option-empty">没有匹配的${label}</div>`;
+    return;
+  }
+  picker.options.innerHTML = picker.visibleSessionIndexes.map((sessionIndex) => {
+    const session = sessions[sessionIndex];
+    const username = sessionValue(session);
+    const selected = picker.selectedUsernames.has(username);
+    const meta = [
+      session.is_group ? "群聊" : "私聊",
+      session.time || "",
+      session.unread ? `${session.unread} 条未读` : "",
+    ].filter(Boolean).join(" · ");
+    return `<button id="${escapeHtml(picker.root.id)}-option-${sessionIndex}" type="button" role="option"
+      aria-selected="${selected}" data-session-index="${sessionIndex}">
+      ${avatarMarkup(session.avatar_url, session.chat || session.username)}
+      <span class="session-picker-option-main">
+        <strong>${escapeHtml(session.chat || session.username)}</strong>
+        <small>${escapeHtml(meta)}</small>
+      </span>
+      <code>${escapeHtml(session.username || "")}</code>
+    </button>`;
+  }).join("");
+}
+
+function selectSessionPickerOption(picker, sessionIndex) {
+  const session = sessions[sessionIndex];
+  if (!session || (picker.filter === "group" && !session.is_group)) return;
+  const username = sessionValue(session);
+  if (picker.multiple) {
+    picker.selectedUsernames.add(session.username);
+    picker.value.value = [...picker.selectedUsernames].join("\n");
+    picker.search.value = "";
+    picker.hint.textContent = selectedSessionHint(picker);
+    renderSessionPickerChips(picker);
+    renderSessionPickerOptions(picker);
+    setSessionPickerOpen(picker, true);
+    return;
+  }
+  picker.selectedUsernames.clear();
+  picker.selectedUsernames.add(username);
+  picker.search.value = session.chat || session.username;
+  picker.value.value = username;
+  picker.hint.textContent = `已选择：${session.chat || session.username} · ${session.is_group ? "群聊" : "私聊"}`;
+  setSessionPickerOpen(picker, false);
+}
+
+function removeSessionPickerSelection(picker, username) {
+  picker.selectedUsernames.delete(username);
+  picker.value.value = [...picker.selectedUsernames].join("\n");
+  picker.hint.textContent = selectedSessionHint(picker);
+  renderSessionPickerChips(picker);
+  renderSessionPickerOptions(picker, picker.search.value);
+}
+
+function moveSessionPickerActiveOption(picker, direction) {
+  const optionButtons = [...picker.options.querySelectorAll("button[data-session-index]")];
+  if (!optionButtons.length) return;
+  if (picker.activeOption < 0) {
+    picker.activeOption = direction > 0 ? 0 : optionButtons.length - 1;
+  } else {
+    picker.activeOption = (
+      picker.activeOption + direction + optionButtons.length
+    ) % optionButtons.length;
+  }
+  optionButtons.forEach((button, index) => {
+    button.classList.toggle("active", index === picker.activeOption);
+  });
+  const activeButton = optionButtons[picker.activeOption];
+  picker.search.setAttribute("aria-activedescendant", activeButton.id);
+  activeButton.scrollIntoView({ block: "nearest" });
+}
+
+function resetSessionPickers() {
+  sessionPickers.forEach((picker) => {
+    picker.search.value = "";
+    picker.value.value = "";
+    picker.options.innerHTML = "";
+    picker.selectedUsernames.clear();
+    picker.visibleSessionIndexes = [];
+    picker.activeOption = -1;
+    picker.hint.textContent = picker.filter === "group"
+      ? "正在读取群聊列表…"
+      : (picker.multiple ? "可不选择；默认搜索全部聊天" : "正在读取会话列表…");
+    picker.retry.classList.add("hidden");
+    renderSessionPickerChips(picker);
+    setSessionPickerOpen(picker, false);
+  });
+}
+
 async function refreshAccountData(shouldApply = () => true) {
   if (!shouldApply()) return;
-  summarySessionsLoaded = false;
-  summarySessions = [];
-  summaryVisibleSessionIndexes = [];
-  inviteVisibleSessionIndexes = [];
-  if (summaryChatSearch) summaryChatSearch.value = "";
-  if (summaryChatValue) summaryChatValue.value = "";
-  if (summaryChatOptions) summaryChatOptions.innerHTML = "";
-  if (inviteGroupSearch) inviteGroupSearch.value = "";
-  if (inviteGroupValue) inviteGroupValue.value = "";
-  if (inviteGroupOptions) inviteGroupOptions.innerHTML = "";
-  if (summaryChatHint) summaryChatHint.textContent = "正在读取最近会话…";
-  if (inviteGroupHint) inviteGroupHint.textContent = "正在读取群聊列表…";
+  sessionsLoaded = false;
+  sessionsRequestVersion += 1;
+  sessions = [];
+  resetSessionPickers();
   if (profileName) profileName.textContent = "正在读取账号…";
   if (profileAvatar) {
     profileAvatar.innerHTML = avatarMarkup("", "W", "brand-avatar");
   }
   const [profileResult, sessionsResult] = await Promise.allSettled([
     loadProfile(shouldApply),
-    loadSummarySessions(shouldApply),
+    loadSessions(shouldApply),
   ]);
   if (!shouldApply()) return;
   if (profileResult.status === "rejected") {
@@ -388,154 +579,21 @@ async function refreshAccountData(shouldApply = () => true) {
     }
   }
   if (sessionsResult.status === "rejected") {
-    showSummarySessionsError(sessionsResult.reason);
+    showSessionsError(sessionsResult.reason);
   }
 }
 
-function setSummaryOptionsOpen(open) {
-  if (!summaryChatOptions || !summaryChatSearch) return;
-  summaryChatOptions.hidden = !open;
-  summaryChatSearch.setAttribute("aria-expanded", String(open));
-}
-
-function renderSummarySessionOptions(query = "") {
-  if (!summaryChatOptions) return;
-  const normalizedQuery = query.trim().toLocaleLowerCase("zh-CN");
-  summaryVisibleSessionIndexes = summarySessions
-    .map((session, index) => ({ session, index }))
-    .filter(({ session }) => {
-      if (!normalizedQuery) return true;
-      return [session.chat, session.username, session.sender, session.last_message]
-        .some((value) => String(value || "").toLocaleLowerCase("zh-CN").includes(normalizedQuery));
-    })
-    .slice(0, 80)
-    .map(({ index }) => index);
-  summaryActiveOption = -1;
-  summaryChatSearch?.setAttribute("aria-activedescendant", "");
-
-  if (!summaryVisibleSessionIndexes.length) {
-    summaryChatOptions.innerHTML = '<div class="summary-option-empty">没有匹配的会话</div>';
-    return;
-  }
-  summaryChatOptions.innerHTML = summaryVisibleSessionIndexes.map((sessionIndex) => {
-    const session = summarySessions[sessionIndex];
-    const meta = [
-      session.is_group ? "群聊" : "私聊",
-      session.time || "",
-      session.unread ? `${session.unread} 条未读` : "",
-    ].filter(Boolean).join(" · ");
-    return `<button id="summary-session-option-${sessionIndex}" type="button" role="option"
-      aria-selected="false" data-session-index="${sessionIndex}">
-      ${avatarMarkup(session.avatar_url, session.chat || session.username)}
-      <span class="summary-option-main">
-        <strong>${escapeHtml(session.chat || session.username)}</strong>
-        <small>${escapeHtml(meta)}</small>
-      </span>
-      <code>${escapeHtml(session.username || "")}</code>
-    </button>`;
-  }).join("");
-}
-
-function selectSummarySession(sessionIndex) {
-  const session = summarySessions[sessionIndex];
-  if (!session || !summaryChatSearch || !summaryChatValue) return;
-  summaryChatSearch.value = session.chat || session.username;
-  summaryChatValue.value = session.username || session.chat;
-  summaryChatSearch.setAttribute("aria-activedescendant", "");
-  if (summaryChatHint) {
-    summaryChatHint.textContent = `已选择：${session.chat || session.username} · ${session.is_group ? "群聊" : "私聊"}`;
-  }
-  setSummaryOptionsOpen(false);
-}
-
-function moveSummaryActiveOption(direction) {
-  if (!summaryChatOptions || !summaryVisibleSessionIndexes.length) return;
-  const optionButtons = [...summaryChatOptions.querySelectorAll("button[data-session-index]")];
-  if (!optionButtons.length) return;
-  summaryActiveOption = (summaryActiveOption + direction + optionButtons.length) % optionButtons.length;
-  optionButtons.forEach((button, index) => {
-    const isActive = index === summaryActiveOption;
-    button.classList.toggle("active", isActive);
-    button.setAttribute("aria-selected", String(isActive));
-  });
-  const activeButton = optionButtons[summaryActiveOption];
-  summaryChatSearch.setAttribute("aria-activedescendant", activeButton.id);
-  activeButton.scrollIntoView({ block: "nearest" });
-}
-
-function setInviteOptionsOpen(open) {
-  if (!inviteGroupOptions || !inviteGroupSearch) return;
-  inviteGroupOptions.hidden = !open;
-  inviteGroupSearch.setAttribute("aria-expanded", String(open));
-}
-
-function renderInviteGroupOptions(query = "") {
-  if (!inviteGroupOptions) return;
-  const normalizedQuery = query.trim().toLocaleLowerCase("zh-CN");
-  inviteVisibleSessionIndexes = summarySessions
-    .map((session, index) => ({ session, index }))
-    .filter(({ session }) => session.is_group)
-    .filter(({ session }) => {
-      if (!normalizedQuery) return true;
-      return [session.chat, session.username]
-        .some((value) => String(value || "").toLocaleLowerCase("zh-CN").includes(normalizedQuery));
-    })
-    .slice(0, 80)
-    .map(({ index }) => index);
-  inviteActiveOption = -1;
-  inviteGroupSearch?.setAttribute("aria-activedescendant", "");
-
-  if (!inviteVisibleSessionIndexes.length) {
-    inviteGroupOptions.innerHTML = '<div class="summary-option-empty">没有匹配的群聊</div>';
-    return;
-  }
-  inviteGroupOptions.innerHTML = inviteVisibleSessionIndexes.map((sessionIndex) => {
-    const session = summarySessions[sessionIndex];
-    return `<button id="invite-group-option-${sessionIndex}" type="button" role="option"
-      aria-selected="false" data-session-index="${sessionIndex}">
-      ${avatarMarkup(session.avatar_url, session.chat || session.username)}
-      <span class="summary-option-main">
-        <strong>${escapeHtml(session.chat || session.username)}</strong>
-        <small>群聊${session.time ? ` · ${escapeHtml(session.time)}` : ""}</small>
-      </span>
-      <code>${escapeHtml(session.username || "")}</code>
-    </button>`;
-  }).join("");
-}
-
-function selectInviteGroup(sessionIndex) {
-  const session = summarySessions[sessionIndex];
-  if (!session?.is_group || !inviteGroupSearch || !inviteGroupValue) return;
-  inviteGroupSearch.value = session.chat || session.username;
-  inviteGroupValue.value = session.username || session.chat;
-  inviteGroupSearch.setAttribute("aria-activedescendant", "");
-  if (inviteGroupHint) {
-    inviteGroupHint.textContent = `已选择：${session.chat || session.username}`;
-  }
-  setInviteOptionsOpen(false);
-}
-
-function moveInviteActiveOption(direction) {
-  if (!inviteGroupOptions || !inviteVisibleSessionIndexes.length) return;
-  const optionButtons = [...inviteGroupOptions.querySelectorAll("button[data-session-index]")];
-  if (!optionButtons.length) return;
-  inviteActiveOption = (inviteActiveOption + direction + optionButtons.length) % optionButtons.length;
-  optionButtons.forEach((button, index) => {
-    const isActive = index === inviteActiveOption;
-    button.classList.toggle("active", isActive);
-    button.setAttribute("aria-selected", String(isActive));
-  });
-  const activeButton = optionButtons[inviteActiveOption];
-  inviteGroupSearch.setAttribute("aria-activedescendant", activeButton.id);
-  activeButton.scrollIntoView({ block: "nearest" });
-}
-
-async function loadSummarySessions(shouldApply = () => true) {
-  if (!summaryChatSearch || !summaryChatOptions) return [];
+async function loadSessions(shouldApply = () => true) {
+  if (!sessionPickers.length) return [];
   if (!shouldApply()) return [];
-  if (summaryChatHint) summaryChatHint.textContent = "正在读取最近会话…";
-  if (summaryChatRetry) summaryChatRetry.classList.add("hidden");
-  if (inviteGroupRetry) inviteGroupRetry.classList.add("hidden");
+  const requestVersion = sessionsRequestVersion + 1;
+  sessionsRequestVersion = requestVersion;
+  sessionPickers.forEach((picker) => {
+    picker.hint.textContent = picker.filter === "group"
+      ? "正在读取群聊列表…"
+      : "正在读取会话列表…";
+    picker.retry.classList.add("hidden");
+  });
   const payload = await fetchJson("/api/run", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -547,26 +605,27 @@ async function loadSummarySessions(shouldApply = () => true) {
   if (!payload.ok || !Array.isArray(payload.data)) {
     throw new Error(payload.stderr || payload.error || "无法读取会话列表");
   }
-  if (!shouldApply()) return [];
-  summarySessions = payload.data;
-  summarySessionsLoaded = true;
-  renderSummarySessionOptions(summaryChatSearch.value);
-  renderInviteGroupOptions(inviteGroupSearch?.value || "");
-  if (summaryChatHint) {
-    summaryChatHint.textContent = `已载入 ${summarySessions.length} 个会话，输入名称或账号可快速匹配`;
-  }
-  if (inviteGroupHint) {
-    const groupCount = summarySessions.filter((session) => session.is_group).length;
-    inviteGroupHint.textContent = `已载入 ${groupCount} 个群聊，输入群名称或群账号可快速匹配`;
-  }
-  return summarySessions;
+  if (!shouldApply() || requestVersion !== sessionsRequestVersion) return [];
+  sessions = payload.data;
+  sessionsLoaded = true;
+  const groupCount = sessions.filter((session) => session.is_group).length;
+  sessionPickers.forEach((picker) => {
+    renderSessionPickerOptions(picker, picker.search.value);
+    picker.hint.textContent = picker.multiple
+      ? selectedSessionHint(picker)
+      : (picker.filter === "group"
+        ? `已载入 ${groupCount} 个群聊，输入名称或账号可快速匹配`
+        : `已载入 ${sessions.length} 个会话，输入名称或账号可快速匹配`);
+  });
+  return sessions;
 }
 
-function showSummarySessionsError(error) {
-  if (summaryChatHint) summaryChatHint.textContent = `会话读取失败：${error.message}`;
-  if (summaryChatRetry) summaryChatRetry.classList.remove("hidden");
-  if (inviteGroupHint) inviteGroupHint.textContent = `群聊读取失败：${error.message}`;
-  if (inviteGroupRetry) inviteGroupRetry.classList.remove("hidden");
+function showSessionsError(error) {
+  sessionPickers.forEach((picker) => {
+    const label = picker.filter === "group" ? "群聊" : "会话";
+    picker.hint.textContent = `${label}读取失败：${error.message}`;
+    picker.retry.classList.remove("hidden");
+  });
 }
 
 function showTransientError(error, screenId = currentScreenId) {
@@ -1174,93 +1233,13 @@ if (dbDirSelect && setupDbDirInput) {
   });
 }
 
-if (summaryChatSearch && summaryChatValue && summaryChatOptions) {
-  summaryChatSearch.addEventListener("focus", () => {
-    renderSummarySessionOptions(summaryChatSearch.value);
-    setSummaryOptionsOpen(true);
-  });
-  summaryChatSearch.addEventListener("input", () => {
-    summaryChatValue.value = "";
-    if (summaryChatHint) summaryChatHint.textContent = "请从匹配结果中选择一个会话";
-    renderSummarySessionOptions(summaryChatSearch.value);
-    setSummaryOptionsOpen(true);
-  });
-  summaryChatSearch.addEventListener("keydown", (event) => {
-    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
-      event.preventDefault();
-      setSummaryOptionsOpen(true);
-      moveSummaryActiveOption(event.key === "ArrowDown" ? 1 : -1);
-    } else if (event.key === "Enter" && summaryActiveOption >= 0) {
-      event.preventDefault();
-      const sessionIndex = summaryVisibleSessionIndexes[summaryActiveOption];
-      selectSummarySession(sessionIndex);
-    } else if (event.key === "Escape") {
-      setSummaryOptionsOpen(false);
+document.addEventListener("click", (event) => {
+  sessionPickers.forEach((picker) => {
+    if (!picker.root.contains(event.target)) {
+      setSessionPickerOpen(picker, false);
     }
   });
-  summaryChatOptions.addEventListener("mousedown", (event) => {
-    event.preventDefault();
-  });
-  summaryChatOptions.addEventListener("click", (event) => {
-    const option = event.target.closest("button[data-session-index]");
-    if (option) selectSummarySession(Number(option.dataset.sessionIndex));
-  });
-  document.addEventListener("click", (event) => {
-    if (!event.target.closest("#summary-chat-combobox")) {
-      setSummaryOptionsOpen(false);
-    }
-  });
-}
-
-if (summaryChatRetry) {
-  summaryChatRetry.addEventListener("click", () => {
-    loadSummarySessions().catch(showSummarySessionsError);
-  });
-}
-
-if (inviteGroupSearch && inviteGroupValue && inviteGroupOptions) {
-  inviteGroupSearch.addEventListener("focus", () => {
-    renderInviteGroupOptions(inviteGroupSearch.value);
-    setInviteOptionsOpen(true);
-  });
-  inviteGroupSearch.addEventListener("input", () => {
-    inviteGroupValue.value = "";
-    if (inviteGroupHint) inviteGroupHint.textContent = "请从匹配结果中选择一个群聊";
-    renderInviteGroupOptions(inviteGroupSearch.value);
-    setInviteOptionsOpen(true);
-  });
-  inviteGroupSearch.addEventListener("keydown", (event) => {
-    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
-      event.preventDefault();
-      setInviteOptionsOpen(true);
-      moveInviteActiveOption(event.key === "ArrowDown" ? 1 : -1);
-    } else if (event.key === "Enter" && inviteActiveOption >= 0) {
-      event.preventDefault();
-      const sessionIndex = inviteVisibleSessionIndexes[inviteActiveOption];
-      selectInviteGroup(sessionIndex);
-    } else if (event.key === "Escape") {
-      setInviteOptionsOpen(false);
-    }
-  });
-  inviteGroupOptions.addEventListener("mousedown", (event) => {
-    event.preventDefault();
-  });
-  inviteGroupOptions.addEventListener("click", (event) => {
-    const option = event.target.closest("button[data-session-index]");
-    if (option) selectInviteGroup(Number(option.dataset.sessionIndex));
-  });
-  document.addEventListener("click", (event) => {
-    if (!event.target.closest("#invite-group-combobox")) {
-      setInviteOptionsOpen(false);
-    }
-  });
-}
-
-if (inviteGroupRetry) {
-  inviteGroupRetry.addEventListener("click", () => {
-    loadSummarySessions().catch(showSummarySessionsError);
-  });
-}
+});
 
 const localDate = new Date();
 const localToday = [
@@ -1268,7 +1247,7 @@ const localToday = [
   String(localDate.getMonth() + 1).padStart(2, "0"),
   String(localDate.getDate()).padStart(2, "0"),
 ].join("-");
-summaryDateInputs.forEach((input) => {
+defaultTodayInputs.forEach((input) => {
   if (!input.value) input.value = localToday;
 });
 

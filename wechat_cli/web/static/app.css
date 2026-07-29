@@ -677,7 +677,7 @@ pre {
   font-weight: 400;
 }
 
-.summary-retry {
+.session-picker-retry {
   justify-self: start;
   border: 0;
   background: transparent;
@@ -689,11 +689,13 @@ pre {
   cursor: pointer;
 }
 
-.summary-combobox {
+.session-picker {
   position: relative;
+  display: grid;
+  gap: 7px;
 }
 
-.summary-combobox::after {
+.session-picker::after {
   content: "⌄";
   position: absolute;
   top: 8px;
@@ -703,17 +705,17 @@ pre {
   pointer-events: none;
 }
 
-.summary-combobox input[type="search"] {
+.session-picker input[type="search"] {
   padding-right: 40px;
   background:
     linear-gradient(90deg, rgba(17, 107, 95, .06), transparent 38%),
     var(--field);
 }
 
-.summary-chat-options {
+.session-picker-options {
   position: absolute;
   z-index: 20;
-  top: calc(100% + 7px);
+  top: 45px;
   left: 0;
   right: 0;
   max-height: 340px;
@@ -724,11 +726,11 @@ pre {
   box-shadow: 0 20px 42px rgba(39, 48, 44, .2);
 }
 
-.summary-chat-options[hidden] {
+.session-picker-options[hidden] {
   display: none;
 }
 
-.summary-chat-options button {
+.session-picker-options button {
   display: grid;
   grid-template-columns: 38px minmax(0, 1fr) minmax(130px, .45fr);
   gap: 10px;
@@ -743,16 +745,17 @@ pre {
   cursor: pointer;
 }
 
-.summary-chat-options button:last-child {
+.session-picker-options button:last-child {
   border-bottom: 0;
 }
 
-.summary-chat-options button:hover,
-.summary-chat-options button.active {
+.session-picker-options button:hover,
+.session-picker-options button.active,
+.session-picker-options button[aria-selected="true"] {
   background: var(--green-soft);
 }
 
-.summary-option-avatar {
+.session-picker-option-avatar {
   display: grid;
   place-items: center;
   width: 38px;
@@ -764,45 +767,93 @@ pre {
   overflow: hidden;
 }
 
-.summary-option-avatar .avatar-shell-fallback {
+.session-picker-option-avatar .avatar-shell-fallback {
   width: 100%;
   height: 100%;
   background: var(--green);
   color: #fff;
 }
 
-.summary-option-main {
+.session-picker-option-main {
   display: grid;
   gap: 3px;
   min-width: 0;
 }
 
-.summary-option-main strong,
-.summary-option-main small {
+.session-picker-option-main strong,
+.session-picker-option-main small {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.summary-option-main small,
-.summary-chat-options code {
+.session-picker-option-main small,
+.session-picker-options code {
   color: var(--muted);
   font-size: 11px;
 }
 
-.summary-chat-options code {
+.session-picker-options code {
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.summary-option-empty {
+.session-picker-option-empty {
   padding: 18px;
   color: var(--muted);
   text-align: center;
 }
 
-.summary-date,
-.invite-date {
+.session-picker-hint {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.session-picker-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.session-picker-chips[hidden] {
+  display: none;
+}
+
+.session-picker-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  max-width: 100%;
+  border: 1px solid #9ebdb5;
+  border-radius: 999px;
+  background: var(--green-soft);
+  padding: 5px 5px 5px 10px;
+  color: var(--green);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.session-picker-chip span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-picker-chip button {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(17, 107, 95, .12);
+  color: var(--green);
+  cursor: pointer;
+}
+
+.date-input {
   color-scheme: light;
 }
 
@@ -995,11 +1046,11 @@ pre {
     flex-direction: column;
   }
 
-  .summary-chat-options button {
+  .session-picker-options button {
     grid-template-columns: 38px minmax(0, 1fr);
   }
 
-  .summary-chat-options code {
+  .session-picker-options code {
     grid-column: 2;
   }
 }
