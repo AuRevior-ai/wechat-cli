@@ -40,6 +40,7 @@ def cli(ctx, config_path):
       wechat-cli contacts --query "李"              # 搜索联系人
       wechat-cli new-messages                       # 获取增量新消息
       wechat-cli invite-stats "群名"                # 群邀请统计与排行
+      wechat-cli ai-package "群名" --output ai.zip  # 生成 AI 聊天资料包
     """
     # init/web/version 命令不需要 AppContext
     if ctx.invoked_subcommand in ("init", "web", "version"):
@@ -70,6 +71,7 @@ from .commands.favorites import favorites
 from .commands.web import web
 from .commands.media import media
 from .commands.invite_stats import invite_stats
+from .commands.ai_package import ai_package
 
 cli.add_command(init)
 cli.add_command(sessions)
@@ -85,6 +87,7 @@ cli.add_command(favorites)
 cli.add_command(web)
 cli.add_command(media)
 cli.add_command(invite_stats)
+cli.add_command(ai_package)
 
 
 if __name__ == "__main__":

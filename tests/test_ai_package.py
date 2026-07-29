@@ -239,6 +239,33 @@ class AiPackageTests(unittest.TestCase):
         self.assertTrue(asset_name.endswith(".png"))
         self.assertEqual(asset_body, PNG_BYTES)
 
+    def test_does_not_package_placeholder_when_v2_image_key_is_missing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            encrypted = root / "missing-key.dat"
+            encrypted.write_bytes(b"\x07\x08V2" + b"\x00" * 100)
+            item = {
+                **_base_item(13, "image", "[图片]"),
+                "media": {
+                    "kind": "image",
+                    "path": str(encrypted),
+                    "exists": True,
+                    "filename": encrypted.name,
+                },
+            }
+
+            result = build_ai_package(
+                _chat(),
+                [item],
+                root / "missing-key.zip",
+                db_dir=str(root / "db_storage"),
+                transcribe_voice=False,
+            )
+
+        self.assertEqual(result.asset_count, 0)
+        self.assertEqual(result.failures[0]["phase"], "local_media")
+        self.assertIn("密钥", result.failures[0]["error"])
+
 
 if __name__ == "__main__":
     unittest.main()

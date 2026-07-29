@@ -164,7 +164,7 @@ def _local_ai_media_payload(
     stem = re.sub(r"_(?:t|h)$", "", path.stem, flags=re.IGNORECASE)
     thumbnail = path.with_name(f"{stem}_t.dat")
     if not thumbnail.is_file() or thumbnail == path:
-        return payload
+        raise RuntimeError("微信 V2 图片密钥不可用，无法读取真实图片")
     fallback = read_media_file_payload(
         str(thumbnail),
         db_dir=db_dir,
@@ -172,7 +172,7 @@ def _local_ai_media_payload(
         image_xor_key=image_xor_key,
     )
     if fallback["content_type"] in unsupported_preview:
-        return payload
+        raise RuntimeError("微信 V2 图片密钥不可用，无法读取真实图片")
     return fallback
 
 
