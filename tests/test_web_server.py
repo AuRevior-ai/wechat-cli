@@ -209,7 +209,7 @@ class BuildCliArgsTests(unittest.TestCase):
         self.assertIn("function renderInviteStats", js)
         self.assertIn("invite-ranking-table", css)
 
-    def test_invite_stats_uses_searchable_group_picker_and_day_inputs(self):
+    def test_invite_stats_uses_reusable_group_picker_and_day_inputs(self):
         html = (
             ROOT / "wechat_cli" / "web" / "static" / "index.html"
         ).read_text(encoding="utf-8")
@@ -217,19 +217,97 @@ class BuildCliArgsTests(unittest.TestCase):
             ROOT / "wechat_cli" / "web" / "static" / "app.js"
         ).read_text(encoding="utf-8")
 
-        self.assertIn('id="invite-group-search"', html)
-        self.assertIn('id="invite-group-options"', html)
         self.assertIn(
-            'id="invite-group-value" data-param="group_name" type="hidden"',
+            'id="invite-group-picker" class="session-picker" '
+            'data-session-picker data-filter="group" data-multiple="false"',
+            html,
+        )
+        self.assertIn(
+            'class="session-picker-value" data-param="group_name" type="hidden"',
             html,
         )
         self.assertEqual(
-            html.count('class="invite-date" data-param='),
-            2,
+            html.count('class="date-input" data-param='),
+            8,
         )
-        self.assertIn("function renderInviteGroupOptions", js)
-        self.assertIn(".filter(({ session }) => session.is_group)", js)
-        self.assertIn("function selectInviteGroup", js)
+        self.assertEqual(
+            html.count('class="date-input" data-param="start_time" type="date"'),
+            4,
+        )
+        self.assertEqual(
+            html.count('class="date-input" data-param="end_time" type="date"'),
+            4,
+        )
+        self.assertIn("function renderSessionPickerOptions", js)
+        self.assertIn('picker.filter === "group" && !session.is_group', js)
+        self.assertIn("function selectSessionPickerOption", js)
+        self.assertNotIn("function renderInviteGroupOptions", js)
+        self.assertNotIn("function selectInviteGroup", js)
+
+    def test_all_chat_and_group_fields_use_reusable_session_pickers(self):
+        html = (
+            ROOT / "wechat_cli" / "web" / "static" / "index.html"
+        ).read_text(encoding="utf-8")
+        js = (
+            ROOT / "wechat_cli" / "web" / "static" / "app.js"
+        ).read_text(encoding="utf-8")
+        expected_pickers = {
+            "history-chat-picker": ("all", "false"),
+            "search-chat-picker": ("all", "true"),
+            "members-group-picker": ("group", "false"),
+            "stats-chat-picker": ("all", "false"),
+            "invite-group-picker": ("group", "false"),
+        }
+
+        self.assertEqual(html.count("data-session-picker"), len(expected_pickers))
+        for picker_id, (session_filter, multiple) in expected_pickers.items():
+            self.assertIn(
+                f'id="{picker_id}" class="session-picker" data-session-picker '
+                f'data-filter="{session_filter}" data-multiple="{multiple}"',
+                html,
+            )
+        self.assertIn(
+            'class="session-picker-value" data-param="chat" '
+            'data-list="lines" type="hidden"',
+            html,
+        )
+        self.assertIn('class="session-picker-chips"', html)
+        self.assertIn(
+            "const sessionPickers = [...document.querySelectorAll(\"[data-session-picker]\")]",
+            js,
+        )
+        self.assertIn("function createSessionPicker(root)", js)
+        self.assertIn("function resetSessionPickers()", js)
+        self.assertIn("async function loadSessions(shouldApply = () => true)", js)
+        self.assertIn(
+            'activeScreen?.querySelector("[data-session-picker]")',
+            js,
+        )
+        self.assertNotIn("async function loadSummarySessions", js)
+        self.assertNotIn("renderSummarySessionOptions", js)
+
+    def test_search_picker_supports_multiple_selected_sessions(self):
+        html = (
+            ROOT / "wechat_cli" / "web" / "static" / "index.html"
+        ).read_text(encoding="utf-8")
+        js = (
+            ROOT / "wechat_cli" / "web" / "static" / "app.js"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn(
+            'id="search-chat-picker" class="session-picker" '
+            'data-session-picker data-filter="all" data-multiple="true"',
+            html,
+        )
+        self.assertIn("picker.selectedUsernames.add(session.username);", js)
+        self.assertIn("picker.selectedUsernames.delete(username);", js)
+        self.assertIn(
+            'picker.value.value = [...picker.selectedUsernames].join("\\n");',
+            js,
+        )
+        self.assertIn("function renderSessionPickerChips", js)
+        self.assertIn('class="session-picker-chip"', js)
+        self.assertIn('aria-label="移除 ${escapeHtml(session.chat)}"', js)
 
     def test_web_uses_local_avatar_proxy_for_profile_sessions_and_messages(self):
         html = (
@@ -257,17 +335,17 @@ class BuildCliArgsTests(unittest.TestCase):
             "async function refreshAccountData(shouldApply = () => true)",
             js,
         )
-        self.assertIn("summarySessionsLoaded = false;", js)
+        self.assertIn("sessionsLoaded = false;", js)
         self.assertIn(
             "await refreshAccountData(() => screenRequestVersions.get(screenId) === requestVersion);",
             js,
         )
         self.assertIn("loadProfile(shouldApply)", js)
-        self.assertIn("loadSummarySessions(shouldApply)", js)
+        self.assertIn("loadSessions(shouldApply)", js)
         self.assertIn("if (!shouldApply()) return profile;", js)
         self.assertIn("if (!shouldApply()) return [];", js)
-        self.assertIn("showSummarySessionsError(sessionsResult.reason)", js)
-        self.assertIn("inviteGroupRetry.classList.add(\"hidden\")", js)
+        self.assertIn("showSessionsError(sessionsResult.reason)", js)
+        self.assertIn("resetSessionPickers();", js)
 
     def test_results_are_saved_and_restored_per_screen(self):
         js = (
@@ -313,7 +391,7 @@ class BuildCliArgsTests(unittest.TestCase):
         self.assertIn("fieldLabel(key)", js)
         self.assertIn('if (typeof value === "boolean") return value ? "是" : "否";', js)
 
-    def test_history_page_has_searchable_chat_picker_and_day_inputs(self):
+    def test_history_page_has_reusable_chat_picker_and_day_inputs(self):
         html = (
             ROOT / "wechat_cli" / "web" / "static" / "index.html"
         ).read_text(encoding="utf-8")
@@ -329,16 +407,18 @@ class BuildCliArgsTests(unittest.TestCase):
         self.assertNotIn('data-target="chat-summary"', html)
         self.assertNotIn('id="chat-summary"', html)
         self.assertIn('data-result-mode="summary"', html)
-        self.assertIn('id="summary-chat-search"', html)
-        self.assertIn('id="summary-chat-options"', html)
-        self.assertEqual(html.count('class="summary-date" data-param='), 2)
-        self.assertIn('type="date"', html)
+        self.assertIn(
+            'id="history-chat-picker" class="session-picker" '
+            'data-session-picker data-filter="all" data-multiple="false"',
+            html,
+        )
+        self.assertEqual(html.count("data-default-today"), 2)
         self.assertIn('data-param="limit" type="hidden" value="50000"', html)
         self.assertIn(
-            "async function loadSummarySessions(shouldApply = () => true)",
+            "async function loadSessions(shouldApply = () => true)",
             js,
         )
-        self.assertEqual(js.count("renderSummarySessionOptions(summaryChatSearch.value);"), 3)
+        self.assertIn("function renderSessionPickerOptions", js)
         self.assertIn("function formatSummaryCopy(data)", js)
         self.assertIn("function formatSummaryKeyCopy(data)", js)
         self.assertIn("`聊天记录 · ${summaryData.chat", js)
@@ -348,10 +428,10 @@ class BuildCliArgsTests(unittest.TestCase):
         self.assertIn("allowRemoteAvatars: true", js)
         self.assertIn("allowRemoteMedia: false", js)
         self.assertIn("function renderMessageMedia(item, { allowRemote = true } = {})", js)
-        self.assertIn('id="summary-chat-retry"', html)
+        self.assertIn('class="session-picker-retry hidden"', html)
         self.assertIn("aria-activedescendant", html)
         self.assertIn("aria-selected", js)
-        self.assertIn(".summary-combobox", css)
+        self.assertIn(".session-picker", css)
         self.assertIn(".summary-result-hero", css)
 
     def test_web_navigation_is_reduced_to_eight_focused_entries(self):
