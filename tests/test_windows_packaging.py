@@ -40,6 +40,7 @@ class WindowsPackagingTests(unittest.TestCase):
         self.assertIn("install.ps1", manifest)
         self.assertIn("start-wechat-cli-web.bat", manifest)
         self.assertIn("README-APP.md", manifest)
+        self.assertIn("THIRD_PARTY_NOTICES.md", manifest)
         self.assertIn("app/wechat-cli.exe", [item.replace("\\", "/") for item in manifest])
 
     def test_installer_stops_running_installed_exe_before_copying(self):

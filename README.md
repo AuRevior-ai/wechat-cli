@@ -8,7 +8,7 @@
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey.svg)](https://github.com/freestylefly/wechat-cli)
 
-Chat history · Contacts · Sessions · Favorites · Statistics · Export
+Chat history · Merged forwards · Voice transcription · AI media packages
 
 [中文文档](README_CN.md)
 
@@ -19,7 +19,7 @@ Chat history · Contacts · Sessions · Favorites · Statistics · Export
 ## ✨ Highlights
 
 - **🚀 Zero-config install** — `npm install -g` and you're done, no Python needed
-- **📦 11 commands** — sessions, history, search, contacts, members, stats, export, favorites, unread, new-messages, init
+- **📦 AI material packages** — recursively expands merged forwards and bundles images, stickers, decoded voice, and copy-ready text
 - **🤖 AI-first** — JSON output by default, designed for LLM agent tool calls
 - **🔒 Fully local** — on-the-fly SQLCipher decryption, data never leaves your machine
 - **📊 Rich analytics** — top senders, message type breakdown, 24-hour activity charts
@@ -154,6 +154,7 @@ EOF
 wechat-cli sessions                        # Recent chats
 wechat-cli history "Alice" --limit 20      # Chat messages
 wechat-cli search "deadline" --chat "Team" # Search messages
+wechat-cli ai-package "Team" --start-time "2026-07-29" --end-time "2026-07-29" --output team-ai.zip
 ```
 
 ---
@@ -228,6 +229,25 @@ wechat-cli history "Alice" --format text
 ```
 
 **Options:** `--limit`, `--offset`, `--start-time`, `--end-time`, `--type`, `--format`
+
+### `ai-package` — AI-ready chat and media ZIP
+
+```bash
+wechat-cli ai-package "Team" --start-time "2026-07-29" --end-time "2026-07-29" --output team-ai.zip
+wechat-cli ai-package "Alice" --output alice-ai.zip --no-transcribe
+```
+
+The ZIP contains `聊天记录.txt`, `清单.json`, and a relative `素材/` directory.
+Merged forwards are expanded recursively. Local images and WeChat stickers are
+saved with deterministic filenames. SILK voice messages are decoded to WAV and,
+by default, transcribed with a SHA-256-verified offline sherpa-onnx model.
+
+On Windows WeChat 4.1, V2 image keys are briefly present after an image is
+opened full-size in WeChat. If a package reports an unavailable V2 image, open
+that image in WeChat and run the command again; verified keys are cached locally.
+
+**Options:** `--start-time`, `--end-time`, `--output`, `--transcribe`,
+`--no-transcribe`, `--include-copy-data`
 
 ### `search` — Search Messages
 

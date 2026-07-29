@@ -110,6 +110,9 @@ Copy-WithRetry -Path (Join-Path $SourceDir "README-APP.md") -Destination $Instal
 if (Test-Path (Join-Path $SourceDir "LICENSE")) {
     Copy-WithRetry -Path (Join-Path $SourceDir "LICENSE") -Destination $InstallDir
 }
+if (Test-Path (Join-Path $SourceDir "THIRD_PARTY_NOTICES.md")) {
+    Copy-WithRetry -Path (Join-Path $SourceDir "THIRD_PARTY_NOTICES.md") -Destination $InstallDir
+}
 
 $Shell = New-Object -ComObject WScript.Shell
 $DesktopShortcut = Join-Path ([Environment]::GetFolderPath("Desktop")) "WeChat CLI Web.lnk"

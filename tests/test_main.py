@@ -19,11 +19,11 @@ class FakeStream:
 
 
 class MainTests(unittest.TestCase):
-    def test_release_version_is_0_3_1(self):
+    def test_release_version_is_0_4_0(self):
         result = CliRunner().invoke(cli, ["--version"])
 
         self.assertEqual(result.exit_code, 0, result.output)
-        self.assertIn("0.3.1", result.output)
+        self.assertIn("0.4.0", result.output)
 
     def test_configure_utf8_stdio_reconfigures_stdout_and_stderr(self):
         stdout = FakeStream()

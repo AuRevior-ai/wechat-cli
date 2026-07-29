@@ -22,6 +22,7 @@ WINDOWS_PACKAGE_FILES = (
     "start-wechat-cli-web.bat",
     "README-APP.md",
     "LICENSE",
+    "THIRD_PARTY_NOTICES.md",
     "app/wechat-cli.exe",
 )
 
@@ -52,6 +53,10 @@ def copy_package_files(package_dir):
     for name in ("install-and-start.bat", "install.ps1", "start-wechat-cli-web.bat", "README-APP.md"):
         shutil.copy2(WINDOWS_TEMPLATES / name, package_dir / name)
     shutil.copy2(ROOT / "LICENSE", package_dir / "LICENSE")
+    shutil.copy2(
+        ROOT / "THIRD_PARTY_NOTICES.md",
+        package_dir / "THIRD_PARTY_NOTICES.md",
+    )
 
 
 def create_package(skip_build=False):
