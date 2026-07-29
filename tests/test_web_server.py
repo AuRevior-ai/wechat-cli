@@ -253,11 +253,20 @@ class BuildCliArgsTests(unittest.TestCase):
             ROOT / "wechat_cli" / "web" / "static" / "app.js"
         ).read_text(encoding="utf-8")
 
-        self.assertIn("async function refreshAccountData()", js)
+        self.assertIn(
+            "async function refreshAccountData(shouldApply = () => true)",
+            js,
+        )
         self.assertIn("summarySessionsLoaded = false;", js)
-        self.assertIn("await refreshAccountData();", js)
-        self.assertIn("loadProfile()", js)
-        self.assertIn("loadSummarySessions()", js)
+        self.assertIn(
+            "await refreshAccountData(() => screenRequestVersions.get(screenId) === requestVersion);",
+            js,
+        )
+        self.assertIn("loadProfile(shouldApply)", js)
+        self.assertIn("loadSummarySessions(shouldApply)", js)
+        self.assertIn("if (!shouldApply()) return profile;", js)
+        self.assertIn("if (!shouldApply()) return [];", js)
+        self.assertIn("showSummarySessionsError(sessionsResult.reason)", js)
         self.assertIn("inviteGroupRetry.classList.add(\"hidden\")", js)
 
     def test_results_are_saved_and_restored_per_screen(self):
@@ -325,7 +334,10 @@ class BuildCliArgsTests(unittest.TestCase):
         self.assertEqual(html.count('class="summary-date" data-param='), 2)
         self.assertIn('type="date"', html)
         self.assertIn('data-param="limit" type="hidden" value="50000"', html)
-        self.assertIn("async function loadSummarySessions()", js)
+        self.assertIn(
+            "async function loadSummarySessions(shouldApply = () => true)",
+            js,
+        )
         self.assertEqual(js.count("renderSummarySessionOptions(summaryChatSearch.value);"), 3)
         self.assertIn("function formatSummaryCopy(data)", js)
         self.assertIn("function formatSummaryKeyCopy(data)", js)

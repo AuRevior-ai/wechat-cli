@@ -343,9 +343,10 @@ function avatarMarkup(url, label, className = "summary-option-avatar") {
   </span>`;
 }
 
-async function loadProfile() {
-  if (!profileAvatar || !profileName) return;
+async function loadProfile(shouldApply = () => true) {
+  if (!profileAvatar || !profileName) return null;
   const profile = await fetchJson("/api/profile");
+  if (!shouldApply()) return profile;
   const displayName = profile.display_name || profile.username || "本机微信";
   profileName.textContent = displayName;
   profileName.title = profile.username || displayName;
@@ -354,9 +355,11 @@ async function loadProfile() {
     displayName,
     "brand-avatar",
   );
+  return profile;
 }
 
-async function refreshAccountData() {
+async function refreshAccountData(shouldApply = () => true) {
+  if (!shouldApply()) return;
   summarySessionsLoaded = false;
   summarySessions = [];
   summaryVisibleSessionIndexes = [];
@@ -369,10 +372,24 @@ async function refreshAccountData() {
   if (inviteGroupOptions) inviteGroupOptions.innerHTML = "";
   if (summaryChatHint) summaryChatHint.textContent = "正在读取最近会话…";
   if (inviteGroupHint) inviteGroupHint.textContent = "正在读取群聊列表…";
-  await Promise.allSettled([
-    loadProfile(),
-    loadSummarySessions(),
+  if (profileName) profileName.textContent = "正在读取账号…";
+  if (profileAvatar) {
+    profileAvatar.innerHTML = avatarMarkup("", "W", "brand-avatar");
+  }
+  const [profileResult, sessionsResult] = await Promise.allSettled([
+    loadProfile(shouldApply),
+    loadSummarySessions(shouldApply),
   ]);
+  if (!shouldApply()) return;
+  if (profileResult.status === "rejected") {
+    if (profileName) profileName.textContent = "本机微信";
+    if (profileAvatar) {
+      profileAvatar.innerHTML = avatarMarkup("", "W", "brand-avatar");
+    }
+  }
+  if (sessionsResult.status === "rejected") {
+    showSummarySessionsError(sessionsResult.reason);
+  }
 }
 
 function setSummaryOptionsOpen(open) {
@@ -513,8 +530,9 @@ function moveInviteActiveOption(direction) {
   activeButton.scrollIntoView({ block: "nearest" });
 }
 
-async function loadSummarySessions() {
+async function loadSummarySessions(shouldApply = () => true) {
   if (!summaryChatSearch || !summaryChatOptions) return [];
+  if (!shouldApply()) return [];
   if (summaryChatHint) summaryChatHint.textContent = "正在读取最近会话…";
   if (summaryChatRetry) summaryChatRetry.classList.add("hidden");
   if (inviteGroupRetry) inviteGroupRetry.classList.add("hidden");
@@ -529,6 +547,7 @@ async function loadSummarySessions() {
   if (!payload.ok || !Array.isArray(payload.data)) {
     throw new Error(payload.stderr || payload.error || "无法读取会话列表");
   }
+  if (!shouldApply()) return [];
   summarySessions = payload.data;
   summarySessionsLoaded = true;
   renderSummarySessionOptions(summaryChatSearch.value);
@@ -1114,7 +1133,7 @@ async function runForm(form) {
     try {
       await refreshStatus(() => screenRequestVersions.get(screenId) === requestVersion);
       if (screenRequestVersions.get(screenId) !== requestVersion) return;
-      await refreshAccountData();
+      await refreshAccountData(() => screenRequestVersions.get(screenId) === requestVersion);
       if (screenRequestVersions.get(screenId) !== requestVersion) return;
     } catch (error) {
       if (screenRequestVersions.get(screenId) !== requestVersion) return;
