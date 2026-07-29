@@ -8,6 +8,7 @@ from unittest import mock
 
 from wechat_cli.core.messages import (
     _build_history_item,
+    _resolve_media_path,
     find_unkeyed_msg_db_paths,
     save_message_item_media,
     validate_search_scope,
@@ -188,6 +189,44 @@ class HistoryItemTests(unittest.TestCase):
             )
 
         self.assertEqual(item["media"]["path"], str(target_full))
+
+    def test_selects_same_second_image_by_cdn_thumbnail_length(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            db_dir = root / "db_storage"
+            image_dir = (
+                root
+                / "msg"
+                / "attach"
+                / hashlib.md5("wxid_friend".encode()).hexdigest()
+                / "2026-07"
+                / "Img"
+            )
+            image_dir.mkdir(parents=True)
+            db_dir.mkdir()
+            ts = int(datetime(2026, 7, 29, 12, 44).timestamp())
+            files = []
+            for name, size in (
+                ("001.dat", 4525),
+                ("002.dat", 6961),
+                ("003.dat", 5320),
+                ("004.dat", 6596),
+            ):
+                path = image_dir / name
+                path.write_bytes(b"x" * size)
+                os.utime(path, (ts, ts))
+                files.append(path)
+
+            selected, exists = _resolve_media_path(
+                str(db_dir),
+                '<msg><img cdnthumblength="5289" /></msg>',
+                3,
+                ts,
+                "wxid_friend",
+            )
+
+        self.assertTrue(exists)
+        self.assertEqual(selected, str(files[2]))
 
     def test_builds_structured_sticker_message_with_remote_url(self):
         ts = int(datetime(2026, 5, 18, 9, 30).timestamp())

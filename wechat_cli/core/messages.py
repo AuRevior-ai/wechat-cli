@@ -351,7 +351,16 @@ def _resolve_media_path(db_dir, content, local_type, create_time_ts, chat_userna
         for d in search_dirs:
             sub = os.path.join(attach_dir, d, date_prefix, sub_dir_name)
             if os.path.isdir(sub):
-                selected = _select_media_file_by_time(sub, create_time_ts, base_type)
+                expected_sizes = (
+                    _image_expected_lengths(content)
+                    if base_type == 3 else set()
+                )
+                selected = _select_media_file_by_time(
+                    sub,
+                    create_time_ts,
+                    base_type,
+                    expected_sizes=expected_sizes,
+                )
                 if selected:
                     return selected, True
 
@@ -366,7 +375,25 @@ def _resolve_media_path(db_dir, content, local_type, create_time_ts, chat_userna
     return None, False
 
 
-def _select_media_file_by_time(directory, create_time_ts, base_type):
+def _image_expected_lengths(content):
+    root = _parse_xml_root(content)
+    image = root.find(".//img") if root is not None else None
+    if image is None:
+        return set()
+    expected = set()
+    for name in ("cdnthumblength", "cdnmidimglength", "cdnbigimglength"):
+        value = _parse_int(image.attrib.get(name), 0)
+        if value > 0:
+            expected.update((value, value + 31))
+    return expected
+
+
+def _select_media_file_by_time(
+    directory,
+    create_time_ts,
+    base_type,
+    expected_sizes=None,
+):
     try:
         names = [
             name for name in os.listdir(directory)
@@ -382,6 +409,22 @@ def _select_media_file_by_time(directory, create_time_ts, base_type):
         stem = re.sub(r'_(?:t|h)(?=\.dat$)', '', name, flags=re.IGNORECASE)
         groups.setdefault(stem, []).append(name)
 
+    candidate_groups = list(groups.items())
+    if base_type == 3 and expected_sizes:
+        exact_groups = []
+        for item in candidate_groups:
+            _, group_names = item
+            for name in group_names:
+                try:
+                    size = os.path.getsize(os.path.join(directory, name))
+                except OSError:
+                    continue
+                if size in expected_sizes:
+                    exact_groups.append(item)
+                    break
+        if exact_groups:
+            candidate_groups = exact_groups
+
     def group_score(item):
         _, group_names = item
         diffs = []
@@ -393,7 +436,7 @@ def _select_media_file_by_time(directory, create_time_ts, base_type):
                 continue
         return min(diffs) if diffs else float("inf")
 
-    _, selected_group = min(groups.items(), key=group_score)
+    _, selected_group = min(candidate_groups, key=group_score)
 
     def file_rank(name):
         lower = name.lower()
@@ -798,7 +841,7 @@ def _build_history_item(
     _, parsed_content = _parse_message_content(content, local_type, ctx['is_group'])
     forwarded = parse_forwarded_message(parsed_content) if base_type == 49 else None
     if base_type == 47:
-        media_payload = _extract_sticker_payload(content)
+        media_payload = _extract_sticker_payload(parsed_content)
     voice_payload = None
     if base_type == 34 and resolve_media and media_db_paths:
         record = find_voice_record(
@@ -813,10 +856,10 @@ def _build_history_item(
                 "bytes": len(record.data),
                 "chunks": record.chunks,
             }
-    if resolve_media and db_dir and content:
+    if resolve_media and db_dir and parsed_content:
         try:
             media_path, media_exists = _resolve_media_path(
-                db_dir, content, local_type, create_time, ctx['username']
+                db_dir, parsed_content, local_type, create_time, ctx['username']
             )
             media_payload = _build_media_payload(local_type, media_path, media_exists) or media_payload
         except Exception:
