@@ -594,18 +594,24 @@ async function loadSessions(shouldApply = () => true) {
       : "正在读取会话列表…";
     picker.retry.classList.add("hidden");
   });
-  const payload = await fetchJson("/api/run", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      command: "sessions",
-      params: { limit: 5000 },
-    }),
-  });
+  let payload;
+  try {
+    payload = await fetchJson("/api/run", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        command: "sessions",
+        params: { limit: 5000 },
+      }),
+    });
+  } catch (error) {
+    if (!shouldApply() || requestVersion !== sessionsRequestVersion) return [];
+    throw error;
+  }
+  if (!shouldApply() || requestVersion !== sessionsRequestVersion) return [];
   if (!payload.ok || !Array.isArray(payload.data)) {
     throw new Error(payload.stderr || payload.error || "无法读取会话列表");
   }
-  if (!shouldApply() || requestVersion !== sessionsRequestVersion) return [];
   sessions = payload.data;
   sessionsLoaded = true;
   const groupCount = sessions.filter((session) => session.is_group).length;

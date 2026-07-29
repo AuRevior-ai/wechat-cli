@@ -347,6 +347,30 @@ class BuildCliArgsTests(unittest.TestCase):
         self.assertIn("showSessionsError(sessionsResult.reason)", js)
         self.assertIn("resetSessionPickers();", js)
 
+    def test_stale_session_requests_cannot_overwrite_or_show_errors(self):
+        js = (
+            ROOT / "wechat_cli" / "web" / "static" / "app.js"
+        ).read_text(encoding="utf-8")
+        load_start = js.index("async function loadSessions")
+        load_end = js.index("\n}\n", load_start)
+        load_block = js[load_start:load_end]
+        stale_guard = (
+            "if (!shouldApply() || requestVersion !== sessionsRequestVersion) "
+            "return [];"
+        )
+
+        self.assertIn("try {", load_block)
+        self.assertIn("} catch (error) {", load_block)
+        self.assertGreaterEqual(load_block.count(stale_guard), 2)
+        self.assertLess(
+            load_block.index(stale_guard, load_block.index("catch (error)")),
+            load_block.index("throw error;"),
+        )
+        self.assertLess(
+            load_block.index(stale_guard, load_block.index("payload = await fetchJson")),
+            load_block.index("if (!payload.ok"),
+        )
+
     def test_results_are_saved_and_restored_per_screen(self):
         js = (
             ROOT / "wechat_cli" / "web" / "static" / "app.js"
