@@ -1,6 +1,7 @@
 const nav = document.querySelector("#nav");
 const screens = [...document.querySelectorAll(".screen")];
 const title = document.querySelector("#screen-title");
+const resultArea = document.querySelector(".result-area");
 const result = document.querySelector("#result");
 const commandPreview = document.querySelector("#command-preview");
 const downloadButton = document.querySelector("#download-result");
@@ -170,6 +171,7 @@ function setScreen(id) {
   });
   const activeScreen = document.getElementById(id);
   title.textContent = activeScreen?.dataset.title || "WeChat CLI Web";
+  resultArea.classList.toggle("hidden", id === "about-support");
   if (id === "setup" && dbDirCandidates.length === 0) {
     refreshDbDirs().catch((error) => showTransientError(error, "setup"));
   }

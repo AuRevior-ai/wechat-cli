@@ -665,6 +665,9 @@ class BuildCliArgsTests(unittest.TestCase):
         css = (
             ROOT / "wechat_cli" / "web" / "static" / "app.css"
         ).read_text(encoding="utf-8")
+        js = (
+            ROOT / "wechat_cli" / "web" / "static" / "app.js"
+        ).read_text(encoding="utf-8")
 
         self.assertIn(
             'class="brand-author">作者 Au Revior</span>',
@@ -683,6 +686,10 @@ class BuildCliArgsTests(unittest.TestCase):
         self.assertIn(".about-support-grid", css)
         self.assertIn(".about-support-card", css)
         self.assertIn(".about-nav", css)
+        self.assertIn(
+            'resultArea.classList.toggle("hidden", id === "about-support")',
+            js,
+        )
 
     def test_init_status_refresh_obeys_latest_request_version(self):
         js = (
