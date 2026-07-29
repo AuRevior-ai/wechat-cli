@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>WeChat CLI Web</title>
-  <link rel="stylesheet" href="/static/app.css?v=20260729-chat-summary">
+  <link rel="stylesheet" href="/static/app.css?v=20260729-web-simplify">
 </head>
 <body>
   <div class="app-shell">
@@ -19,17 +19,12 @@
       <nav id="nav" class="nav">
         <button data-target="dashboard" class="active">总览</button>
         <button data-target="setup">初始化</button>
-        <button data-target="sessions">最近会话</button>
         <button data-target="history">聊天记录</button>
-        <button data-target="chat-summary">聊天总结</button>
         <button data-target="search">消息搜索</button>
         <button data-target="contacts">联系人</button>
-        <button data-target="members">群成员</button>
-        <button data-target="stats">统计</button>
-        <button data-target="invite-stats">邀请统计</button>
-        <button data-target="export">导出</button>
-        <button data-target="favorites">收藏</button>
-        <button data-target="unread">未读与新增</button>
+        <button data-target="members">群聊成员统计和导出</button>
+        <button data-target="stats">单个聊天数据统计</button>
+        <button data-target="invite-stats">群聊成员邀请统计</button>
       </nav>
     </aside>
 
@@ -53,17 +48,6 @@
               <button class="ghost" data-action="refresh-status" type="button">刷新</button>
             </div>
             <dl id="status-list" class="status-list"></dl>
-          </section>
-          <section class="panel quick-panel">
-            <div class="panel-head">
-              <span class="label">快捷操作</span>
-            </div>
-            <div class="quick-actions">
-              <button data-jump="sessions" type="button">查看最近会话</button>
-              <button data-jump="unread" type="button">查看未读</button>
-              <button data-jump="search" type="button">搜索消息</button>
-              <button data-jump="setup" type="button">重新初始化</button>
-            </div>
           </section>
         </div>
       </section>
@@ -91,65 +75,12 @@
         </form>
       </section>
 
-      <section id="sessions" class="screen" data-title="最近会话">
-        <form class="tool-form" data-command="sessions">
-          <div class="form-grid compact">
-            <label>数量
-              <input data-param="limit" type="number" min="1" value="20">
-            </label>
-          </div>
-          <button class="primary" type="submit">查询会话</button>
-        </form>
-      </section>
-
       <section id="history" class="screen" data-title="聊天记录">
-        <form class="tool-form" data-command="history">
-          <div class="form-grid">
-            <label>聊天对象
-              <input data-param="chat_name" required placeholder="昵称、备注、群名或 wxid">
-            </label>
-            <label>消息类型
-              <select data-param="type">
-                <option value="">全部</option>
-                <option value="text">文本</option>
-                <option value="image">图片</option>
-                <option value="voice">语音</option>
-                <option value="video">视频</option>
-                <option value="sticker">表情</option>
-                <option value="location">位置</option>
-                <option value="link">链接</option>
-                <option value="file">文件</option>
-                <option value="call">通话</option>
-                <option value="system">系统</option>
-              </select>
-            </label>
-            <label>开始时间
-              <input data-param="start_time" placeholder="YYYY-MM-DD HH:MM">
-            </label>
-            <label>结束时间
-              <input data-param="end_time" placeholder="YYYY-MM-DD HH:MM">
-            </label>
-            <label>数量
-              <input data-param="limit" type="number" min="1" value="50">
-            </label>
-            <label>偏移
-              <input data-param="offset" type="number" min="0" value="0">
-            </label>
-            <label class="checkline">
-              <input data-param="media" type="checkbox" checked>
-              <span>解析媒体路径</span>
-            </label>
-          </div>
-          <button class="primary" type="submit">读取记录</button>
-        </form>
-      </section>
-
-      <section id="chat-summary" class="screen" data-title="聊天记录总结">
         <form class="tool-form summary-form" data-command="history" data-result-mode="summary">
           <div class="summary-form-intro">
-            <span>AI READY TRANSCRIPT</span>
-            <strong>把聊天整理成 AI 能直接理解的材料</strong>
-            <p>选择会话和日期后读取本机记录；网页不会把内容上传到任何外部服务。</p>
+            <span>CHAT RECORDS</span>
+            <strong>选择聊天与日期，直接整理并复制记录</strong>
+            <p>从本机微信数据库读取；可复制完整材料给 AI，也可只复制精简信息。</p>
           </div>
           <div class="form-grid summary-form-grid">
             <label class="full">选择聊天
@@ -174,8 +105,8 @@
             <input data-param="limit" type="hidden" value="50000">
           </div>
           <div class="summary-submit-row">
-            <p>结果生成后，可复制完整材料，或只复制时间、发言人和消息正文。</p>
-            <button class="primary" type="submit">整理聊天记录</button>
+            <p>网页不会上传聊天内容；精简信息仅保留范围、时间、发言人、类型和正文。</p>
+            <button class="primary" type="submit">读取聊天记录</button>
           </div>
         </form>
       </section>
@@ -238,7 +169,7 @@
         </form>
       </section>
 
-      <section id="members" class="screen" data-title="群成员">
+      <section id="members" class="screen" data-title="群聊成员统计和导出">
         <form class="tool-form" data-command="members">
           <div class="form-grid compact">
             <label>群名
@@ -249,7 +180,7 @@
         </form>
       </section>
 
-      <section id="stats" class="screen" data-title="统计">
+      <section id="stats" class="screen" data-title="单个聊天数据统计">
         <form class="tool-form" data-command="stats">
           <div class="form-grid">
             <label>聊天对象
@@ -266,12 +197,12 @@
         </form>
       </section>
 
-      <section id="invite-stats" class="screen" data-title="群邀请统计">
+      <section id="invite-stats" class="screen" data-title="群聊成员邀请统计">
         <form class="tool-form invite-stats-form" data-command="invite-stats">
           <div class="invite-form-intro">
             <span>GROUP INVITE LEDGER</span>
             <strong>按唯一被邀请人数排行</strong>
-            <p>读取本工具当前可见的全部群系统提示；二维码入群归属于二维码分享者。</p>
+            <p><b>统计范围：从微信数据库记载的日子开始。</b>读取当前可见的全部群系统提示；二维码入群归属于二维码分享者。</p>
           </div>
           <div class="form-grid">
             <label>群名称
@@ -293,75 +224,6 @@
         </form>
       </section>
 
-      <section id="export" class="screen" data-title="导出">
-        <form class="tool-form" data-command="export">
-          <div class="form-grid">
-            <label>聊天对象
-              <input data-param="chat_name" required>
-            </label>
-            <label>格式
-              <select data-param="format">
-                <option value="markdown">Markdown</option>
-                <option value="txt">TXT</option>
-              </select>
-            </label>
-            <label>开始时间
-              <input data-param="start_time" placeholder="YYYY-MM-DD">
-            </label>
-            <label>结束时间
-              <input data-param="end_time" placeholder="YYYY-MM-DD">
-            </label>
-            <label>数量
-              <input data-param="limit" type="number" min="1" value="500">
-            </label>
-            <label>输出文件路径
-              <input data-param="output_path" placeholder="留空则在网页中生成">
-            </label>
-          </div>
-          <button class="primary" type="submit">导出</button>
-        </form>
-      </section>
-
-      <section id="favorites" class="screen" data-title="收藏">
-        <form class="tool-form" data-command="favorites">
-          <div class="form-grid">
-            <label>关键词
-              <input data-param="query">
-            </label>
-            <label>类型
-              <select data-param="type">
-                <option value="">全部</option>
-                <option value="text">文本</option>
-                <option value="image">图片</option>
-                <option value="article">文章</option>
-                <option value="card">名片</option>
-                <option value="video">视频号</option>
-              </select>
-            </label>
-            <label>数量
-              <input data-param="limit" type="number" min="1" value="20">
-            </label>
-          </div>
-          <button class="primary" type="submit">查询收藏</button>
-        </form>
-      </section>
-
-      <section id="unread" class="screen" data-title="未读与新增">
-        <div class="split-tools">
-          <form class="tool-form" data-command="unread">
-            <div class="form-grid compact">
-              <label>未读会话数量
-                <input data-param="limit" type="number" min="1" value="50">
-              </label>
-            </div>
-            <button class="primary" type="submit">查看未读</button>
-          </form>
-          <form class="tool-form" data-command="new-messages">
-            <button class="primary" type="submit">获取新增消息</button>
-          </form>
-        </div>
-      </section>
-
       <section class="result-area">
         <div class="result-head">
           <div>
@@ -370,7 +232,7 @@
           </div>
           <div class="result-actions">
             <button id="copy-result" class="ghost" type="button">复制</button>
-            <button id="copy-key-result" class="ghost hidden" type="button">复制关键信息</button>
+            <button id="copy-key-result" class="ghost hidden" type="button">复制精简信息</button>
             <button id="download-result" class="ghost hidden" type="button">下载</button>
           </div>
         </div>
@@ -378,6 +240,6 @@
       </section>
     </main>
   </div>
-  <script src="/static/app.js?v=20260729-chat-summary"></script>
+  <script src="/static/app.js?v=20260729-web-simplify"></script>
 </body>
 </html>

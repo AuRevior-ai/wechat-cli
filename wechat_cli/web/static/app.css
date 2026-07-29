@@ -87,8 +87,7 @@ textarea {
   gap: 4px;
 }
 
-.nav button,
-.quick-actions button {
+.nav button {
   border: 0;
   border-radius: 8px;
   color: var(--ink);
@@ -98,8 +97,7 @@ textarea {
   cursor: pointer;
 }
 
-.nav button:hover,
-.quick-actions button:hover {
+.nav button:hover {
   background: #efe8db;
 }
 
@@ -182,7 +180,7 @@ h1 {
 
 .dashboard-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1.4fr) minmax(260px, 0.6fr);
+  grid-template-columns: minmax(0, 1fr);
   gap: 16px;
 }
 
@@ -223,11 +221,6 @@ h1 {
 .status-list dd {
   margin: 0;
   overflow-wrap: anywhere;
-}
-
-.quick-actions {
-  display: grid;
-  gap: 8px;
 }
 
 .form-grid {

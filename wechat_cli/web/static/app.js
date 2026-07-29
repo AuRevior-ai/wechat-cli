@@ -173,7 +173,7 @@ function setScreen(id) {
     refreshDbDirs().catch((error) => showTransientError(error, "setup"));
   }
   restoreResultState(id);
-  if (id === "chat-summary" && !summarySessionsLoaded) {
+  if (id === "history" && !summarySessionsLoaded) {
     loadSummarySessions().catch(showSummarySessionsError);
   }
 }
@@ -545,7 +545,7 @@ function renderSummaryResult(data) {
     </section>
     <section class="summary-copy-guide">
       <div><b>复制</b><span>包含总结要求与完整聊天记录，可直接粘贴给 AI。</span></div>
-      <div><b>复制关键信息</b><span>只保留范围、时间、发言人、类型和正文。</span></div>
+      <div><b>复制精简信息</b><span>只保留范围、时间、发言人、类型和正文。</span></div>
     </section>
     ${previewNotice}
     ${renderChatMessages(previewItems, {
@@ -876,7 +876,7 @@ function buildResultState(payload, resultMode = "") {
       state.lastText = "";
       state.lastKeyText = "";
       state.copyData = summaryData;
-      state.commandPreview = `聊天总结 · ${summaryData.chat || summaryData.username || "会话"} · ${
+      state.commandPreview = `聊天记录 · ${summaryData.chat || summaryData.username || "会话"} · ${
         summaryData.start_time || "最早"
       } 至 ${summaryData.end_time || "最新"}`;
       return state;
@@ -977,10 +977,6 @@ nav.addEventListener("click", (event) => {
   if (button) setScreen(button.dataset.target);
 });
 
-document.querySelectorAll("[data-jump]").forEach((button) => {
-  button.addEventListener("click", () => setScreen(button.dataset.jump));
-});
-
 document.querySelectorAll(".tool-form").forEach((form) => {
   form.addEventListener("submit", (event) => {
     event.preventDefault();
@@ -1074,8 +1070,8 @@ copyKeyButton.addEventListener("click", async () => {
   const copyText = lastKeyText || (lastCopyData ? formatSummaryKeyCopy(lastCopyData) : "");
   if (!copyText) return;
   await navigator.clipboard.writeText(copyText);
-  copyKeyButton.textContent = "已复制关键信息";
-  setTimeout(() => { copyKeyButton.textContent = "复制关键信息"; }, 1000);
+  copyKeyButton.textContent = "已复制精简信息";
+  setTimeout(() => { copyKeyButton.textContent = "复制精简信息"; }, 1000);
 });
 
 downloadButton.addEventListener("click", () => {

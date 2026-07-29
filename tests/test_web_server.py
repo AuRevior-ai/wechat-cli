@@ -96,7 +96,7 @@ class BuildCliArgsTests(unittest.TestCase):
         self.assertIn("fieldLabel(key)", js)
         self.assertIn('if (typeof value === "boolean") return value ? "是" : "否";', js)
 
-    def test_chat_summary_page_has_searchable_chat_picker_and_day_inputs(self):
+    def test_history_page_has_searchable_chat_picker_and_day_inputs(self):
         html = (
             ROOT / "wechat_cli" / "web" / "static" / "index.html"
         ).read_text(encoding="utf-8")
@@ -107,8 +107,10 @@ class BuildCliArgsTests(unittest.TestCase):
             ROOT / "wechat_cli" / "web" / "static" / "app.css"
         ).read_text(encoding="utf-8")
 
-        self.assertIn('data-target="chat-summary"', html)
-        self.assertIn('id="chat-summary"', html)
+        self.assertIn('<button data-target="history">聊天记录</button>', html)
+        self.assertIn('id="history" class="screen" data-title="聊天记录"', html)
+        self.assertNotIn('data-target="chat-summary"', html)
+        self.assertNotIn('id="chat-summary"', html)
         self.assertIn('data-result-mode="summary"', html)
         self.assertIn('id="summary-chat-search"', html)
         self.assertIn('id="summary-chat-options"', html)
@@ -119,6 +121,8 @@ class BuildCliArgsTests(unittest.TestCase):
         self.assertEqual(js.count("renderSummarySessionOptions(summaryChatSearch.value);"), 3)
         self.assertIn("function formatSummaryCopy(data)", js)
         self.assertIn("function formatSummaryKeyCopy(data)", js)
+        self.assertIn("`聊天记录 · ${summaryData.chat", js)
+        self.assertNotIn("`聊天总结 · ${summaryData.chat", js)
         self.assertIn("const SUMMARY_PREVIEW_LIMIT = 200;", js)
         self.assertIn("共 ${items.length} 条，仅在网页预览前 ${previewItems.length} 条", js)
         self.assertIn("allowRemoteAvatars: false", js)
@@ -129,6 +133,29 @@ class BuildCliArgsTests(unittest.TestCase):
         self.assertIn("aria-selected", js)
         self.assertIn(".summary-combobox", css)
         self.assertIn(".summary-result-hero", css)
+
+    def test_web_navigation_is_reduced_to_eight_focused_entries(self):
+        html = (
+            ROOT / "wechat_cli" / "web" / "static" / "index.html"
+        ).read_text(encoding="utf-8")
+        expected_buttons = [
+            '<button data-target="dashboard" class="active">总览</button>',
+            '<button data-target="setup">初始化</button>',
+            '<button data-target="history">聊天记录</button>',
+            '<button data-target="search">消息搜索</button>',
+            '<button data-target="contacts">联系人</button>',
+            '<button data-target="members">群聊成员统计和导出</button>',
+            '<button data-target="stats">单个聊天数据统计</button>',
+            '<button data-target="invite-stats">群聊成员邀请统计</button>',
+        ]
+
+        self.assertEqual(html.count("data-target="), len(expected_buttons))
+        for button in expected_buttons:
+            self.assertIn(button, html)
+        for removed_id in ("sessions", "chat-summary", "export", "favorites", "unread"):
+            self.assertNotIn(f'id="{removed_id}" class="screen', html)
+        self.assertNotIn("快捷操作", html)
+        self.assertIn("统计范围：从微信数据库记载的日子开始", html)
 
     def test_init_status_refresh_obeys_latest_request_version(self):
         js = (
@@ -285,20 +312,22 @@ class BuildCliArgsTests(unittest.TestCase):
         self.assertIn('id="detect-db-dirs"', html)
         self.assertIn('id="setup-db-dir"', html)
 
-    def test_history_media_resolution_is_enabled_by_default(self):
+    def test_history_summary_does_not_request_remote_media(self):
         html = (ROOT / "wechat_cli" / "web" / "static" / "index.html").read_text(encoding="utf-8")
         js = (ROOT / "wechat_cli" / "web" / "static" / "app.js").read_text(encoding="utf-8")
 
-        self.assertIn('data-param="media" type="checkbox" checked', html)
+        self.assertNotIn('data-param="media" type="checkbox" checked', html)
+        self.assertIn('id="history" class="screen" data-title="聊天记录"', html)
+        self.assertIn('data-result-mode="summary"', html)
         self.assertIn('form.dataset.command === "history"', js)
-        self.assertIn('params.media = true', js)
+        self.assertIn('params.media = false', js)
 
     def test_history_result_has_key_info_copy_button(self):
         html = (ROOT / "wechat_cli" / "web" / "static" / "index.html").read_text(encoding="utf-8")
         js = (ROOT / "wechat_cli" / "web" / "static" / "app.js").read_text(encoding="utf-8")
 
         self.assertIn('id="copy-key-result"', html)
-        self.assertIn("复制关键信息", html)
+        self.assertIn("复制精简信息", html)
         self.assertIn('document.querySelector("#copy-key-result")', js)
         self.assertIn("let lastKeyText = \"\";", js)
         self.assertIn("function formatMessagesForKeyCopy(messages)", js)
