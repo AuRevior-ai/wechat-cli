@@ -27,3 +27,26 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+## sherpa-onnx
+
+- Project: `k2-fsa/sherpa-onnx`
+- Source: https://github.com/k2-fsa/sherpa-onnx
+- Version used on Windows: 1.13.4
+- License: Apache License 2.0
+- Runtime archive SHA-256: `e33dc64195d17601879532583233d0d6ed76aa399eb863e5ca0783c5ac82b5aa`
+
+The runtime is not embedded in the WeChat CLI executable. It is downloaded
+from the project's official GitHub release on first voice transcription,
+verified with the SHA-256 value above, and then cached locally.
+
+## Paraformer Chinese offline ASR model
+
+- Distribution: `sherpa-onnx-paraformer-zh-small-2024-03-09`
+- Distribution source: https://github.com/k2-fsa/sherpa-onnx/releases/tag/asr-models
+- Original model source: https://www.modelscope.cn/models/crazyant/speech_paraformer_asr_nat-zh-cn-16k-common-vocab8358-onnx/summary
+- Archive SHA-256: `da92b3db5218c5be53aad53e57d1b6e63e7fc98a0e054fbdd6dbe18e9c6b1450`
+
+The model is not embedded in the WeChat CLI executable. It is downloaded on
+first use, verified with the SHA-256 value above, and cached for offline use.
+The model's upstream terms remain applicable.
