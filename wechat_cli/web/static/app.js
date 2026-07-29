@@ -395,6 +395,7 @@ function createSessionPicker(root) {
       const sessionIndex = picker.visibleSessionIndexes[picker.activeOption];
       selectSessionPickerOption(picker, sessionIndex);
     } else if (event.key === "Escape") {
+      event.preventDefault();
       setSessionPickerOpen(picker, false);
     }
   });

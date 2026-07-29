@@ -309,6 +309,20 @@ class BuildCliArgsTests(unittest.TestCase):
         self.assertIn('class="session-picker-chip"', js)
         self.assertIn('aria-label="移除 ${escapeHtml(session.chat)}"', js)
 
+    def test_escape_only_closes_picker_without_clearing_selected_value(self):
+        js = (
+            ROOT / "wechat_cli" / "web" / "static" / "app.js"
+        ).read_text(encoding="utf-8")
+        escape_start = js.index('} else if (event.key === "Escape") {')
+        escape_end = js.index("\n    }", escape_start)
+        escape_block = js[escape_start:escape_end]
+
+        self.assertIn("event.preventDefault();", escape_block)
+        self.assertLess(
+            escape_block.index("event.preventDefault();"),
+            escape_block.index("setSessionPickerOpen(picker, false);"),
+        )
+
     def test_web_uses_local_avatar_proxy_for_profile_sessions_and_messages(self):
         html = (
             ROOT / "wechat_cli" / "web" / "static" / "index.html"
