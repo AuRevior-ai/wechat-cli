@@ -2,12 +2,22 @@
 
 import mimetypes
 import os
+import struct
 from pathlib import Path
 
-WECHAT_V2_DAT_MAGIC = b"\x07\x08V2\x08\x07\x00\x04"
+from Crypto.Cipher import AES
+from Crypto.Util.Padding import unpad
+
+WECHAT_V2_DAT_MAGIC = b"\x07\x08V2\x08\x07"
+WECHAT_V1_DAT_MAGIC = b"\x07\x08V1\x08\x07"
 
 
-def read_media_file_payload(path: str, db_dir: str = "") -> dict:
+def read_media_file_payload(
+    path: str,
+    db_dir: str = "",
+    image_aes_key=None,
+    image_xor_key=None,
+) -> dict:
     """Return local media bytes, optionally constrained to a WeChat data root."""
     if not path:
         raise FileNotFoundError("media path is empty")
@@ -27,7 +37,12 @@ def read_media_file_payload(path: str, db_dir: str = "") -> dict:
 
     with open(target, "rb") as f:
         raw = f.read()
-    body, content_type = decode_media_bytes(raw, target)
+    body, content_type = decode_media_bytes(
+        raw,
+        target,
+        image_aes_key=image_aes_key,
+        image_xor_key=image_xor_key,
+    )
     return {
         "body": body,
         "content_type": content_type,
@@ -50,7 +65,12 @@ def export_media_file(path: str, output_dir: str, db_dir: str = "") -> dict:
     }
 
 
-def decode_media_bytes(raw: bytes, path: str) -> tuple[bytes, str]:
+def decode_media_bytes(
+    raw: bytes,
+    path: str,
+    image_aes_key=None,
+    image_xor_key=None,
+) -> tuple[bytes, str]:
     content_type = image_content_type(raw, path)
     if content_type:
         return raw, content_type
@@ -58,7 +78,14 @@ def decode_media_bytes(raw: bytes, path: str) -> tuple[bytes, str]:
         decoded = decode_wechat_dat_image(raw)
         if decoded:
             return decoded
-        decoded = decode_wechat_v2_dat_image(raw)
+        decoded = decode_wechat_v2_dat_image(
+            raw,
+            aes_key=image_aes_key,
+            xor_key=image_xor_key,
+        )
+        if decoded:
+            return decoded
+        decoded = _decode_clear_v2_compat(raw)
         if decoded:
             return decoded
         return media_placeholder_svg(os.path.basename(path)), "image/svg+xml; charset=utf-8"
@@ -76,6 +103,7 @@ def media_download_filename(path: str, content_type: str) -> str:
         "image/heic": ".heic",
         "image/heif": ".heif",
         "image/avif": ".avif",
+        "image/x-wechat-wxgf": ".wxgf",
         "image/svg+xml; charset=utf-8": ".svg",
     }
     expected_ext = extension_by_type.get(content_type)
@@ -85,6 +113,8 @@ def media_download_filename(path: str, content_type: str) -> str:
 
 
 def image_content_type(raw: bytes, path: str) -> str:
+    if raw.startswith(b"wxgf"):
+        return "image/x-wechat-wxgf"
     if raw.startswith(b"\xff\xd8\xff"):
         return "image/jpeg"
     if raw.startswith(b"\x89PNG\r\n\x1a\n"):
@@ -134,7 +164,67 @@ def decode_wechat_dat_image(raw: bytes) -> tuple[bytes, str] | None:
     return None
 
 
-def decode_wechat_v2_dat_image(raw: bytes) -> tuple[bytes, str] | None:
+def decode_wechat_v2_dat_image(
+    raw: bytes,
+    aes_key=None,
+    xor_key=None,
+) -> tuple[bytes, str] | None:
+    if not raw.startswith((WECHAT_V2_DAT_MAGIC, WECHAT_V1_DAT_MAGIC)):
+        return None
+    if len(raw) < 31:
+        return None
+    if raw.startswith(WECHAT_V1_DAT_MAGIC):
+        key_bytes = b"cfcd208495d565ef"
+        xor_value = 0x88 if xor_key is None else int(xor_key) & 0xFF
+    else:
+        if not aes_key or xor_key is None:
+            return None
+        try:
+            key_bytes = (
+                aes_key.encode("ascii")
+                if isinstance(aes_key, str)
+                else bytes(aes_key)
+            )[:16]
+        except (UnicodeEncodeError, TypeError, ValueError):
+            return None
+        xor_value = int(xor_key) & 0xFF
+    if len(key_bytes) != 16:
+        return None
+    try:
+        aes_size, xor_size = struct.unpack("<II", raw[6:14])
+    except struct.error:
+        return None
+    aligned_aes_size = ((aes_size // 16) + 1) * 16
+    encrypted_start = 15
+    encrypted_end = encrypted_start + aligned_aes_size
+    xor_start = len(raw) - xor_size
+    if (
+        aes_size <= 0
+        or encrypted_end > len(raw)
+        or xor_start < encrypted_end
+    ):
+        return None
+    try:
+        decrypted_aes = unpad(
+            AES.new(key_bytes, AES.MODE_ECB).decrypt(
+                raw[encrypted_start:encrypted_end]
+            ),
+            16,
+        )
+    except (ValueError, TypeError):
+        return None
+    if len(decrypted_aes) != aes_size:
+        return None
+    raw_middle = raw[encrypted_end:xor_start]
+    decrypted_tail = bytes(value ^ xor_value for value in raw[xor_start:])
+    body = decrypted_aes + raw_middle + decrypted_tail
+    content_type = image_content_type(body, "")
+    if not content_type:
+        return None
+    return body, content_type
+
+
+def _decode_clear_v2_compat(raw: bytes) -> tuple[bytes, str] | None:
     if not raw.startswith(WECHAT_V2_DAT_MAGIC):
         return None
     candidates = []

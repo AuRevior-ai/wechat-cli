@@ -15,6 +15,7 @@
 - 新建 `wechat_cli/core/forwarded.py`：安全递归解析 `appmsg/type=19`。
 - 新建 `wechat_cli/core/voice.py`：定位 `media_N.db`、读取 SILK、解码 WAV。
 - 新建 `wechat_cli/core/asr.py`：固定来源下载、SHA-256 校验、安全解压、离线识别与缓存。
+- 新建 `wechat_cli/core/image_keys.py`：提取并交叉验证微信 4.1 V2 图片 AES/XOR 密钥。
 - 新建 `wechat_cli/core/ai_package.py`：素材收集、去重、文本/清单渲染、ZIP 生成。
 - 新建 `wechat_cli/commands/ai_package.py`：公开 `ai-package` CLI。
 - 修改 `wechat_cli/core/messages.py`：接入合并转发、语音元数据和精确图片匹配。
@@ -384,7 +385,10 @@ git commit -m "feat: add verified offline voice transcription"
 
 **Files:**
 - Create: `tests/test_ai_package.py`
+- Create: `tests/test_image_v2.py`
 - Create: `wechat_cli/core/ai_package.py`
+- Create: `wechat_cli/core/image_keys.py`
+- Modify: `wechat_cli/core/media.py`
 - Modify: `wechat_cli/core/messages.py`
 
 - [ ] **Step 1: 写入 ZIP 结构、素材引用、去重和部分失败测试**
@@ -442,7 +446,9 @@ def add_asset(raw, kind, message, extension, manifest):
     return relative
 ```
 
-本地 `.dat` 使用现有 `decode_media_bytes()` 后检测真实 MIME；表情远程请求只允许微信官方域名、HTTPS、最多 5 次重定向、20 MiB、`image/*` 和图片魔数。
+本地 `.dat` 使用现有 `decode_media_bytes()` 后检测真实 MIME；表情远程请求只允许微信官方域名、最多 5 次重定向、20 MiB、`image/*` 或 `application/octet-stream`，并强制验证图片魔数。
+
+微信 4.1 V2 `.dat` 先解析 15 字节头和 AES/XOR 分段；Windows 仅扫描 `Weixin.exe` 小于 50 MiB 的可读区域，优先可写区域，以多个密文块解出 JPEG/PNG/GIF/WebP/wxgf 魔数才接受候选。官方数据库中的历史表情 URL 可能仍是 HTTP，因此允许精确白名单内的 `*.tc.qq.com` 原始 HTTP，并继续强制响应大小和图片魔数校验。标准图解出 `wxgf` 时改用同组 JPEG 缩略图。
 
 - [ ] **Step 4: 实现确定性文字和 JSON 清单**
 
