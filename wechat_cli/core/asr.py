@@ -9,6 +9,7 @@ import re
 import shutil
 import subprocess
 import tarfile
+import time
 import uuid
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
@@ -173,25 +174,42 @@ class OfflineAsrManager:
 
     def _default_download(self, asset: Asset, target: Path) -> None:
         request = Request(asset.url, headers={"User-Agent": "wechat-cli/0.4"})
-        total = 0
-        try:
-            response = urlopen(request, timeout=60)
-            with response, target.open("wb") as output:
-                while True:
-                    chunk = response.read(_MIB)
-                    if not chunk:
-                        break
-                    total += len(chunk)
-                    if total > asset.max_bytes:
-                        raise AsrInstallError(f"{asset.name} 下载体积超过安全限制")
-                    output.write(chunk)
+        last_error = None
+        for attempt in range(1, 4):
+            total = 0
+            try:
+                response = urlopen(request, timeout=60)
+                with response, target.open("wb") as output:
+                    while True:
+                        chunk = response.read(_MIB)
+                        if not chunk:
+                            break
+                        total += len(chunk)
+                        if total > asset.max_bytes:
+                            raise AsrInstallError(
+                                f"{asset.name} 下载体积超过安全限制"
+                            )
+                        output.write(chunk)
+                        self.progress(
+                            f"正在下载{asset.name}：{total / _MIB:.1f} MiB"
+                        )
+                return
+            except AsrInstallError:
+                raise
+            except Exception as exc:
+                last_error = exc
+                try:
+                    target.unlink()
+                except FileNotFoundError:
+                    pass
+                if attempt < 3:
                     self.progress(
-                        f"正在下载{asset.name}：{total / _MIB:.1f} MiB"
+                        f"{asset.name} 第 {attempt} 次下载中断，正在重试"
                     )
-        except AsrInstallError:
-            raise
-        except Exception as exc:
-            raise AsrInstallError(f"下载{asset.name}失败: {exc}") from exc
+                    time.sleep(0.5 * attempt)
+        raise AsrInstallError(
+            f"下载{asset.name}失败（已重试 3 次）: {last_error}"
+        ) from last_error
 
     def ensure_archive(self, asset: Asset) -> Path:
         if not asset.url.startswith("https://") or not re.fullmatch(r"[0-9a-f]{64}", asset.sha256):

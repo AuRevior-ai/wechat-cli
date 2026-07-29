@@ -28,6 +28,47 @@ def _tar_bz2(path, members):
 
 
 class OfflineAsrInstallTests(unittest.TestCase):
+    def test_default_download_retries_transient_connection_failure(self):
+        payload = b"verified archive"
+        digest = hashlib.sha256(payload).hexdigest()
+        asset = Asset(
+            name="retry",
+            url="https://example.invalid/retry.tar.bz2",
+            sha256=digest,
+            filename="retry.tar.bz2",
+            max_bytes=1024,
+        )
+
+        class Response:
+            def __init__(self):
+                self.sent = False
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def read(self, _size):
+                if self.sent:
+                    return b""
+                self.sent = True
+                return payload
+
+        with tempfile.TemporaryDirectory() as tmp, mock.patch(
+            "wechat_cli.core.asr.urlopen",
+            side_effect=[OSError("temporary disconnect"), Response()],
+        ) as open_url, mock.patch(
+            "wechat_cli.core.asr.time.sleep",
+        ):
+            manager = OfflineAsrManager(cache_dir=tmp)
+
+            archive = manager.ensure_archive(asset)
+            archive_body = archive.read_bytes()
+
+        self.assertEqual(archive_body, payload)
+        self.assertEqual(open_url.call_count, 2)
+
     def test_assets_are_pinned_to_https_and_sha256(self):
         for asset in (RUNTIME_ASSET, MODEL_ASSET):
             self.assertTrue(asset.url.startswith("https://"))
