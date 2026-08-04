@@ -36,6 +36,22 @@ def normalize_person_name(name: str) -> str:
     return (name or "").strip().strip('"“”').strip()
 
 
+def _xml_invitee_names(plain: str, usernames: list[str]) -> list[str]:
+    invitee_names = [
+        normalize_person_name(value)
+        for value in _QUOTE_RE.findall(plain)
+    ]
+    if len(invitee_names) == 1 and len(usernames) > 1:
+        batch_names = [
+            normalize_person_name(value)
+            for value in re.split(r"[、，]", invitee_names[0])
+            if normalize_person_name(value)
+        ]
+        if len(batch_names) == len(usernames):
+            return batch_names
+    return invitee_names
+
+
 def _parse_self_invite_xml(notice: str) -> list[dict] | None:
     xml_start = notice.find("<sysmsg")
     if xml_start < 0:
@@ -50,26 +66,28 @@ def _parse_self_invite_xml(notice: str) -> list[dict] | None:
     if container is None:
         return None
     scene = (container.findtext("./link/scene") or "").strip()
-    if scene != "invite":
+    if scene not in {"invite", "qrcode"}:
         return None
     plain = (
         container.findtext("plain")
         or container.findtext("text")
         or ""
     )
-    invitee_names = [
-        normalize_person_name(value)
-        for value in _QUOTE_RE.findall(plain)
-    ]
     invitee_usernames = [
         (node.text or "").strip()
         for node in container.findall("./link/memberlist/username")
     ]
-    if not invitee_names or "你邀请" not in plain:
+    invitee_names = _xml_invitee_names(plain, invitee_usernames)
+    is_direct = scene == "invite" and "你邀请" in plain
+    is_self_qr = (
+        scene == "qrcode"
+        and "通过扫描你分享的二维码加入群聊" in plain
+    )
+    if not invitee_names or not (is_direct or is_self_qr):
         return None
     return [
         {
-            "method": "direct",
+            "method": "direct" if is_direct else "qr",
             "inviter_name_raw": "你",
             "inviter_is_self": True,
             "invitee_name_raw": invitee_name,

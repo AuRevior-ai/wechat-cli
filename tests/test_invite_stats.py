@@ -88,6 +88,69 @@ class InviteNoticeParserTests(unittest.TestCase):
             "invitee_username": "wxid_zipilqil46k022",
         }])
 
+    def test_splits_batch_self_invitation_xml_and_pairs_usernames(self):
+        events = parse_invite_notice(
+            """57757918914@chatroom:
+            <sysmsg type="delchatroommember">
+              <delchatroommember>
+                <plain><![CDATA[你邀请"甲、乙"加入了群聊  ]]></plain>
+                <text><![CDATA[你邀请"甲、乙"加入了群聊  ]]></text>
+                <link>
+                  <scene>invite</scene>
+                  <text><![CDATA[  撤销]]></text>
+                  <memberlist>
+                    <username><![CDATA[wxid_a]]></username>
+                    <username><![CDATA[wxid_b]]></username>
+                  </memberlist>
+                </link>
+              </delchatroommember>
+            </sysmsg>"""
+        )
+
+        self.assertEqual(events, [
+            {
+                "method": "direct",
+                "inviter_name_raw": "你",
+                "inviter_is_self": True,
+                "invitee_name_raw": "甲",
+                "invitee_username": "wxid_a",
+            },
+            {
+                "method": "direct",
+                "inviter_name_raw": "你",
+                "inviter_is_self": True,
+                "invitee_name_raw": "乙",
+                "invitee_username": "wxid_b",
+            },
+        ])
+
+    def test_parses_self_shared_qr_xml_with_invitee_username(self):
+        events = parse_invite_notice(
+            """57757918914@chatroom:
+            <sysmsg type="delchatroommember">
+              <delchatroommember>
+                <plain><![CDATA["闵杰 南昌大学"通过扫描你分享的二维码加入群聊  ]]></plain>
+                <text><![CDATA["闵杰 南昌大学"通过扫描你分享的二维码加入群聊  ]]></text>
+                <link>
+                  <scene>qrcode</scene>
+                  <text><![CDATA[  撤销]]></text>
+                  <memberlist>
+                    <username><![CDATA[wxid_invitee]]></username>
+                  </memberlist>
+                  <qrcode><![CDATA[http://weixin.qq.com/g/example]]></qrcode>
+                </link>
+              </delchatroommember>
+            </sysmsg>"""
+        )
+
+        self.assertEqual(events, [{
+            "method": "qr",
+            "inviter_name_raw": "你",
+            "inviter_is_self": True,
+            "invitee_name_raw": "闵杰 南昌大学",
+            "invitee_username": "wxid_invitee",
+        }])
+
     def test_preserves_unattributed_self_qr_join(self):
         events = parse_invite_notice(
             "你通过扫描二维码加入群聊，群聊参与人还有：甲、乙"
@@ -178,6 +241,80 @@ class InviteIdentityTests(unittest.TestCase):
 
 
 class InviteAggregationTests(unittest.TestCase):
+    def test_aggregates_batch_and_self_shared_qr_xml_for_local_account(self):
+        table_name = "Msg_" + "9" * 32
+        batch_notice = """57757918914@chatroom:
+        <sysmsg type="delchatroommember">
+          <delchatroommember>
+            <plain><![CDATA[你邀请"甲、乙"加入了群聊  ]]></plain>
+            <text><![CDATA[你邀请"甲、乙"加入了群聊  ]]></text>
+            <link>
+              <scene>invite</scene>
+              <memberlist>
+                <username><![CDATA[wxid_a]]></username>
+                <username><![CDATA[wxid_b]]></username>
+              </memberlist>
+            </link>
+          </delchatroommember>
+        </sysmsg>"""
+        qr_notice = """57757918914@chatroom:
+        <sysmsg type="delchatroommember">
+          <delchatroommember>
+            <plain><![CDATA["丙"通过扫描你分享的二维码加入群聊  ]]></plain>
+            <text><![CDATA["丙"通过扫描你分享的二维码加入群聊  ]]></text>
+            <link>
+              <scene>qrcode</scene>
+              <memberlist>
+                <username><![CDATA[wxid_c]]></username>
+              </memberlist>
+              <qrcode><![CDATA[http://weixin.qq.com/g/example]]></qrcode>
+            </link>
+          </delchatroommember>
+        </sysmsg>"""
+        members = [
+            {
+                "username": "wxid_me",
+                "display_name": "Au Revior",
+                "nick_name": "Au Revior",
+                "remark": "",
+            },
+            *[
+                {
+                    "username": f"wxid_{suffix}",
+                    "display_name": name,
+                    "nick_name": name,
+                    "remark": "",
+                }
+                for suffix, name in (("a", "甲"), ("b", "乙"), ("c", "丙"))
+            ],
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "message.db"
+            create_message_db(path, table_name, [
+                (1, 701, 10000, 1785295680, batch_notice, 0),
+                (2, 702, 10000, 1785295740, qr_notice, 0),
+            ])
+            ctx = {
+                "display_name": "测试群",
+                "username": "57757918914@chatroom",
+                "self_username": "wxid_me",
+                "is_group": True,
+                "message_tables": [{
+                    "db_path": str(path),
+                    "table_name": table_name,
+                }],
+            }
+
+            result = collect_group_invite_stats(ctx, members, {})
+
+        self.assertEqual(result["summary"]["invite_event_count"], 3)
+        self.assertEqual(result["summary"]["unparsed_count"], 0)
+        self.assertEqual(len(result["ranking"]), 1)
+        self.assertEqual(result["ranking"][0]["inviter_name"], "Au Revior")
+        self.assertEqual(result["ranking"][0]["unique_invitee_count"], 3)
+        self.assertEqual(result["ranking"][0]["direct_count"], 2)
+        self.assertEqual(result["ranking"][0]["qr_count"], 1)
+
     def test_attributes_self_invitation_xml_to_local_account(self):
         table_name = "Msg_" + "f" * 32
         notice = """54539324941@chatroom:
