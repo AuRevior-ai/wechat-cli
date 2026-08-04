@@ -145,4 +145,3 @@ Use the repository's existing non-destructive integration convention, preserving
 - [ ] **Step 3: Verify main and the installed app one final time**
 
 Expected: local main contains the fix commits, remains clean, and both installed CLI and Web report the corrected invite statistics.
-
