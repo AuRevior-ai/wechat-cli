@@ -26,6 +26,7 @@
         <button data-target="members">群聊成员统计和导出</button>
         <button data-target="stats">单个聊天数据统计</button>
         <button data-target="invite-stats">群聊成员邀请统计</button>
+        <button data-target="license">许可证与更新</button>
         <button class="about-nav" data-target="about-support"><span>关于与支持</span>
           <small>作者 Au Revior</small>
         </button>
@@ -279,6 +280,73 @@
           </div>
           <button class="primary" type="submit">生成邀请统计</button>
         </form>
+      </section>
+
+      <section id="license" class="screen" data-title="许可证与更新">
+        <div class="license-screen">
+          <header class="license-hero">
+            <div>
+              <span>LICENSE &amp; UPDATE</span>
+              <h2>许可证与更新</h2>
+              <p>查看当前授权、设备绑定和版本状态。完整许可证与设备令牌不会显示在网页中。</p>
+            </div>
+            <div class="license-toolbar">
+              <button id="license-refresh" class="ghost" type="button">刷新状态</button>
+              <button id="manual-update-check" class="primary" type="button">检查更新</button>
+            </div>
+          </header>
+
+          <div id="license-feedback" class="license-feedback hidden" role="status"></div>
+
+          <div class="license-grid">
+            <article class="license-card">
+              <span class="license-card-label">许可证状态</span>
+              <strong id="license-state">正在读取</strong>
+              <dl class="license-meta">
+                <div><dt>许可证</dt><dd id="license-hint">—</dd></div>
+                <div><dt>离线有效期</dt><dd id="license-offline-until">—</dd></div>
+                <div><dt>剩余离线时间</dt><dd id="license-offline-remaining">—</dd></div>
+              </dl>
+            </article>
+            <article class="license-card">
+              <span class="license-card-label">版本状态</span>
+              <strong id="update-state">正在读取</strong>
+              <dl class="license-meta">
+                <div><dt>当前版本</dt><dd id="current-app-version">—</dd></div>
+                <div><dt>启动器</dt><dd id="current-launcher-version">—</dd></div>
+                <div><dt>发布通道</dt><dd id="release-channel">—</dd></div>
+                <div><dt>待安装版本</dt><dd id="pending-app-version">—</dd></div>
+              </dl>
+              <div class="update-progress" aria-label="更新下载进度">
+                <span id="update-progress-bar"></span>
+              </div>
+              <small id="update-progress-label">尚未下载更新</small>
+            </article>
+          </div>
+
+          <article class="license-panel">
+            <div class="license-panel-head">
+              <div><span>DEVICES</span><h3>设备管理</h3></div>
+              <small>每张许可证最多绑定三台设备</small>
+            </div>
+            <div id="license-devices" class="device-list">
+              <div class="empty-state">正在读取设备列表…</div>
+            </div>
+          </article>
+
+          <article class="license-panel diagnostics-consent">
+            <div class="license-panel-head">
+              <div><span>DIAGNOSTICS</span><h3>诊断与支持</h3></div>
+              <small>默认只保存到本机，不会自动上传</small>
+            </div>
+            <p>诊断包仅包含版本摘要和经过脱敏的启动、更新及回滚日志，不包含微信聊天记录、数据库密钥、完整许可证或设备令牌。</p>
+            <div class="diagnostics-actions">
+              <button id="diagnostics-generate" class="ghost" type="button">生成本地诊断包</button>
+              <button id="diagnostics-submit" class="primary" type="button" disabled>明确同意并提交</button>
+            </div>
+            <small id="diagnostics-status">尚未生成诊断包。</small>
+          </article>
+        </div>
       </section>
 
       <section id="about-support" class="screen" data-title="关于与支持">

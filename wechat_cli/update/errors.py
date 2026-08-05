@@ -1,0 +1,57 @@
+"""Stable error contracts shared by updater clients and user interfaces."""
+
+from __future__ import annotations
+
+from enum import Enum
+
+
+class ErrorCode(str, Enum):
+    UPDATE_SCHEMA_UNSUPPORTED = "UPDATE_SCHEMA_UNSUPPORTED"
+    UPDATE_MANIFEST_INVALID = "UPDATE_MANIFEST_INVALID"
+    UPDATE_PRODUCT_MISMATCH = "UPDATE_PRODUCT_MISMATCH"
+    UPDATE_PLATFORM_MISMATCH = "UPDATE_PLATFORM_MISMATCH"
+    UPDATE_ARCHITECTURE_MISMATCH = "UPDATE_ARCHITECTURE_MISMATCH"
+    UPDATE_APP_TOO_OLD = "UPDATE_APP_TOO_OLD"
+    UPDATE_LAUNCHER_TOO_NEW = "UPDATE_LAUNCHER_TOO_NEW"
+    UPDATE_SIGNATURE_INVALID = "UPDATE_SIGNATURE_INVALID"
+    UPDATE_SIGNING_KEY_UNKNOWN = "UPDATE_SIGNING_KEY_UNKNOWN"
+    UPDATE_HASH_MISMATCH = "UPDATE_HASH_MISMATCH"
+    UPDATE_PACKAGE_UNSAFE = "UPDATE_PACKAGE_UNSAFE"
+    UPDATE_PACKAGE_INVALID = "UPDATE_PACKAGE_INVALID"
+    UPDATE_HEALTH_FAILED = "UPDATE_HEALTH_FAILED"
+    UPDATE_NOT_AVAILABLE = "UPDATE_NOT_AVAILABLE"
+    UPDATE_PAUSED = "UPDATE_PAUSED"
+    LAUNCHER_TOO_OLD = "LAUNCHER_TOO_OLD"
+    DOWNLOAD_TICKET_EXPIRED = "DOWNLOAD_TICKET_EXPIRED"
+    DOWNLOAD_NOT_AUTHORIZED = "DOWNLOAD_NOT_AUTHORIZED"
+    LICENSE_NOT_FOUND = "LICENSE_NOT_FOUND"
+    LICENSE_SUSPENDED = "LICENSE_SUSPENDED"
+    LICENSE_REVOKED = "LICENSE_REVOKED"
+    DEVICE_LIMIT_REACHED = "DEVICE_LIMIT_REACHED"
+    DEVICE_UNBOUND = "DEVICE_UNBOUND"
+    DEVICE_DISABLED = "DEVICE_DISABLED"
+    INVALID_DEVICE_TOKEN = "INVALID_DEVICE_TOKEN"
+    OFFLINE_LEASE_DENIED = "OFFLINE_LEASE_DENIED"
+    LOCAL_STATE_CORRUPT = "LOCAL_STATE_CORRUPT"
+    SERVICE_TEMPORARILY_UNAVAILABLE = "SERVICE_TEMPORARILY_UNAVAILABLE"
+    RATE_LIMITED = "RATE_LIMITED"
+
+
+class UpdateError(Exception):
+    """Base exception carrying a stable machine-readable error code."""
+
+    def __init__(
+        self,
+        code: ErrorCode,
+        message: str,
+        *,
+        retryable: bool = False,
+    ) -> None:
+        super().__init__(message)
+        self.code = code
+        self.message = message
+        self.retryable = retryable
+
+
+class ManifestValidationError(UpdateError):
+    """Raised when signed manifest content violates the update contract."""

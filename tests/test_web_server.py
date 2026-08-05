@@ -1,4 +1,5 @@
 import unittest
+import io
 import json
 import os
 import sys
@@ -224,6 +225,32 @@ class BuildCliArgsTests(unittest.TestCase):
         self.assertFalse(web_server._is_local_request_source(
             "127.0.0.1:9999", "", 8787, require_origin=False
         ))
+
+    def test_rejected_small_post_body_is_drained_before_response(self):
+        handler = object.__new__(web_server.WeChatWebHandler)
+        handler.command = "POST"
+        handler.headers = {"Content-Length": "2"}
+        handler.rfile = io.BytesIO(b"{}")
+        handler.close_connection = False
+
+        drained = handler._discard_rejected_request_body()
+
+        self.assertTrue(drained)
+        self.assertEqual(b"", handler.rfile.read())
+        self.assertFalse(handler.close_connection)
+
+    def test_rejected_oversized_post_body_is_not_read_and_closes_connection(self):
+        handler = object.__new__(web_server.WeChatWebHandler)
+        handler.command = "POST"
+        handler.headers = {"Content-Length": str(64 * 1024 + 1)}
+        handler.rfile = io.BytesIO(b"not-read")
+        handler.close_connection = False
+
+        drained = handler._discard_rejected_request_body()
+
+        self.assertFalse(drained)
+        self.assertEqual(0, handler.rfile.tell())
+        self.assertTrue(handler.close_connection)
 
     def test_web_ai_package_uses_server_owned_path_and_one_time_download(self):
         with tempfile.TemporaryDirectory() as tmp, patch.object(
@@ -627,7 +654,7 @@ class BuildCliArgsTests(unittest.TestCase):
         self.assertIn(".session-picker", css)
         self.assertIn(".summary-result-hero", css)
 
-    def test_web_navigation_has_eight_tools_and_author_support(self):
+    def test_web_navigation_has_tools_license_and_author_support(self):
         html = (
             ROOT / "wechat_cli" / "web" / "static" / "index.html"
         ).read_text(encoding="utf-8")
@@ -640,6 +667,7 @@ class BuildCliArgsTests(unittest.TestCase):
             '<button data-target="members">群聊成员统计和导出</button>',
             '<button data-target="stats">单个聊天数据统计</button>',
             '<button data-target="invite-stats">群聊成员邀请统计</button>',
+            '<button data-target="license">许可证与更新</button>',
             (
                 '<button class="about-nav" data-target="about-support">'
                 '<span>关于与支持</span>'
@@ -655,6 +683,10 @@ class BuildCliArgsTests(unittest.TestCase):
         self.assertIn("统计范围：从微信数据库记载的日子开始", html)
         self.assertLess(
             html.index('data-target="invite-stats"'),
+            html.index('data-target="license"'),
+        )
+        self.assertLess(
+            html.index('data-target="license"'),
             html.index('data-target="about-support"'),
         )
 
@@ -687,7 +719,7 @@ class BuildCliArgsTests(unittest.TestCase):
         self.assertIn(".about-support-card", css)
         self.assertIn(".about-nav", css)
         self.assertIn(
-            'resultArea.classList.toggle("hidden", id === "about-support")',
+            'resultArea.classList.toggle("hidden", ["about-support", "license"].includes(id))',
             js,
         )
 

@@ -1,0 +1,9 @@
+# Copy to .dev.vars for local Wrangler development. Never commit the real file.
+LICENSE_KEY_PEPPER=replace-with-at-least-32-random-bytes
+DEVICE_TOKEN_PEPPER=replace-with-at-least-32-random-bytes
+ADMIN_TOKEN_PEPPER=replace-with-at-least-32-random-bytes
+CONTACT_LOOKUP_PEPPER=replace-with-at-least-32-random-bytes
+CONTACT_ENCRYPTION_KEY_V1=replace-with-base64-encoded-32-byte-aes-key
+LEASE_SIGNING_PRIVATE_KEY=replace-with-base64-encoded-ed25519-pkcs8-private-key
+DOWNLOAD_TICKET_SECRET=replace-with-at-least-32-random-bytes
+GITHUB_RELEASE_READ_TOKEN=replace-with-fine-grained-private-release-read-token

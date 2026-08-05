@@ -5,8 +5,7 @@ import sys
 import click
 
 from .core.context import AppContext
-
-_VERSION = "0.4.2"
+from .version import APP_VERSION
 
 
 def _configure_utf8_stdio(stdout=None, stderr=None):
@@ -21,7 +20,7 @@ _configure_utf8_stdio()
 
 
 @click.group()
-@click.version_option(version=_VERSION, prog_name="wechat-cli")
+@click.version_option(version=APP_VERSION, prog_name="wechat-cli")
 @click.option("--config", "config_path", default=None, envvar="WECHAT_CLI_CONFIG",
               help="config.json 路径（默认自动查找）")
 @click.pass_context

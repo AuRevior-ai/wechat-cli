@@ -6,6 +6,7 @@ payloads to the existing click CLI. It never accepts arbitrary commands.
 
 from __future__ import annotations
 
+import html
 import json
 import mimetypes
 import os
@@ -32,6 +33,8 @@ from ..core.media import decode_media_bytes as _core_decode_media_bytes
 from ..core.media import media_download_filename as _core_media_download_filename
 from ..core.media import read_media_file_payload
 from ..core.messages import validate_search_scope
+from ..license.app_authorization import resolve_app_authorization
+from ..update.health import build_health_payload
 
 AVATAR_MAX_BYTES = 2 * 1024 * 1024
 AVATAR_ALLOWED_HOSTS = ("qlogo.cn", "qpic.cn", "weixin.qq.com")
@@ -484,6 +487,31 @@ def db_dir_candidates_payload() -> dict[str, Any]:
     }
 
 
+def health_payload(*, license_session_valid: bool | None = None) -> dict[str, Any]:
+    """Return the launcher-facing health contract without touching chat data."""
+    if license_session_valid is None:
+        requires_session = os.environ.get("WECHAT_CLI_REQUIRE_LAUNCH_SESSION", "").lower() in {
+            "1",
+            "true",
+            "yes",
+        }
+        session_flag = os.environ.get("WECHAT_CLI_LAUNCH_SESSION_VALID", "").lower() in {
+            "1",
+            "true",
+            "yes",
+        }
+        license_session_valid = session_flag if requires_session else True
+    return build_health_payload(
+        config_loaded=True,
+        license_session_valid=license_session_valid,
+        core_modules={
+            "server": "ok",
+            "storage": "ok",
+            "routes": "ok",
+        },
+    )
+
+
 def status_payload() -> dict[str, Any]:
     cfg: dict[str, Any] = {}
     if os.path.exists(CONFIG_FILE):
@@ -733,12 +761,180 @@ def _media_placeholder_svg(filename: str) -> bytes:
 class WeChatWebHandler(BaseHTTPRequestHandler):
     server_version = "wechat-cli-web/0.1"
 
+    def _license_session_valid(self) -> bool:
+        return bool(getattr(self.server, "license_session_valid", True))
+
+    def _license_session_reason(self) -> str:
+        value = getattr(self.server, "license_session_reason", None)
+        return value if isinstance(value, str) and value else "missing_or_invalid"
+
+    def _send_license_error(self) -> None:
+        self._send_json(
+            {
+                "ok": False,
+                "error": {
+                    "code": "LICENSE_SESSION_INVALID",
+                    "message": "许可证启动会话无效，请从 WeChat CLI Launcher 重新启动。",
+                    "reason": self._license_session_reason(),
+                    "retryable": False,
+                },
+            },
+            HTTPStatus.FORBIDDEN,
+        )
+
+    def _diagnostic_export_store(self):
+        store = getattr(self.server, "diagnostic_exports", None)
+        lock = getattr(self.server, "diagnostic_exports_lock", None)
+        if not isinstance(store, dict) or lock is None:
+            store = {}
+            lock = Lock()
+            self.server.diagnostic_exports = store
+            self.server.diagnostic_exports_lock = lock
+        return store, lock
+
+    def _remember_diagnostic_export(self, path: Path) -> str:
+        token = secrets.token_urlsafe(24)
+        store, lock = self._diagnostic_export_store()
+        now = time.monotonic()
+        with lock:
+            expired = [
+                key
+                for key, item in store.items()
+                if not isinstance(item, dict)
+                or float(item.get("expires_at", 0)) <= now
+            ]
+            for key in expired:
+                store.pop(key, None)
+            store[token] = {
+                "path": str(path),
+                "expires_at": now + 15 * 60,
+            }
+        return token
+
+    def _resolve_diagnostic_export(self, token: str) -> Path:
+        if not isinstance(token, str) or not re.fullmatch(
+            r"[A-Za-z0-9_-]{16,128}", token
+        ):
+            raise ValueError("diagnostic submission token is invalid")
+        store, lock = self._diagnostic_export_store()
+        now = time.monotonic()
+        with lock:
+            item = store.get(token)
+            if (
+                not isinstance(item, dict)
+                or float(item.get("expires_at", 0)) <= now
+                or not isinstance(item.get("path"), str)
+            ):
+                store.pop(token, None)
+                raise ValueError("diagnostic submission token is invalid or expired")
+            path = Path(item["path"])
+        if path.is_symlink() or not path.is_file():
+            with lock:
+                store.pop(token, None)
+            raise ValueError("diagnostic bundle is missing")
+        return path
+
+    def _consume_diagnostic_export(self, token: str) -> None:
+        store, lock = self._diagnostic_export_store()
+        with lock:
+            store.pop(token, None)
+
+    def _management_service(self):
+        service = getattr(self.server, "license_management", None)
+        if service is None:
+            self._send_json(
+                {
+                    "ok": False,
+                    "error": {
+                        "code": "LICENSE_MANAGEMENT_UNAVAILABLE",
+                        "message": "许可证与更新服务尚未初始化。",
+                        "retryable": True,
+                    },
+                },
+                HTTPStatus.SERVICE_UNAVAILABLE,
+            )
+            return None
+        return service
+
+    def _send_management_failure(self, *, invalid_request: bool = False) -> None:
+        self._send_json(
+            {
+                "ok": False,
+                "error": {
+                    "code": (
+                        "MANAGEMENT_REQUEST_INVALID"
+                        if invalid_request
+                        else "LICENSE_MANAGEMENT_FAILED"
+                    ),
+                    "message": (
+                        "请求参数无效。"
+                        if invalid_request
+                        else "许可证与更新操作未完成，请稍后重试。"
+                    ),
+                    "retryable": not invalid_request,
+                },
+            },
+            HTTPStatus.BAD_REQUEST
+            if invalid_request
+            else HTTPStatus.BAD_GATEWAY,
+        )
+
+    def _send_restricted_page(self) -> None:
+        reason = html.escape(self._license_session_reason(), quote=True)
+        page = f"""<!doctype html>
+<html lang=\"zh-CN\">
+<head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">
+<title>WeChat CLI Web - 许可证验证未通过</title>
+<style>body{{font-family:Segoe UI,Microsoft YaHei,sans-serif;background:#f5f3ee;color:#28251f;margin:0;display:grid;min-height:100vh;place-items:center}}main{{max-width:640px;background:white;border:1px solid #ded8cc;border-radius:18px;padding:32px;box-shadow:0 18px 50px #0001}}h1{{font-size:24px}}code{{background:#f1eee7;padding:3px 7px;border-radius:6px}}p{{line-height:1.7}}</style></head>
+<body><main><h1>许可证验证未通过</h1><p>请关闭此窗口，并从桌面的 WeChat CLI Launcher 重新启动程序。</p><p>错误原因：<code>{reason}</code></p><p>微信数据和配置没有被修改。</p></main></body></html>"""
+        self._send_bytes(page.encode("utf-8"), "text/html; charset=utf-8")
+
     def do_GET(self) -> None:  # noqa: N802
         if not self._validate_request_source(require_origin=False):
             return
         parsed = urlparse(self.path)
+        if parsed.path == "/api/health":
+            self._send_json(
+                health_payload(license_session_valid=self._license_session_valid())
+            )
+            return
+        if not self._license_session_valid():
+            if parsed.path in ("", "/"):
+                self._send_restricted_page()
+            elif parsed.path == "/api/license-status":
+                self._send_json(
+                    {
+                        "ok": True,
+                        "authorized": False,
+                        "reason": self._license_session_reason(),
+                    }
+                )
+            else:
+                self._send_license_error()
+            return
         if parsed.path in ("", "/"):
             self._send_bytes(_static_bytes("index.html"), "text/html; charset=utf-8")
+            return
+        if parsed.path in {
+            "/api/license",
+            "/api/license/devices",
+            "/api/update-status",
+        }:
+            service = self._management_service()
+            if service is None:
+                return
+            try:
+                if parsed.path == "/api/license":
+                    payload = service.license_status()
+                elif parsed.path == "/api/license/devices":
+                    payload = {"devices": service.list_devices()}
+                else:
+                    payload = service.update_status()
+                self._send_json(payload)
+            except ValueError:
+                self._send_management_failure(invalid_request=True)
+            except Exception:
+                self._send_management_failure()
             return
         if parsed.path == "/api/status":
             self._send_json(status_payload())
@@ -748,9 +944,6 @@ class WeChatWebHandler(BaseHTTPRequestHandler):
             return
         if parsed.path == "/api/db-dirs":
             self._send_json(db_dir_candidates_payload())
-            return
-        if parsed.path == "/api/health":
-            self._send_json({"ok": True})
             return
         if parsed.path.startswith("/api/ai-package/"):
             token = parsed.path.rsplit("/", 1)[-1]
@@ -804,6 +997,135 @@ class WeChatWebHandler(BaseHTTPRequestHandler):
         if not self._validate_request_source(require_origin=True):
             return
         parsed = urlparse(self.path)
+        if not self._license_session_valid():
+            self._send_license_error()
+            return
+        if parsed.path == "/api/diagnostics/generate":
+            try:
+                payload = self._read_json()
+                submit = payload.get("submit", False)
+                if not isinstance(submit, bool):
+                    raise ValueError("submit must be a boolean")
+                if submit:
+                    submitter = getattr(self.server, "diagnostics_submitter", None)
+                    if submitter is None:
+                        self._send_json(
+                            {
+                                "ok": False,
+                                "error": {
+                                    "code": "DIAGNOSTIC_UPLOAD_NOT_ENABLED",
+                                    "message": "诊断包上传尚未启用。",
+                                    "retryable": False,
+                                },
+                            },
+                            HTTPStatus.NOT_IMPLEMENTED,
+                        )
+                        return
+                    token = payload.get("submission_token")
+                    try:
+                        bundle_path = self._resolve_diagnostic_export(token)
+                    except ValueError:
+                        self._send_json(
+                            {
+                                "ok": False,
+                                "error": {
+                                    "code": "DIAGNOSTIC_SUBMISSION_INVALID",
+                                    "message": "诊断包提交凭证无效或已过期。",
+                                    "retryable": False,
+                                },
+                            },
+                            HTTPStatus.BAD_REQUEST,
+                        )
+                        return
+                    upload = submitter.submit(bundle_path)
+                    self._consume_diagnostic_export(token)
+                    self._send_json(
+                        {
+                            "ok": True,
+                            "filename": bundle_path.name,
+                            "submitted": True,
+                            "submission_id": upload.submission_id,
+                            "status": upload.status,
+                            "size_bytes": upload.size_bytes,
+                            "sha256": upload.sha256,
+                        }
+                    )
+                    return
+
+                builder = getattr(self.server, "diagnostics_builder", None)
+                if builder is None:
+                    self._send_json(
+                        {
+                            "ok": False,
+                            "error": {
+                                "code": "DIAGNOSTICS_UNAVAILABLE",
+                                "message": "诊断包生成功能尚未初始化。",
+                                "retryable": True,
+                            },
+                        },
+                        HTTPStatus.SERVICE_UNAVAILABLE,
+                    )
+                    return
+                result = builder.build_local()
+                submission_token = self._remember_diagnostic_export(result.path)
+                self._send_json(
+                    {
+                        "ok": True,
+                        "filename": result.path.name,
+                        "size_bytes": result.path.stat().st_size,
+                        "submitted": False,
+                        "submission_token": submission_token,
+                        "can_submit": getattr(
+                            self.server, "diagnostics_submitter", None
+                        )
+                        is not None,
+                    }
+                )
+            except ValueError:
+                self._send_management_failure(invalid_request=True)
+            except Exception:
+                self._send_json(
+                    {
+                        "ok": False,
+                        "error": {
+                            "code": "DIAGNOSTIC_OPERATION_FAILED",
+                            "message": "诊断包操作未完成，请稍后重试。",
+                            "retryable": True,
+                        },
+                    },
+                    HTTPStatus.BAD_GATEWAY,
+                )
+            return
+        management_paths = {
+            "/api/license/devices/unbind",
+            "/api/license/devices/rename",
+            "/api/update/check",
+        }
+        if parsed.path in management_paths:
+            service = self._management_service()
+            if service is None:
+                return
+            try:
+                payload = self._read_json()
+                if parsed.path == "/api/license/devices/unbind":
+                    result = service.unbind_device(
+                        payload.get("device_id"),
+                        payload.get("operation_nonce"),
+                    )
+                elif parsed.path == "/api/license/devices/rename":
+                    result = service.rename_device(
+                        payload.get("device_id"),
+                        payload.get("display_name"),
+                        payload.get("operation_nonce"),
+                    )
+                else:
+                    result = service.trigger_update_check()
+                self._send_json(result)
+            except ValueError:
+                self._send_management_failure(invalid_request=True)
+            except Exception:
+                self._send_management_failure()
+            return
         if parsed.path not in {"/api/run", "/api/ai-package"}:
             self.send_error(HTTPStatus.NOT_FOUND)
             return
@@ -835,6 +1157,33 @@ class WeChatWebHandler(BaseHTTPRequestHandler):
             raise ValueError("Request body must be an object")
         return payload
 
+    def _discard_rejected_request_body(self, max_bytes: int = 64 * 1024) -> bool:
+        """Drain a small rejected request body so Windows can return HTTP cleanly."""
+        if self.command not in {"POST", "PUT", "PATCH"}:
+            return True
+        if self.headers.get("Transfer-Encoding"):
+            self.close_connection = True
+            return False
+        raw_length = self.headers.get("Content-Length")
+        if not raw_length:
+            return True
+        try:
+            length = int(raw_length)
+        except (TypeError, ValueError):
+            self.close_connection = True
+            return False
+        if length < 0 or length > max_bytes:
+            self.close_connection = True
+            return False
+        remaining = length
+        while remaining:
+            chunk = self.rfile.read(min(64 * 1024, remaining))
+            if not chunk:
+                self.close_connection = True
+                return False
+            remaining -= len(chunk)
+        return True
+
     def _validate_request_source(self, *, require_origin: bool) -> bool:
         server_port = int(self.server.server_address[1])
         allowed = _is_local_request_source(
@@ -844,7 +1193,18 @@ class WeChatWebHandler(BaseHTTPRequestHandler):
             require_origin=require_origin,
         )
         if not allowed:
-            self.send_error(HTTPStatus.FORBIDDEN)
+            self._discard_rejected_request_body()
+            self._send_json(
+                {
+                    "ok": False,
+                    "error": {
+                        "code": "FORBIDDEN_REQUEST_SOURCE",
+                        "message": "Forbidden request source.",
+                        "retryable": False,
+                    },
+                },
+                HTTPStatus.FORBIDDEN,
+            )
         return allowed
 
     def end_headers(self) -> None:
@@ -914,11 +1274,146 @@ class WeChatWebHandler(BaseHTTPRequestHandler):
         sys.stderr.write("[wechat-web] " + fmt % args + "\n")
 
 
+def _configure_local_management(httpd) -> None:
+    """Attach local license/update and diagnostic services when installed.
+
+    Source-development runs and partially installed copies remain usable for
+    existing non-management features. Initialization errors are intentionally
+    kept out of HTTP responses so secrets and local paths are not exposed.
+    """
+    try:
+        from ..diagnostics import DiagnosticBundleBuilder
+        from ..diagnostics_upload import (
+            DiagnosticUploadClient,
+            InstalledDiagnosticSubmitter,
+            UrllibDiagnosticBinaryTransport,
+            UrllibDiagnosticJsonTransport,
+        )
+        from ..launcher.config import LauncherConfig
+        from ..license.app_management import AppManagementService
+        from ..license.client import LicenseApiClient, UrllibJsonTransport
+        from ..license.storage import LicenseStateStorage
+        from ..update.layout import InstallLayout
+        from ..windows.dpapi import WindowsDpapiProtector
+    except Exception:
+        return
+
+    try:
+        layout = InstallLayout.from_environment()
+    except Exception:
+        return
+
+    try:
+        httpd.diagnostics_builder = DiagnosticBundleBuilder(layout=layout)
+    except Exception:
+        pass
+
+    if not bool(getattr(httpd, "license_session_valid", False)):
+        return
+    config_path = layout.launcher_dir / "launcher-config.json"
+    if not config_path.is_file():
+        return
+
+    allow_loopback = os.environ.get(
+        "WECHAT_CLI_ALLOW_INSECURE_LOOPBACK", ""
+    ).lower() in {"1", "true", "yes"}
+    try:
+        config = LauncherConfig.load(
+            config_path,
+            allow_insecure_loopback=allow_loopback,
+        )
+        storage = LicenseStateStorage(
+            layout.state_dir / "license-state.dat",
+            WindowsDpapiProtector(),
+        )
+        transport = UrllibJsonTransport(
+            config.api_base_url,
+            allow_insecure_loopback=allow_loopback,
+        )
+        client = LicenseApiClient(transport)
+        diagnostic_client = DiagnosticUploadClient(
+            UrllibDiagnosticJsonTransport(
+                config.api_base_url,
+                allow_insecure_loopback=allow_loopback,
+            ),
+            UrllibDiagnosticBinaryTransport(
+                config.api_base_url,
+                allow_insecure_loopback=allow_loopback,
+            ),
+        )
+        httpd.diagnostics_submitter = InstalledDiagnosticSubmitter(
+            layout=layout,
+            storage=storage,
+            client=diagnostic_client,
+        )
+    except Exception:
+        return
+
+    def trigger_update_check() -> bool:
+        import subprocess
+        import sys
+
+        launcher_executable = layout.launcher_dir / "wechat-cli-launcher.exe"
+        if launcher_executable.is_file():
+            command = [
+                str(launcher_executable),
+                "--download-update",
+                "--config-path",
+                str(config_path),
+            ]
+        elif not getattr(sys, "frozen", False):
+            command = [
+                sys.executable,
+                "-m",
+                "wechat_cli.launcher.cli",
+                "--download-update",
+                "--config-path",
+                str(config_path),
+            ]
+        else:
+            return False
+        stdin = open(os.devnull, "rb")
+        try:
+            kwargs = {
+                "stdin": stdin,
+                "stdout": subprocess.DEVNULL,
+                "stderr": subprocess.DEVNULL,
+                "shell": False,
+                "close_fds": True,
+            }
+            if os.name == "nt":
+                kwargs["creationflags"] = (
+                    getattr(subprocess, "CREATE_NO_WINDOW", 0)
+                    | getattr(subprocess, "DETACHED_PROCESS", 0)
+                )
+            subprocess.Popen(command, **kwargs)
+            return True
+        except OSError:
+            return False
+        finally:
+            stdin.close()
+
+    try:
+        httpd.license_management = AppManagementService(
+            layout=layout,
+            storage=storage,
+            client=client,
+            lease_keys=config.lease_keys,
+            update_trigger=trigger_update_check,
+        )
+    except Exception:
+        return
+
+
 def serve(host: str = "127.0.0.1", port: int = 8787, open_browser: bool = False) -> None:
     if host not in {"127.0.0.1", "localhost"}:
         raise ValueError("The web console is limited to localhost in this version")
     _expire_ai_package_downloads()
+    authorization = resolve_app_authorization()
     httpd = ThreadingHTTPServer((host, port), WeChatWebHandler)
+    httpd.license_session_valid = authorization.valid
+    httpd.license_session_reason = authorization.reason
+    _configure_local_management(httpd)
     url = f"http://{host}:{httpd.server_address[1]}"
     print(f"WeChat CLI Web is running at {url}", flush=True)
     print("Press Ctrl+C to stop.", flush=True)

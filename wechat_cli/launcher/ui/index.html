@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self'; script-src 'self'; img-src 'self' data:; connect-src 'none'; font-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'">
+  <title>WeChat CLI Launcher</title>
+  <link rel="stylesheet" href="app.css">
+</head>
+<body>
+  <main class="shell" aria-live="polite">
+    <header class="brand">
+      <span class="mark" aria-hidden="true">W</span>
+      <div>
+        <p class="eyebrow">WECHAT CLI WEB</p>
+        <h1 id="title">正在初始化</h1>
+      </div>
+    </header>
+
+    <section class="panel">
+      <p id="message" class="message">正在检查安装状态与许可证。</p>
+      <div id="progress-wrap" class="progress-wrap" hidden>
+        <div class="progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+          <div id="progress" class="progress-bar"></div>
+        </div>
+        <span id="progress-label">0%</span>
+      </div>
+
+      <form id="activation-form" class="activation" hidden autocomplete="off">
+        <label for="license-key">许可证密钥</label>
+        <input id="license-key" name="license-key" type="password" maxlength="128" spellcheck="false" autocomplete="off" required>
+        <label for="device-name">设备名称</label>
+        <input id="device-name" name="device-name" type="text" maxlength="64" autocomplete="off">
+        <button type="submit" class="primary">激活并启动</button>
+      </form>
+
+      <dl id="details" class="details"></dl>
+      <p id="error" class="error" hidden></p>
+
+      <div class="actions">
+        <button id="retry-validation" type="button" hidden>重新验证</button>
+        <button id="retry-update" type="button" hidden>重试更新</button>
+        <button id="start-application" type="button" class="primary" hidden>启动应用</button>
+        <button id="open-logs" type="button">打开日志目录</button>
+        <button id="close-launcher" type="button">关闭</button>
+      </div>
+    </section>
+
+    <footer>本窗口不会显示或上传微信聊天数据。</footer>
+  </main>
+  <script src="app.js"></script>
+</body>
+</html>

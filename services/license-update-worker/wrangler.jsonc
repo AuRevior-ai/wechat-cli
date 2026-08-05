@@ -1,0 +1,82 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "wechat-cli-license-update",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-04",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "triggers": {
+    "crons": ["17 * * * *"]
+  },
+  "observability": {
+    "enabled": false
+  },
+  "vars": {
+    "ENVIRONMENT": "local",
+    "LEASE_SIGNING_KEY_ID": "lease-key-local-01",
+    "CONTACT_ENCRYPTION_KEY_VERSION": "1",
+    "MAX_DIAGNOSTIC_BYTES": "20971520"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "wechat-cli-license-local",
+      "database_id": "local-placeholder",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "DIAGNOSTICS",
+      "bucket_name": "wechat-cli-diagnostics-local"
+    }
+  ],
+  "env": {
+    "staging": {
+      "name": "wechat-cli-license-update-staging",
+      "vars": {
+        "ENVIRONMENT": "staging",
+        "LEASE_SIGNING_KEY_ID": "lease-key-staging-01",
+        "CONTACT_ENCRYPTION_KEY_VERSION": "1",
+        "MAX_DIAGNOSTIC_BYTES": "20971520"
+      },
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "wechat-cli-license-staging",
+          "database_id": "REPLACE_WITH_STAGING_D1_ID",
+          "migrations_dir": "migrations"
+        }
+      ],
+      "r2_buckets": [
+        {
+          "binding": "DIAGNOSTICS",
+          "bucket_name": "wechat-cli-diagnostics-staging"
+        }
+      ]
+    },
+    "production": {
+      "name": "wechat-cli-license-update",
+      "vars": {
+        "ENVIRONMENT": "production",
+        "LEASE_SIGNING_KEY_ID": "lease-key-production-01",
+        "CONTACT_ENCRYPTION_KEY_VERSION": "1",
+        "MAX_DIAGNOSTIC_BYTES": "20971520"
+      },
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "wechat-cli-license-production",
+          "database_id": "REPLACE_WITH_PRODUCTION_D1_ID",
+          "migrations_dir": "migrations"
+        }
+      ],
+      "r2_buckets": [
+        {
+          "binding": "DIAGNOSTICS",
+          "bucket_name": "wechat-cli-diagnostics-production"
+        }
+      ]
+    }
+  }
+}

@@ -17,6 +17,10 @@ const setupDbDirInput = document.querySelector("#setup-db-dir");
 const profileAvatar = document.querySelector("#profile-avatar");
 const profileName = document.querySelector("#profile-name");
 const defaultTodayInputs = [...document.querySelectorAll("[data-default-today]")];
+const licenseRefreshButton = document.querySelector("#license-refresh");
+const manualUpdateButton = document.querySelector("#manual-update-check");
+const diagnosticsGenerateButton = document.querySelector("#diagnostics-generate");
+const diagnosticsSubmitButton = document.querySelector("#diagnostics-submit");
 
 let lastText = "";
 let lastKeyText = "";
@@ -27,6 +31,7 @@ let sessions = [];
 let sessionsLoaded = false;
 let sessionsRequestVersion = 0;
 let currentScreenId = document.querySelector(".screen.active")?.id || "dashboard";
+let diagnosticSubmissionToken = "";
 const screenResultStates = new Map();
 const screenRequestVersions = new Map();
 const SUMMARY_PREVIEW_LIMIT = 200;
@@ -171,9 +176,14 @@ function setScreen(id) {
   });
   const activeScreen = document.getElementById(id);
   title.textContent = activeScreen?.dataset.title || "WeChat CLI Web";
-  resultArea.classList.toggle("hidden", id === "about-support");
+  resultArea.classList.toggle("hidden", ["about-support", "license"].includes(id));
   if (id === "setup" && dbDirCandidates.length === 0) {
     refreshDbDirs().catch((error) => showTransientError(error, "setup"));
+  }
+  if (id === "license") {
+    loadLicenseManagement().catch((error) => {
+      setLicenseFeedback(error.message || "许可证与更新状态读取失败。", "error");
+    });
   }
   restoreResultState(id);
   if (activeScreen?.querySelector("[data-session-picker]") && !sessionsLoaded) {
@@ -1310,6 +1320,336 @@ async function runAiPackage() {
   }
 }
 
+const LICENSE_STATE_LABELS = {
+  online_valid: "在线验证成功",
+  offline_valid: "离线授权有效",
+  offline_expiring: "离线授权即将到期",
+  offline_expired: "离线授权已过期",
+  device_unbound: "当前设备已解绑",
+  device_disabled: "当前设备已停用",
+  license_suspended: "许可证已暂停",
+  license_revoked: "许可证已吊销",
+  local_state_corrupt: "本地授权状态损坏",
+  unactivated: "尚未激活",
+};
+
+const UPDATE_STATE_LABELS = {
+  idle: "已是最新版本",
+  checking: "正在检查更新",
+  downloading: "正在下载更新",
+  ready_to_install: "更新已就绪",
+  installing: "正在安装更新",
+  committed: "更新已安装",
+  rolled_back: "新版本失败，已恢复旧版本",
+  failed: "更新未完成",
+};
+
+function operationNonce() {
+  if (window.crypto && typeof window.crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  const bytes = new Uint8Array(16);
+  window.crypto.getRandomValues(bytes);
+  return Array.from(bytes, (value) => value.toString(16).padStart(2, "0")).join("");
+}
+
+function managementError(payload, fallback) {
+  const error = new Error(payload?.error?.message || fallback);
+  error.code = payload?.error?.code || "MANAGEMENT_REQUEST_FAILED";
+  return error;
+}
+
+async function managementRequest(path, options = {}) {
+  const payload = await fetchJson(path, {
+    cache: "no-store",
+    ...options,
+    headers: {
+      ...(options.body ? { "Content-Type": "application/json" } : {}),
+      ...(options.headers || {}),
+    },
+  });
+  if (payload?.error || payload?.ok === false) {
+    throw managementError(payload, "许可证与更新操作未完成。");
+  }
+  return payload;
+}
+
+function setManagementText(id, value, fallback = "—") {
+  const element = document.getElementById(id);
+  if (!element) return;
+  element.textContent = value === null || value === undefined || value === ""
+    ? fallback
+    : String(value);
+}
+
+function formatManagementTime(value) {
+  if (!value) return "—";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return date.toLocaleString("zh-CN", { hour12: false });
+}
+
+function formatManagementBytes(value) {
+  const size = Number(value);
+  if (!Number.isFinite(size) || size < 0) return "0 B";
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 ** 2) return `${(size / 1024).toFixed(1)} KB`;
+  return `${(size / 1024 ** 2).toFixed(1)} MB`;
+}
+
+function formatOfflineRemaining(seconds) {
+  const value = Number(seconds);
+  if (!Number.isFinite(value) || value <= 0) return "需要联网验证";
+  const days = Math.floor(value / 86400);
+  const hours = Math.floor((value % 86400) / 3600);
+  const minutes = Math.floor((value % 3600) / 60);
+  if (days > 0) return `${days} 天 ${hours} 小时`;
+  if (hours > 0) return `${hours} 小时 ${minutes} 分钟`;
+  return `${Math.max(1, minutes)} 分钟`;
+}
+
+function setLicenseFeedback(message = "", tone = "info") {
+  const element = document.getElementById("license-feedback");
+  if (!element) return;
+  element.textContent = message;
+  element.dataset.tone = tone;
+  element.classList.toggle("hidden", !message);
+}
+
+function renderLicenseStatus(payload) {
+  setManagementText(
+    "license-state",
+    LICENSE_STATE_LABELS[payload.state] || payload.state || "状态未知",
+  );
+  setManagementText(
+    "license-hint",
+    payload.license_hint ? `••••-${payload.license_hint}` : null,
+  );
+  setManagementText(
+    "license-offline-until",
+    payload.offline_until ? formatManagementTime(payload.offline_until) : null,
+  );
+  setManagementText(
+    "license-offline-remaining",
+    formatOfflineRemaining(payload.offline_remaining_seconds),
+  );
+  setManagementText("current-app-version", payload.current_version);
+  setManagementText("current-launcher-version", payload.launcher_version);
+  setManagementText(
+    "release-channel",
+    payload.channel === "stable" ? "稳定版" : payload.channel,
+  );
+}
+
+function renderUpdateStatus(payload) {
+  setManagementText(
+    "update-state",
+    UPDATE_STATE_LABELS[payload.status] || payload.status || "状态未知",
+  );
+  setManagementText("current-app-version", payload.current_version);
+  setManagementText("current-launcher-version", payload.launcher_version);
+  setManagementText(
+    "release-channel",
+    payload.channel === "stable" ? "稳定版" : payload.channel,
+  );
+  setManagementText("pending-app-version", payload.pending_version);
+  const progress = Math.max(0, Math.min(100, Number(payload.progress_percent) || 0));
+  const progressBar = document.getElementById("update-progress-bar");
+  if (progressBar) progressBar.style.width = `${progress}%`;
+  const label = document.getElementById("update-progress-label");
+  if (!label) return;
+  if (payload.status === "ready_to_install") {
+    label.textContent = "更新将在下次启动时自动安装。";
+  } else if (Number(payload.expected_size) > 0) {
+    label.textContent = `${formatManagementBytes(payload.downloaded_bytes || 0)} / ${formatManagementBytes(payload.expected_size)}（${progress}%）`;
+  } else {
+    label.textContent = payload.error_message || "尚未下载更新";
+  }
+}
+
+async function renameManagedDevice(device) {
+  const selected = prompt("请输入新的设备名称", device.display_name || "");
+  if (selected === null) return;
+  const displayName = selected.trim();
+  if (!displayName) {
+    setLicenseFeedback("设备名称不能为空。", "error");
+    return;
+  }
+  await managementRequest("/api/license/devices/rename", {
+    method: "POST",
+    body: JSON.stringify({
+      device_id: device.device_id,
+      display_name: displayName,
+      operation_nonce: operationNonce(),
+    }),
+  });
+  setLicenseFeedback("设备名称已更新。", "success");
+  await loadLicenseManagement();
+}
+
+async function unbindManagedDevice(device) {
+  const accepted = confirm(
+    `确定解绑 ${device.display_name || "此设备"}？\n\n解绑后，该设备下次联网验证时将无法继续使用；完全离线时最多可继续使用到现有七天租约到期。`,
+  );
+  if (!accepted) return;
+  await managementRequest("/api/license/devices/unbind", {
+    method: "POST",
+    body: JSON.stringify({
+      device_id: device.device_id,
+      operation_nonce: operationNonce(),
+    }),
+  });
+  setLicenseFeedback("设备已解绑，许可证槽位已经释放。", "success");
+  await loadLicenseManagement();
+}
+
+function renderManagedDevices(payload) {
+  const container = document.getElementById("license-devices");
+  if (!container) return;
+  container.replaceChildren();
+  const devices = Array.isArray(payload.devices) ? payload.devices : [];
+  if (!devices.length) {
+    const empty = document.createElement("div");
+    empty.className = "empty-state";
+    empty.textContent = "没有可显示的设备记录。";
+    container.appendChild(empty);
+    return;
+  }
+  devices.forEach((device) => {
+    const row = document.createElement("article");
+    row.className = "device-row";
+    const details = document.createElement("div");
+    const heading = document.createElement("strong");
+    heading.textContent = device.display_name || "未命名设备";
+    if (device.is_current) {
+      const badge = document.createElement("span");
+      badge.className = "current-device-badge";
+      badge.textContent = "当前设备";
+      heading.append(" ", badge);
+    }
+    const meta = document.createElement("small");
+    meta.textContent = `状态：${device.status || "unknown"} · 最后验证：${device.last_validated_at ? formatManagementTime(device.last_validated_at) : "从未在线验证"} · 应用：${device.last_app_version || "—"}`;
+    details.append(heading, meta);
+
+    const actions = document.createElement("div");
+    actions.className = "device-actions";
+    const renameButton = document.createElement("button");
+    renameButton.type = "button";
+    renameButton.className = "ghost compact-button";
+    renameButton.textContent = "重命名";
+    renameButton.addEventListener("click", () => {
+      renameManagedDevice(device).catch((error) => {
+        setLicenseFeedback(error.message || "设备重命名失败。", "error");
+      });
+    });
+    actions.appendChild(renameButton);
+    if (!device.is_current) {
+      const unbindButton = document.createElement("button");
+      unbindButton.type = "button";
+      unbindButton.className = "danger-button compact-button";
+      unbindButton.textContent = "解绑设备";
+      unbindButton.addEventListener("click", () => {
+        unbindManagedDevice(device).catch((error) => {
+          setLicenseFeedback(error.message || "设备解绑失败。", "error");
+        });
+      });
+      actions.appendChild(unbindButton);
+    }
+    row.append(details, actions);
+    container.appendChild(row);
+  });
+}
+
+async function loadLicenseManagement() {
+  setLicenseFeedback("");
+  const [license, devices, update] = await Promise.all([
+    managementRequest("/api/license"),
+    managementRequest("/api/license/devices"),
+    managementRequest("/api/update-status"),
+  ]);
+  renderLicenseStatus(license);
+  renderManagedDevices(devices);
+  renderUpdateStatus(update);
+}
+
+async function triggerManualUpdateCheck() {
+  if (manualUpdateButton) manualUpdateButton.disabled = true;
+  try {
+    const payload = await managementRequest("/api/update/check", {
+      method: "POST",
+      body: "{}",
+    });
+    setLicenseFeedback(
+      payload.started
+        ? "已开始检查更新，请稍后刷新状态。"
+        : "更新检查未能启动。",
+      payload.started ? "success" : "error",
+    );
+    if (payload.started) {
+      window.setTimeout(() => {
+        loadLicenseManagement().catch((error) => {
+          setLicenseFeedback(error.message || "更新状态读取失败。", "error");
+        });
+      }, 1200);
+    }
+  } finally {
+    if (manualUpdateButton) manualUpdateButton.disabled = false;
+  }
+}
+
+async function generateLocalDiagnostics() {
+  const status = document.getElementById("diagnostics-status");
+  if (diagnosticsGenerateButton) diagnosticsGenerateButton.disabled = true;
+  if (diagnosticsSubmitButton) diagnosticsSubmitButton.disabled = true;
+  diagnosticSubmissionToken = "";
+  try {
+    const payload = await managementRequest("/api/diagnostics/generate", {
+      method: "POST",
+      body: JSON.stringify({ submit: false }),
+    });
+    diagnosticSubmissionToken = payload.submission_token || "";
+    if (status) {
+      status.textContent = `诊断包已保存到本机日志目录：${payload.filename || "diagnostic.zip"}`;
+    }
+    if (diagnosticsSubmitButton) {
+      diagnosticsSubmitButton.disabled = !(
+        payload.can_submit && diagnosticSubmissionToken
+      );
+    }
+  } finally {
+    if (diagnosticsGenerateButton) diagnosticsGenerateButton.disabled = false;
+  }
+}
+
+async function submitGeneratedDiagnostics() {
+  const status = document.getElementById("diagnostics-status");
+  if (!diagnosticSubmissionToken) {
+    if (status) status.textContent = "请先生成本地诊断包。";
+    return;
+  }
+  const accepted = confirm(
+    "将把刚刚生成的脱敏诊断包提交给维护者。诊断包不包含微信聊天记录、数据库密钥、完整许可证或设备令牌。是否继续？",
+  );
+  if (!accepted) return;
+  if (diagnosticsSubmitButton) diagnosticsSubmitButton.disabled = true;
+  try {
+    const payload = await managementRequest("/api/diagnostics/generate", {
+      method: "POST",
+      body: JSON.stringify({
+        submit: true,
+        submission_token: diagnosticSubmissionToken,
+      }),
+    });
+    diagnosticSubmissionToken = "";
+    if (status) {
+      status.textContent = `诊断包已提交，编号：${payload.submission_id || "—"}`;
+    }
+  } catch (error) {
+    if (diagnosticsSubmitButton) diagnosticsSubmitButton.disabled = false;
+    throw error;
+  }
+}
+
 nav.addEventListener("click", (event) => {
   const button = event.target.closest("button[data-target]");
   if (button) setScreen(button.dataset.target);
@@ -1327,6 +1667,29 @@ aiPackageButton?.addEventListener("click", runAiPackage);
 document.querySelectorAll("[data-action='refresh-status'], #refresh-status").forEach((button) => {
   button.addEventListener("click", () => {
     refreshStatus().catch((error) => showTransientError(error, "dashboard"));
+  });
+});
+
+licenseRefreshButton?.addEventListener("click", () => {
+  loadLicenseManagement().catch((error) => {
+    setLicenseFeedback(error.message || "许可证与更新状态读取失败。", "error");
+  });
+});
+manualUpdateButton?.addEventListener("click", () => {
+  triggerManualUpdateCheck().catch((error) => {
+    setLicenseFeedback(error.message || "更新检查失败。", "error");
+  });
+});
+diagnosticsGenerateButton?.addEventListener("click", () => {
+  generateLocalDiagnostics().catch((error) => {
+    const status = document.getElementById("diagnostics-status");
+    if (status) status.textContent = error.message || "诊断包生成失败。";
+  });
+});
+diagnosticsSubmitButton?.addEventListener("click", () => {
+  submitGeneratedDiagnostics().catch((error) => {
+    const status = document.getElementById("diagnostics-status");
+    if (status) status.textContent = error.message || "诊断包提交失败。";
   });
 });
 
