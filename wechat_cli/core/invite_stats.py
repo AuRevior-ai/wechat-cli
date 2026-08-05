@@ -15,6 +15,10 @@ from .messages import _is_safe_msg_table_name, decompress_content
 
 _SYSTEM_PREFIX_RE = re.compile(r"^\s*\[系统\]\s*")
 _QUOTE_RE = re.compile(r'["“](.*?)["”]')
+_DIRECT_TO_SELF_RE = re.compile(
+    r'^\s*(?P<inviter>.+?)\s*邀请你加入了群聊'
+    r'(?:[，,]\s*群聊参与人还有[：:].*)?\s*$'
+)
 _DIRECT_RE = re.compile(
     r'^\s*["“](?P<inviter>.*?)["”]\s*邀请'
     r'(?P<invitees>.*?)加入了群聊\s*$'
@@ -117,6 +121,17 @@ def parse_invite_notice(text: str) -> list[dict] | None:
             "invitee_name_raw": normalize_person_name(
                 qr_match.group("invitee")
             ),
+        }]
+
+    direct_to_self_match = _DIRECT_TO_SELF_RE.fullmatch(notice)
+    if direct_to_self_match:
+        return [{
+            "method": "direct",
+            "inviter_name_raw": normalize_person_name(
+                direct_to_self_match.group("inviter")
+            ),
+            "invitee_name_raw": "你",
+            "invitee_is_self": True,
         }]
 
     direct_match = _DIRECT_RE.fullmatch(notice)
@@ -374,8 +389,13 @@ def collect_group_invite_stats(
                     ),
                     "raw_text": notice,
                 }
+                invitee_username = (
+                    chat_ctx.get("self_username", "")
+                    if relation.get("invitee_is_self")
+                    else relation.get("invitee_username", "")
+                )
                 invitee = resolver.resolve_username(
-                    relation.get("invitee_username", ""),
+                    invitee_username,
                     relation["invitee_name_raw"],
                 )
                 event.update(_identity_fields("invitee", invitee))

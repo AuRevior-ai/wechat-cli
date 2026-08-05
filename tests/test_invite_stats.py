@@ -43,6 +43,17 @@ class InviteNoticeParserTests(unittest.TestCase):
             "invitee_name_raw": "阿班",
         }])
 
+    def test_parses_direct_invitation_to_self_with_participant_suffix(self):
+        events = parse_invite_notice(
+            "麟雪邀请你加入了群聊，群聊参与人还有：唐传广、林兆润、林晓莹（大赢）"
+        )
+        self.assertEqual(events, [{
+            "method": "direct",
+            "inviter_name_raw": "麟雪",
+            "invitee_name_raw": "你",
+            "invitee_is_self": True,
+        }])
+
     def test_parses_qr_invitation_as_share_owner_credit(self):
         events = parse_invite_notice(
             '"郑桓宇🔥🔥"通过扫描"小陶老师 青年OPC盟主"分享的二维码加入群聊'
@@ -241,6 +252,51 @@ class InviteIdentityTests(unittest.TestCase):
 
 
 class InviteAggregationTests(unittest.TestCase):
+    def test_resolves_direct_invitation_to_self_as_local_account(self):
+        table_name = "Msg_" + "8" * 32
+        notice = (
+            "麟雪邀请你加入了群聊，群聊参与人还有："
+            "唐传广、林兆润、林晓莹（大赢）"
+        )
+        members = [
+            {
+                "username": "wxid_me",
+                "display_name": "Au Revior",
+                "nick_name": "Au Revior",
+                "remark": "",
+            },
+            {
+                "username": "wxid_linxue",
+                "display_name": "麟雪",
+                "nick_name": "麟雪",
+                "remark": "",
+            },
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "message.db"
+            create_message_db(path, table_name, [
+                (1, 700, 10000, 1785855420, notice, 0),
+            ])
+            ctx = {
+                "display_name": "测试群",
+                "username": "57757918914@chatroom",
+                "self_username": "wxid_me",
+                "is_group": True,
+                "message_tables": [{
+                    "db_path": str(path),
+                    "table_name": table_name,
+                }],
+            }
+
+            result = collect_group_invite_stats(ctx, members, {})
+
+        self.assertEqual(result["summary"]["invite_event_count"], 1)
+        self.assertEqual(result["summary"]["unparsed_count"], 0)
+        event = result["events"][0]
+        self.assertEqual(event["inviter_username"], "wxid_linxue")
+        self.assertEqual(event["invitee_username"], "wxid_me")
+        self.assertEqual(event["invitee_identity_status"], "resolved")
+
     def test_aggregates_batch_and_self_shared_qr_xml_for_local_account(self):
         table_name = "Msg_" + "9" * 32
         batch_notice = """57757918914@chatroom:
