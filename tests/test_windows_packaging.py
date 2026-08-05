@@ -1,6 +1,7 @@
 import importlib.util
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -20,7 +21,7 @@ class WindowsPackagingTests(unittest.TestCase):
             ROOT / "packaging" / "windows" / "README-APP.md"
         ).read_text(encoding="utf-8")
 
-        self.assertIn('version = "0.4.2"', pyproject)
+        self.assertIn('version = "0.5.0"', pyproject)
         self.assertIn('authors = [{ name = "Au Revior" }]', pyproject)
         self.assertIn("作者：Au Revior", guide)
         self.assertIn("关于与支持", guide)
@@ -28,16 +29,71 @@ class WindowsPackagingTests(unittest.TestCase):
     def test_pyinstaller_command_bundles_web_static_files(self):
         build = load_module("npm_build", ROOT / "npm" / "scripts" / "build.py")
 
-        cmd = build.make_pyinstaller_command("win32-x64")
+        cmd = build.make_pyinstaller_command("win32-x64", "app")
         joined = "\n".join(cmd)
 
         self.assertIn("--add-data", cmd)
         self.assertIn("wechat_cli/web/static", joined.replace("\\", "/"))
+        self.assertIn("entry.py", joined.replace("\\", "/"))
+        self.assertNotIn("--windowed", cmd)
+
+    def test_launcher_pyinstaller_command_bundles_local_ui_and_webview(self):
+        build = load_module("npm_build_launcher", ROOT / "npm" / "scripts" / "build.py")
+
+        cmd = build.make_pyinstaller_command("win32-x64", "launcher")
+        joined = "\n".join(cmd).replace("\\", "/")
+
+        self.assertIn("--windowed", cmd)
+        self.assertIn("--collect-all", cmd)
+        self.assertIn("webview", cmd)
+        self.assertIn("wechat_cli/launcher/ui", joined)
+        self.assertIn("launcher_entry.py", joined)
+        self.assertIn("wechat-cli-launcher", cmd)
+
+    def test_launcher_build_fails_fast_when_pywebview_is_missing(self):
+        build = load_module(
+            "npm_build_missing_webview",
+            ROOT / "npm" / "scripts" / "build.py",
+        )
+
+        with patch.object(build.importlib.util, "find_spec", return_value=None):
+            with self.assertRaisesRegex(RuntimeError, "pywebview"):
+                build.ensure_target_dependencies("launcher")
+
+    def test_application_build_does_not_require_pywebview(self):
+        build = load_module(
+            "npm_build_app_dependencies",
+            ROOT / "npm" / "scripts" / "build.py",
+        )
+
+        def finder(module):
+            return None if module == "webview" else object()
+
+        build.ensure_target_dependencies("app", module_finder=finder)
+
+    def test_windows_build_preflights_all_targets_before_running_pyinstaller(self):
+        build = load_module(
+            "npm_build_preflight",
+            ROOT / "npm" / "scripts" / "build.py",
+        )
+
+        def dependency_check(target):
+            if target == "launcher":
+                raise RuntimeError("missing pywebview")
+
+        with patch.object(
+            build,
+            "ensure_target_dependencies",
+            side_effect=dependency_check,
+        ), patch.object(build.subprocess, "check_call") as check_call:
+            self.assertFalse(build.build_platform("win32-x64"))
+
+        check_call.assert_not_called()
 
     def test_pyinstaller_command_omits_missing_legacy_sqlcipher_imports(self):
         build = load_module("npm_build", ROOT / "npm" / "scripts" / "build.py")
 
-        cmd = build.make_pyinstaller_command("win32-x64")
+        cmd = build.make_pyinstaller_command("win32-x64", "app")
 
         self.assertNotIn("pysqlcipher3", cmd)
         self.assertNotIn("sqlcipher3", cmd)
@@ -52,7 +108,22 @@ class WindowsPackagingTests(unittest.TestCase):
         self.assertIn("start-wechat-cli-web.bat", manifest)
         self.assertIn("README-APP.md", manifest)
         self.assertIn("THIRD_PARTY_NOTICES.md", manifest)
-        self.assertIn("app/wechat-cli.exe", [item.replace("\\", "/") for item in manifest])
+        normalized = [item.replace("\\", "/") for item in manifest]
+        self.assertIn("launcher/wechat-cli-launcher.exe", normalized)
+        self.assertIn("launcher/launcher-config.json", normalized)
+        self.assertTrue(
+            any(
+                item.startswith("versions/") and item.endswith("/wechat-cli.exe")
+                for item in normalized
+            )
+        )
+        self.assertTrue(
+            any(
+                item.startswith("versions/") and item.endswith("/app-manifest.json")
+                for item in normalized
+            )
+        )
+        self.assertNotIn("app/wechat-cli.exe", normalized)
 
     def test_installer_stops_running_installed_exe_before_copying(self):
         script = (ROOT / "packaging" / "windows" / "install.ps1").read_text(encoding="utf-8")
@@ -95,6 +166,88 @@ class WindowsPackagingTests(unittest.TestCase):
 
         self.assertIn("Closing old WeChat CLI Web launcher window", script)
         self.assertIn("name = 'cmd.exe'", script)
+
+    def test_installer_uses_versioned_layout_and_atomic_current_pointer(self):
+        script = (ROOT / "packaging" / "windows" / "install.ps1").read_text(encoding="utf-8")
+
+        self.assertIn('$VersionsDir = Join-Path $InstallDir "versions"', script)
+        self.assertIn('$CurrentStatePath = Join-Path $StateDir "current.json"', script)
+        self.assertIn("function Write-JsonAtomic", script)
+        self.assertIn("current_version = $Version", script)
+        self.assertIn("previous_version = $PreviousVersion", script)
+        self.assertIn("Move-Item -Path $StagedVersionDir", script)
+        self.assertNotIn("mklink", script.lower())
+
+    def test_installer_bootstraps_official_webview2_runtime_when_missing(self):
+        script = (ROOT / "packaging" / "windows" / "install.ps1").read_text(encoding="utf-8")
+
+        self.assertIn("Get-WebView2RuntimeVersion", script)
+        self.assertIn("https://go.microsoft.com/fwlink/p/?LinkId=2124703", script)
+        self.assertIn('"/silent", "/install"', script)
+        self.assertIn("WebView2 installer completed but the Runtime is still not detected", script)
+
+    def test_installer_preserves_and_versions_the_legacy_app(self):
+        script = (ROOT / "packaging" / "windows" / "install.ps1").read_text(encoding="utf-8")
+
+        self.assertIn('$LegacyAppDir = Join-Path $InstallDir "app"', script)
+        self.assertIn('$LegacyVersion = [string]$PackageMetadata.legacy_version', script)
+        self.assertIn('$LegacyVersionDir = Join-Path $VersionsDir $LegacyVersion', script)
+        self.assertIn("Copy-WithRetry -Recurse -Path (Join-Path $LegacyAppDir \"*\")", script)
+        self.assertIn("build_id = \"legacy-bootstrap\"", script)
+        self.assertIn("$PreviousVersion = $LegacyVersion", script)
+        self.assertIn("Existing legacy app was preserved", script)
+        self.assertNotIn("Remove-Item -Force -Recurse $LegacyAppDir", script)
+
+    def test_installer_supports_isolated_no_start_no_shortcuts_mode(self):
+        script = (ROOT / "packaging" / "windows" / "install.ps1").read_text(encoding="utf-8")
+
+        self.assertIn("[switch]$NoStart", script)
+        self.assertIn("[switch]$NoShortcuts", script)
+        self.assertIn("[switch]$SkipWebView2Check", script)
+        self.assertIn("[switch]$SkipProcessStop", script)
+        self.assertIn("Isolation switches require -NoStart and -NoShortcuts", script)
+        self.assertIn("if (-not $SkipWebView2Check)", script)
+        self.assertIn("if (-not $SkipProcessStop)", script)
+        self.assertIn("if (-not $NoShortcuts)", script)
+        self.assertIn("-TargetPath $LauncherExePath", script)
+
+    def test_installer_records_and_rolls_back_install_transaction(self):
+        script = (ROOT / "packaging" / "windows" / "install.ps1").read_text(encoding="utf-8")
+
+        self.assertIn('$InstallTransactionPath = Join-Path $StateDir "install-transaction.json"', script)
+        self.assertIn('-Stage "preparing"', script)
+        self.assertIn('-Stage "switched"', script)
+        self.assertIn('-Stage "committed"', script)
+        self.assertIn("Restore-InstallState", script)
+        self.assertIn("Launcher did not complete successfully", script)
+
+    def test_bootstrap_metadata_declares_supported_legacy_version(self):
+        package_source = (ROOT / "scripts" / "package_windows_app.py").read_text(encoding="utf-8")
+
+        self.assertIn('LEGACY_BOOTSTRAP_VERSION = "0.4.2"', package_source)
+        self.assertIn('"legacy_version": LEGACY_BOOTSTRAP_VERSION', package_source)
+
+    def test_repair_and_uninstall_entrypoints_are_packaged(self):
+        package = load_module(
+            "package_windows_repair",
+            ROOT / "scripts" / "package_windows_app.py",
+        )
+        manifest = package.build_manifest()
+
+        self.assertIn("repair-wechat-cli-web.bat", manifest)
+        self.assertIn("uninstall-wechat-cli-web.bat", manifest)
+        self.assertIn("uninstall.ps1", manifest)
+        repair = (
+            ROOT / "packaging" / "windows" / "repair-wechat-cli-web.bat"
+        ).read_text(encoding="utf-8")
+        uninstall = (
+            ROOT / "packaging" / "windows" / "uninstall.ps1"
+        ).read_text(encoding="utf-8")
+        self.assertIn("--repair", repair)
+        self.assertIn("[switch]$NoShortcuts", uninstall)
+        self.assertIn("if (-not $NoShortcuts)", uninstall)
+        self.assertIn('Join-Path $HOME ".wechat-cli"', uninstall)
+        self.assertIn("User data was intentionally preserved", uninstall)
 
 
 if __name__ == "__main__":

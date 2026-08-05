@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Build wechat-cli standalone binaries with PyInstaller."""
 
+import importlib.util
 import os
 import shutil
 import subprocess
@@ -35,47 +36,108 @@ def _resource_sep(platform: str):
     return ";" if os_name == "win32" else ":"
 
 
-def make_pyinstaller_command(platform: str):
+def ensure_target_dependencies(target: str, module_finder=None) -> None:
+    """Fail before PyInstaller when a required runtime module is unavailable."""
+    if target not in {"app", "launcher"}:
+        raise ValueError(f"Unknown build target: {target}")
+    finder = module_finder or importlib.util.find_spec
+    required = {
+        "app": (
+            ("click", "click"),
+            ("Crypto", "pycryptodome"),
+            ("zstandard", "zstandard"),
+        ),
+        "launcher": (
+            ("click", "click"),
+            ("Crypto", "pycryptodome"),
+            ("zstandard", "zstandard"),
+            ("webview", "pywebview"),
+        ),
+    }
+    missing = [display for module, display in required[target] if finder(module) is None]
+    if missing:
+        raise RuntimeError(
+            "Missing build dependencies for "
+            f"{target}: {', '.join(missing)}. "
+            "Install the project dependencies before building."
+        )
+
+
+def make_pyinstaller_command(platform: str, target: str = "app"):
     if platform not in PLATFORM_MAP:
         raise ValueError(f"Unknown platform: {platform}")
-    os_name, arch = platform.split("-")
+    if target not in {"app", "launcher"}:
+        raise ValueError(f"Unknown build target: {target}")
+    os_name, _arch = platform.split("-")
+    if target == "launcher" and os_name != "win32":
+        raise ValueError("The graphical launcher is currently Windows-only")
+
     output_dir = PLATFORMS_DIR / platform / "bin"
     sep = _resource_sep(platform)
+    name = "wechat-cli" if target == "app" else "wechat-cli-launcher"
+    entrypoint = ROOT / ("entry.py" if target == "app" else "launcher_entry.py")
     cmd = [
-        sys.executable, "-m", "PyInstaller",
+        sys.executable,
+        "-m",
+        "PyInstaller",
         "--onefile",
-        "--name", "wechat-cli",
-        "--distpath", str(output_dir),
-        "--workpath", str(ROOT / "build" / f"wechat-cli_{platform}"),
-        "--specpath", str(ROOT / "build"),
+        "--name",
+        name,
+        "--distpath",
+        str(output_dir),
+        "--workpath",
+        str(ROOT / "build" / f"{name}_{platform}"),
+        "--specpath",
+        str(ROOT / "build"),
         "--noconfirm",
         "--clean",
     ]
+    if target == "launcher":
+        cmd.append("--windowed")
 
-    # Bundle C binaries for key extraction
+    # Bundle C binaries for key extraction into the application only.
     bin_dir = ROOT / "wechat_cli" / "bin"
-    if bin_dir.exists():
+    if target == "app" and bin_dir.exists():
         for f in bin_dir.iterdir():
             if not f.name.startswith(".") and f.is_file():
                 cmd.extend(["--add-binary", f"{f}{sep}wechat_cli/bin"])
 
     static_dir = ROOT / "wechat_cli" / "web" / "static"
-    if static_dir.exists():
+    if target == "app" and static_dir.exists():
         cmd.extend(["--add-data", f"{static_dir}{sep}wechat_cli/web/static"])
 
-    # Hidden imports
-    hidden = ["zstandard", "wechat_cli.web", "wechat_cli.web.static"]
-    for h in hidden:
-        cmd.extend(["--hidden-import", h])
+    launcher_ui = ROOT / "wechat_cli" / "launcher" / "ui"
+    if target == "launcher" and launcher_ui.exists():
+        cmd.extend(["--add-data", f"{launcher_ui}{sep}wechat_cli/launcher/ui"])
+        cmd.extend(["--collect-all", "webview"])
 
-    cmd.append(str(ROOT / "entry.py"))
+    hidden = ["zstandard"]
+    if target == "app":
+        hidden.extend(["wechat_cli.web", "wechat_cli.web.static"])
+    else:
+        hidden.extend(
+            [
+                "webview",
+                "webview.platforms.edgechromium",
+                "wechat_cli.launcher",
+                "wechat_cli.windows.dpapi",
+            ]
+        )
+    for module in hidden:
+        cmd.extend(["--hidden-import", module])
+
+    cmd.append(str(entrypoint))
     return [str(part) for part in cmd]
 
 
 def build_platform(platform: str):
-    os_name, arch = platform.split("-")
+    os_name, _arch = platform.split("-")
     ext = ".exe" if os_name == "win32" else ""
-    binary_name = f"wechat-cli{ext}"
+    targets = ["app"] + (["launcher"] if os_name == "win32" else [])
+    expected = {
+        "app": f"wechat-cli{ext}",
+        "launcher": f"wechat-cli-launcher{ext}",
+    }
 
     output_dir = PLATFORMS_DIR / platform / "bin"
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -84,23 +146,28 @@ def build_platform(platform: str):
     print(f"Building for {platform}...")
     print(f"{'='*60}")
 
-    cmd = make_pyinstaller_command(platform)
+    for target in targets:
+        try:
+            ensure_target_dependencies(target)
+        except RuntimeError as exc:
+            print(f"[-] Cannot build {target} for {platform}: {exc}")
+            return False
 
-    print(f"[+] Running: {' '.join(cmd)}")
+    for target in targets:
+        cmd = make_pyinstaller_command(platform, target)
+        print(f"[+] Running ({target}): {' '.join(cmd)}")
+        try:
+            subprocess.check_call(cmd, cwd=str(ROOT))
+        except subprocess.CalledProcessError as exc:
+            print(f"[-] {target} build failed for {platform}: {exc}")
+            return False
 
-    try:
-        subprocess.check_call(cmd, cwd=str(ROOT))
-    except subprocess.CalledProcessError as e:
-        print(f"[-] Build failed for {platform}: {e}")
-        return False
-
-    binary_path = output_dir / binary_name
-    if not binary_path.exists():
-        print(f"[-] Binary not found: {binary_path}")
-        return False
-
-    print(f"[+] Built: {binary_path}")
-    print(f"    Size: {binary_path.stat().st_size / 1024 / 1024:.1f} MB")
+        binary_path = output_dir / expected[target]
+        if not binary_path.exists():
+            print(f"[-] Binary not found: {binary_path}")
+            return False
+        print(f"[+] Built: {binary_path}")
+        print(f"    Size: {binary_path.stat().st_size / 1024 / 1024:.1f} MB")
     return True
 
 
