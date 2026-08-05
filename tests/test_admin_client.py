@@ -1,8 +1,14 @@
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import MagicMock, patch
 
-from wechat_cli.admin.client import AdminApiClient, AdminApiError
+from wechat_cli.admin.client import (
+    AdminApiClient,
+    AdminApiError,
+    UrllibAdminDownloadTransport,
+    UrllibAdminJsonTransport,
+)
 
 
 class FakeJsonTransport:
@@ -30,6 +36,44 @@ class FakeDownloadTransport:
 
 
 class AdminApiClientTests(unittest.TestCase):
+    @patch("wechat_cli.admin.client.urlopen")
+    def test_json_transport_sets_application_user_agent(self, mocked_urlopen):
+        response = MagicMock()
+        response.status = 200
+        response.read.return_value = b'{"releases":[]}'
+        response.__enter__.return_value = response
+        mocked_urlopen.return_value = response
+
+        transport = UrllibAdminJsonTransport("https://example.com")
+        transport(
+            "GET",
+            "/v1/admin/releases",
+            {"Authorization": "Admin wcadmin_adm_id.secret"},
+            None,
+        )
+
+        request = mocked_urlopen.call_args.args[0]
+        self.assertEqual("WeChatCliAdmin/0.5.0", request.get_header("User-agent"))
+
+    @patch("wechat_cli.admin.client.urlopen")
+    def test_download_transport_sets_application_user_agent(self, mocked_urlopen):
+        response = MagicMock()
+        response.__enter__.return_value = response
+        response.read.return_value = b""
+        mocked_urlopen.return_value = response
+
+        with TemporaryDirectory() as tmp:
+            destination = Path(tmp) / "diagnostic.zip"
+            transport = UrllibAdminDownloadTransport("https://example.com")
+            transport(
+                "/v1/admin/diagnostics/diag_01/content",
+                {"Authorization": "Admin wcadmin_adm_id.secret"},
+                destination,
+            )
+
+        request = mocked_urlopen.call_args.args[0]
+        self.assertEqual("WeChatCliAdmin/0.5.0", request.get_header("User-agent"))
+
     def test_create_license_uses_admin_header_and_operation_nonce(self):
         transport = FakeJsonTransport(
             [

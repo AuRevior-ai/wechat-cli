@@ -12,6 +12,10 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urlparse
 from urllib.request import Request, urlopen
 
+from ..version import APP_VERSION
+
+_ADMIN_USER_AGENT = f"WeChatCliAdmin/{APP_VERSION}"
+
 
 class AdminJsonTransport(Protocol):
     def __call__(
@@ -81,6 +85,7 @@ class UrllibAdminJsonTransport:
         body = None
         request_headers = dict(headers)
         request_headers.setdefault("Accept", "application/json")
+        request_headers.setdefault("User-Agent", _ADMIN_USER_AGENT)
         if payload is not None:
             body = json.dumps(
                 payload,
@@ -161,9 +166,11 @@ class UrllibAdminDownloadTransport:
         target.parent.mkdir(parents=True, exist_ok=True)
         if target.exists():
             raise FileExistsError(target)
+        request_headers = {**headers, "Accept": "application/zip"}
+        request_headers.setdefault("User-Agent", _ADMIN_USER_AGENT)
         request = Request(
             self.base_url + path,
-            headers={**headers, "Accept": "application/zip"},
+            headers=request_headers,
             method="GET",
         )
         temporary: Path | None = None
