@@ -44,7 +44,7 @@
         {
           "binding": "DB",
           "database_name": "wechat-cli-license-staging",
-          "database_id": "REPLACE_WITH_STAGING_D1_ID",
+          "database_id": "fa55ac90-8de1-4a69-a8c7-a1997ba02afb",
           "migrations_dir": "migrations"
         }
       ],
