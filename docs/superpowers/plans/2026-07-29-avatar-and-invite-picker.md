@@ -1,5 +1,13 @@
 # Avatar and Invite Picker Implementation Plan
 
+> **历史施工计划：** 本文件记录实施当时的预定步骤，未勾选项目不代表当前完成度。当前状态请读取 [`docs/PROJECT_STATE.md`](../../PROJECT_STATE.md) 和对应专项路线图。
+
+## 最终结果
+
+- 主要提交：`7f57776`。
+- 已实现安全的本机头像代理、真实头像显示、邀请群聊选择器和日期控件。
+- 主要验证位于 Web Server 测试和静态 UI 契约测试。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 为邀请统计增加群聊下拉与日历，并通过安全的本机代理显示本人、群聊和消息发送者的真实头像。

@@ -1,5 +1,13 @@
 # 微信 AI 资料包 Implementation Plan
 
+> **历史施工计划：** 本文件记录实施当时的预定步骤，未勾选项目不代表当前完成度。当前状态请读取 [`docs/PROJECT_STATE.md`](../../PROJECT_STATE.md) 和对应专项路线图。
+
+## 最终结果
+
+- 主要提交：`f7dcdca`、`d2516b8`、`691d19d`、`325c2be`；配套提交包括 `1f05b8b`、`39f9cb9`、`df0bee7`、`d789d21`、`853867a`、`b376f86`。
+- 已实现递归合并转发解析、图片与表情素材收集、语音解码和离线转写，以及 CLI 与 Web 的 AI ZIP 资料包流程。
+- 主要验证位于 `tests/test_ai_package.py`、`tests/test_forwarded.py`、`tests/test_voice.py`、`tests/test_asr.py` 和 Web 测试。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 为 CLI 和 Web 增加可递归解析合并转发、离线转写微信 4.1 语音并用相对路径打包图片/表情/音频的 AI 资料包。

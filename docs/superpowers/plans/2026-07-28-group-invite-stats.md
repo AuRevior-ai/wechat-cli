@@ -1,5 +1,13 @@
 # Group Invite Statistics Implementation Plan
 
+> **Historical construction plan:** This file records the intended implementation steps at the time. Its unchecked boxes are not the current project progress. Read [`docs/PROJECT_STATE.md`](../../PROJECT_STATE.md) and the relevant specialist roadmap for current status.
+
+## Final result
+
+- Main delivery commit: `019eed8`; later compatibility fixes: `8431984` and `8d46801`.
+- Delivered `invite-stats` in the CLI and Web console with text/CSV output, exact identity resolution, manual identity binding, and later WeChat XML compatibility fixes.
+- Verification lives primarily in `tests/test_invite_stats.py` and the Web command tests.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add auditable group invitation statistics to the CLI and localhost Web UI, ranked by unique invitees and resolved to stable WeChat account identities when exact evidence exists.

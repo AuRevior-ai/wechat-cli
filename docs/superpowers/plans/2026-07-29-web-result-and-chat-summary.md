@@ -1,5 +1,13 @@
 # Web Result Isolation and Chat Summary Implementation Plan
 
+> **历史施工计划：** 本文件记录实施当时的预定步骤，未勾选项目不代表当前完成度。当前状态请读取 [`docs/PROJECT_STATE.md`](../../PROJECT_STATE.md) 和对应专项路线图。
+
+## 最终结果
+
+- 主要提交：`d4da7d3`、`877af46`、`4cec836`。
+- 已实现按功能隔离结果、中文化展示、聊天总结工作流，以及性能和隐私加固。
+- 主要验证位于 Web Server 测试和 UI 契约测试。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 让 Web 控制台按功能隔离结果、全面中文化通用字段，并增加可搜索会话与日粒度日期的聊天总结页面。
