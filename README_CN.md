@@ -2,11 +2,11 @@
 
 # WeChat CLI
 
-**命令行查询本地微信数据，专为 AI 集成设计。**
+**面向用户与 AI Agent 的本地微信数据访问工具，并包含产品化的 Windows 0.5.0 路线。**
 
 [![npm version](https://img.shields.io/npm/v/@canghe_ai/wechat-cli.svg)](https://www.npmjs.com/package/@canghe_ai/wechat-cli)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
-[![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey.svg)](https://github.com/freestylefly/wechat-cli)
+[![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey.svg)](https://github.com/AuRevior-ai/wechat-cli)
 
 聊天记录 · 联系人 · 会话 · 收藏 · 统计 · 导出
 
@@ -20,27 +20,35 @@
 
 ## ✨ 功能亮点
 
-- **🖥️ 本机网页控制台** — “关于与支持”页可查看作者微信和收款码，二维码仅由本机服务展示
-- **🚀 开箱即用** — `npm install -g` 一键安装，无需 Python
-- **📦 12 个命令** — sessions、history、search、contacts、members、stats、invite-stats、export、favorites、unread、new-messages、init
-- **🤖 AI 优先** — 默认 JSON 输出，专为 LLM Agent 工具调用设计
-- **🔒 全程本地** — SQLCipher 即时解密，数据不出本机
-- **📊 丰富统计** — 发言排行、消息类型分布、24 小时活跃图
-- **📝 灵活导出** — Markdown 或纯文本，支持时间范围过滤
+- **AI 优先的本地数据访问** — 提供结构化 JSON、文本导出、搜索、统计和 AI 素材包。
+- **本机网页控制台** — 包含聊天整理、邀请统计、导出和本地管理界面。
+- **Windows 0.5.0 产品线** — 包含 WebView2 Launcher、设备授权、签名更新、健康检查和自动回滚。
+- **15 个主命令** — 覆盖初始化、查询、统计、导出、AI 资料包、本地媒体处理和 Web 控制台。
+- **本地优先处理** — 微信数据库访问与聊天处理在本机完成；诊断上传只有在用户明确操作后才会发生。
+- **只读消息访问** — 工具不会发送、修改或删除微信消息。
 
 ---
+
+## 分发渠道与版本线
+
+| 渠道 | 当前仓库版本 | 可用方式 |
+|---|---:|---|
+| Python/源码与 Windows 产品线 | 0.5.0 | 源码安装；Windows 授权版通过私有发布系统分发 |
+| 现有 npm 包装层 | 0.2.4 | 已有 npm 包，目前携带 macOS arm64 平台包 |
+
+两条版本线目前不同步。npm 徽章显示的是 npm 渠道版本，不代表 Windows/Python 主工程版本。
 
 ## 📥 安装（给人类看）
 
 AI Agent 请直接移步到“安装（给 Agent 看）”
 
-### npm（推荐）
+### 现有 npm 渠道（0.2.4）
 
 ```bash
 npm install -g @canghe_ai/wechat-cli
 ```
 
-> 目前提供 **macOS arm64** 二进制。其他平台可使用下方 pip 安装。欢迎提交其他平台二进制 PR。
+> 该命令安装现有 npm 0.2.4 版本线，目前携带 macOS arm64 平台包；它不会安装 Windows/Python 0.5.0 产品线。
 
 **更新到最新版本：**
 
@@ -48,18 +56,18 @@ npm install -g @canghe_ai/wechat-cli
 npm update -g @canghe_ai/wechat-cli
 ```
 
-### pip
+### 现有 Python 包渠道
 
 ```bash
 pip install wechat-cli
 ```
 
-需要 Python >= 3.10。
+需要 Python >= 3.10。包索引中已发布的版本可能与当前仓库版本不同。
 
 ### 从源码安装
 
 ```bash
-git clone https://github.com/freestylefly/wechat-cli.git
+git clone https://github.com/AuRevior-ai/wechat-cli.git
 cd wechat-cli
 pip install -e .
 ```
@@ -181,7 +189,10 @@ WeChat CLI 专为 AI Agent 设计，所有命令默认输出结构化 JSON。
 - `wechat-cli new-messages` — 获取上次以来的新消息
 - `wechat-cli members "群名"` — 列出群成员
 - `wechat-cli stats "聊天名" --format text` — 聊天统计
-- `wechat-cli invite-stats "群名"` — 群邀请统计与拉新排行
+- `wechat-cli invite-stats "群名" --format text` — 群邀请统计与拉新排行
+- `wechat-cli ai-package "聊天名" --output chat-ai.zip` — 生成可供 AI 使用的文字与媒体资料包
+- `wechat-cli media export PATH --output-dir exported-media` — 处理聊天记录返回的本地媒体路径
+- `wechat-cli web --open` — 启动本机网页控制台
 ```
 
 然后在对话中可以直接问 Claude：
@@ -230,6 +241,17 @@ wechat-cli history "张三" --format text
 ```
 
 **选项：** `--limit`、`--offset`、`--start-time`、`--end-time`、`--type`、`--format`
+
+### `ai-package` — AI 聊天资料包
+
+```bash
+wechat-cli ai-package "群名" --start-time "2026-07-29" --end-time "2026-07-29" --output group-ai.zip
+wechat-cli ai-package "张三" --output contact-ai.zip --no-transcribe-voice
+```
+
+ZIP 中包含 `聊天记录.txt`、`清单.json` 和相对路径的 `素材/` 目录。工具会递归展开合并转发，收集本地图片和微信表情，并可将 SILK 语音解码为 WAV；默认使用经过 SHA-256 校验的离线识别组件转写语音。
+
+**选项：** `--start-time`、`--end-time`、`--output`、`--transcribe`、`--no-transcribe-voice`、`--include-copy-data`
 
 ### `search` — 搜索消息
 
@@ -332,6 +354,26 @@ wechat-cli new-messages                    # 后续: 仅返回上次以来的新
 
 状态保存在 `~/.wechat-cli/last_check.json`，删除此文件可重置。
 
+### `media` — 处理本地媒体
+
+用于处理 `history --media` 返回的本地媒体路径；图片 `.dat` 文件会在可能时解码为可查看格式。
+
+```bash
+wechat-cli media export PATH
+wechat-cli media export PATH --output-dir exported-media --format text
+```
+
+**选项：** `--output-dir`、`--format json|text`
+
+### `web` — 启动本机网页控制台
+
+```bash
+wechat-cli web
+wechat-cli web --port 8787 --open
+```
+
+界面绑定在本机。**选项：** `--port`、`--open`
+
 ---
 
 ## 🔍 消息类型过滤
@@ -355,21 +397,22 @@ wechat-cli new-messages                    # 后续: 仅返回上次以来的新
 
 ## 💻 系统要求
 
-- **macOS** ≥ 26.3.1
-- **微信 Mac 版** ≤ 4.1.8.100
+- 源码安装需要 Python >= 3.10。
+- 初始化和密钥提取需要本机已安装并运行微信客户端。
+- 进程内存访问需要对应平台的权限。
 
-> macOS 老版本或更新的微信版本可能不兼容。
+当前记录的 macOS 兼容基线为 macOS 26.3.1 或更高版本、微信 Mac 版不高于 4.1.8.100；其他客户端版本可能需要额外兼容工作。
 
 ---
 
 ## 🖥️ 平台支持
 
-| 平台 | 状态 | 说明 |
-|------|------|------|
-| macOS (Apple Silicon) | ✅ 支持 | 内置 arm64 二进制 |
-| macOS (Intel) | ✅ 支持 | 需要 x86_64 二进制 |
-| Windows | ✅ 支持 | 读取 Weixin.exe 进程内存 |
-| Linux | ✅ 支持 | 读取 /proc/pid/mem，需要 root |
+| 平台 | 源码能力 | 当前打包渠道 |
+|---|---|---|
+| Windows x86-64 | 支持；读取 `Weixin.exe` 进程内存 | 0.5.0 Windows 产品与私有更新流程 |
+| macOS Apple Silicon | 支持 | 现有 npm 0.2.4 arm64 平台包 |
+| macOS Intel | 源码支持需要 x86-64 二进制 | 当前仓库未记录可用的 npm 捆绑平台包 |
+| Linux | 通过 `/proc/<pid>/mem` 支持，通常需要 root | 源码安装 |
 
 ---
 
@@ -379,13 +422,15 @@ wechat-cli new-messages                    # 后续: 仅返回上次以来的新
 
 1. **提取密钥** — 扫描微信进程内存获取加密密钥（`init`）
 2. **即时解密** — 透明页级 AES-256-CBC 解密，带缓存
-3. **本地查询** — 所有数据留在本机，无需网络访问
+3. **本地查询与处理** — 核心聊天访问在本机完成；0.5.0 产品线会连接配置的授权与更新服务，诊断上传需要用户明确操作
 
 ---
 
 ## 📄 开源协议
 
 [Apache License 2.0](LICENSE)
+
+源码许可证不代表所有打包版本或私有更新资产都可以公开下载。Windows 授权分发及其私有发布服务属于独立交付渠道。
 
 ---
 
@@ -394,9 +439,19 @@ wechat-cli new-messages                    # 后续: 仅返回上次以来的新
 本项目为个人使用的本地数据查询工具，请注意：
 
 - **只读不写** — 本工具仅读取本地存储的数据，不会发送、修改或删除任何消息
-- **数据不出本机** — 所有数据仅在你本机处理，不会上传至任何云端服务器
+- **本地优先** — 核心聊天查询和资料处理在本机完成。0.5.0 产品线会连接配置的授权与更新服务；诊断上传只有在用户明确操作后才会发生
 - **不破坏微信生态** — 本工具不会干扰微信正常运行，不会自动化任何操作，不违反微信使用协议
 - **风险自担** — 本项目仅供个人学习研究使用，使用者需确保遵守当地法律法规
+
+---
+
+## 开发记录
+
+- [当前项目状态](docs/PROJECT_STATE.md)
+- [版本变更记录](CHANGELOG.md)
+- [授权更新路线图](docs/deployment/authorized-update-roadmap.md)
+- [已批准设计](docs/superpowers/specs/)
+- [实施计划](docs/superpowers/plans/)——历史计划不是当前进度看板
 
 ---
 
@@ -408,4 +463,4 @@ wechat-cli new-messages                    # 后续: 仅返回上次以来的新
 
 ## ⭐ Star History
 
-[![Star History Chart](https://api.star-history.com/svg?repos=freestylefly/wechat-cli&type=Date)](https://star-history.com/#freestylefly/wechat-cli&Date)
+[![Star History Chart](https://api.star-history.com/svg?repos=AuRevior-ai/wechat-cli&type=Date)](https://star-history.com/#AuRevior-ai/wechat-cli&Date)
