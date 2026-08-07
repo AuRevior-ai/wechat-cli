@@ -2,8 +2,8 @@
 
 > Repository-wide current-state summary: [`docs/PROJECT_STATE.md`](../PROJECT_STATE.md). This roadmap remains authoritative for the fixed seven-board licensing, update, release, and deployment program.
 
-更新时间：2026-08-05 20:08 +08:00  
-状态来源：本文件为七板块状态、检查点和下一步动作的唯一权威记录。  
+更新时间：2026-08-05 20:08 +08:00
+状态来源：本文件为七板块状态、检查点和下一步动作的唯一权威记录。
 实施状态：**板块 4 Task 2 已获授权；正在准备安全创建并保存真实 staging 测试许可证。**
 
 ## 1. 使用规则
