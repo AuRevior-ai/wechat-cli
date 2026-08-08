@@ -2,9 +2,9 @@
 
 > Repository-wide current-state summary: [`docs/PROJECT_STATE.md`](../PROJECT_STATE.md). This roadmap remains authoritative for the fixed seven-board licensing, update, release, and deployment program.
 
-更新时间：2026-08-05 20:08 +08:00
+更新时间：2026-08-08 19:18 +08:00
 状态来源：本文件为七板块状态、检查点和下一步动作的唯一权威记录。
-实施状态：**板块 4 Task 2 已获授权；正在准备安全创建并保存真实 staging 测试许可证。**
+实施状态：**板块 4 Task 1–4 已完成并完成最终冻结验证；Task 5 设计已批准，当前先冻结最新 `main` 基线，再从该 HEAD 创建隔离 DevSpace worktree 实施 0.5.1 本地构建。**
 
 ## 1. 使用规则
 
@@ -22,7 +22,7 @@
 | 1 | 本地最终收尾 | 已完成 | 本地实现、测试、构建、安装迁移与安全检查已完成 |
 | 2 | 建立正式的两个私有 GitHub 仓库 | 已完成 | 源码仓库、发布仓库和最小权限凭据已建立 |
 | 3 | 配置 Cloudflare staging 环境 | 已完成 | Worker、D1、R2、Secret、迁移和公网部署已完成 |
-| 4 | 首次测试许可证与测试发布 | **进行中** | Task 1 基线冻结已完成；下一项是创建 staging 测试许可证 |
+| 4 | 首次测试许可证与测试发布 | **进行中** | Task 1–4 已完成；Task 5 设计已批准，等待以冻结后的最新 `main` HEAD 创建隔离 worktree 后实施 |
 | 5 | Windows 真实端到端验收 | 未开始 | 等待板块 4 完成并验收 |
 | 6 | 安全与正式交付准备 | 未开始 | 等待板块 5 完成并验收 |
 | 7 | 自动化发布与正式上线 | 未开始 | 等待板块 6 完成并另行批准生产动作 |
@@ -118,7 +118,9 @@
 - GitHub 私有 Draft Release `v0.5.0` 已创建；
 - ZIP、manifest、signature 三项资产已上传；
 - Worker 已登记 `rel_staging_050`；
-- 当前状态：`enabled=True`、`paused=False`、`rollout_percentage=100`。
+- 当前状态：`enabled=True`、`paused=False`、`rollout_percentage=100`；
+- 已创建真实 staging 测试许可证：ID `lic_ptrqZVAxh2NI8h5RM6gnGiiL`，提示 `JD25`，状态 `active`，`stable` 通道，最多 3 台设备；
+- 完整许可证只保存在仓库外受限文件 `staging-secrets-20260805/staging-test-license-01.txt`，未写入 Git 或本路线图。
 
 ### 固定发布证据
 
@@ -134,9 +136,6 @@
 
 ### 尚未完成
 
-- 创建并安全保存一张 staging 测试许可证；
-- 三设备上限和第四设备拒绝；
-- 在线验证、离线租约、设备重命名、解绑与重新激活；
 - 构建 0.5.1；
 - 签名、发布并登记 `rel_staging_051`；
 - 板块 4 验收报告。
@@ -156,7 +155,7 @@
 
 Task 1“冻结板块边界并保存基线”已完成，证据如下：
 
-- 源码提交：`e36ab47d27bbff7360cbfc1a9038d47e9e18ce48`
+- 功能代码基线：`e36ab47d27bbff7360cbfc1a9038d47e9e18ce48`；后续外部记忆治理只产生文档提交，未改变功能代码
 - 发布仓库提交：`2b9fa385b86df83f7968239a1029d4d59f020027`
 - staging Worker 版本：`04a61d9a-d513-4484-83af-e926dbe835f3`
 - D1 无待执行迁移，8 个预期 Secret 名称全部存在
@@ -165,7 +164,19 @@ Task 1“冻结板块边界并保存基线”已完成，证据如下：
 - 发布仓库干净；源码仓库仅有本次外部记忆文档尚未提交
 - 仓库外安全目录文件和 ACL 正常，管理员明文令牌已删除
 
-Task 2 已于 2026-08-05 20:12 +08:00 获得独立明确授权；当前正在执行安全创建前检查。
+Task 2 已完成，证据如下：
+
+- 创建时间：`2026-08-08T09:07:57.146Z`（本地 +08:00 为 17:07:57）
+- D1 只读核验确认该许可证记录数恰好为 1
+- License ID：`lic_ptrqZVAxh2NI8h5RM6gnGiiL`
+- Hint：`JD25`
+- 状态：`active`
+- 通道：`stable`
+- 最大设备数：3
+- 明文许可证文件和非敏感 metadata 文件均位于仓库外安全目录，ACL 仅允许当前用户、SYSTEM 和管理员组
+- 仓库和当前外部记忆未发现完整许可证、Token、管理员令牌或私钥泄露
+
+Task 3 已于 2026-08-08 完成真实 staging 验收。用户在本机终端运行专用 headless 工具后返回 `ok=true`；第 1/2/3 台设备激活成功，第 4 台首次激活稳定返回 `DEVICE_LIMIT_REACHED`，在线 validate、设备列表、重命名、解绑和重新激活均成功。随后 D1 只读核验确认共有 4 条历史设备记录，其中 3 条 `active`、1 条 `unbound`，设备 2 的 `STAGING-ACCEPTANCE-RENAMED` 名称和设备 3 的解绑时间均已持久化。
 
 ### 状态
 
@@ -244,12 +255,19 @@ Task 2 已于 2026-08-05 20:12 +08:00 获得独立明确授权；当前正在执
 
 ## 10. 当前下一步
 
-Task 1 已完成。当前唯一允许推进的下一项是 Task 2：
+Task 1、Task 2、Task 3 已完成。Task 4 的真实租约/验签/时钟半段也已完成：
 
-1. 已说明用途、安全保存方式和不可逆影响；
-2. 已于 2026-08-05 20:12 +08:00 取得独立明确授权；
-3. 创建 `stable` 通道、最多 3 台设备的许可证；
-4. 将完整许可证直接保存到仓库外受限文件，不在聊天或 Git 中展示；
-5. 只记录许可证 ID、提示尾号、最大设备数和创建时间。
+1. 用户执行获批的 `scripts/staging_lease_acceptance.py` 后返回 `ok=true`；
+2. `lease-key-staging-01` 独立 Ed25519 验签成功；
+3. 租约与许可证/设备绑定正确，`duration_seconds=604800`，`offline_until` 比 `issued_at` 精确晚 7 天；
+4. `offline_valid`、`offline_expiring`、`offline_expired` 和明显时钟回拨 `OFFLINE_LEASE_DENIED` 均符合预期；
+5. D1 只读核验确认设备 1 与许可证仍为 `active`，`last_validated_at=2026-08-08T09:56:21.830Z`；
+6. 本次新增审计 request ID：`device.activate` = `72c1d50b-5542-4b9b-a7f9-ade395e80833`，`device.validate` = `ac834a2a-a5df-43cb-9b4d-ef82de2158c0`。
 
-当前不得提前构建或发布 0.5.1，不制作 staging bootstrap，也不开始 Windows 真实端到端验收。
+Task 4 已完成真实 staging 在线优先策略验收。用户执行获批的 `scripts/staging_license_status_acceptance.py` 后返回 `ok=true`、`suspended_rejection_code=LICENSE_SUSPENDED`、`restore_succeeded=true`、`restored_validation_ok=true`。随后 D1 只读核验确认许可证最终为 `active`、revision=3、`suspended_at=NULL`、`revoked_at=NULL`，设备 1 仍为 `active` 且恢复后 `last_validated_at=2026-08-08T10:23:26.931Z`。状态审计 request ID：`license.suspended` = `24f68caa-2b83-42dc-90d5-d35df4153911`；`license.active` = `ba926744-e8c6-4512-92de-5767b6ede9e0`；恢复后的 `device.validate` = `dc2198d3-be66-4abc-a239-4e384a9d3a65`。暂停期间在线 validate 在活动许可证检查处被 `LICENSE_SUSPENDED` 拒绝，因此不会产生成功 `device.validate` 审计，这与 Worker 当前实现一致。吊销继续推迟，以保留后续 0.5.1 和板块 5 的测试许可证。
+
+Task 3/4 冻结前最终验证已于 2026-08-08 重新执行：Python 全量 476 项运行、474 通过、2 项跳过；Worker `npm run typecheck` 通过，Vitest 3 个文件/17 项测试全部通过；`git diff --check` 通过；针对待提交 Task 3/4 文件与 Task 5 计划的敏感值形态扫描为 0 命中；发布仓库工作树干净。随后只读 D1 再次确认许可证最终 `active`、revision=3、`suspended_at=NULL`、`revoked_at=NULL`，历史设备 4 条（3 active、1 unbound），设备 1 仍 active，三条 Task 4 审计 request ID 与记录一致，所有查询 `rows_written=0`。
+
+Task 5 brainstorming 已完成并批准：0.5.1 仅用于更新链路验证；Launcher 保持 0.1.0 且不重建；`npm/scripts/build.py` 增加 app-only 目标，`scripts/package_windows_app.py` 增加 update-only 模式；不制作 staging bootstrap，不覆盖 0.5.0 固定 ZIP；默认 BUILD_ID 固定为 `staging-051-20260808.1`，同时保留 `WECHAT_CLI_BUILD_ID` 显式覆盖；Task 5 不创建、上传、登记或启用 0.5.1 Release。详细实施子计划见 `docs/superpowers/plans/2026-08-08-board-4-task-5-051-update.md`。
+
+当前唯一允许推进的下一项是：先把 Task 3/4 实现、验收工具/测试、状态文档和 Task 5 子计划冻结提交到 `main`（不得 push），然后基于冻结后的最新 `main` HEAD 创建新的隔离 DevSpace worktree/分支实施 Task 5。主 checkout 中未跟踪的 `NUL` 必须保留且不得纳入提交。Task 6 的发布外部副作用继续单独授权。
