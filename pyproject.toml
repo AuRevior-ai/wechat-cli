@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "wechat-cli"
-version = "0.5.0"
+version = "0.5.1"
 description = "WeChat data query CLI for LLMs"
 authors = [{ name = "Au Revior" }]
 requires-python = ">=3.10"

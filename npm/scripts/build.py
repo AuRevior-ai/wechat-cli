@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Build wechat-cli standalone binaries with PyInstaller."""
 
+import argparse
 import importlib.util
 import os
 import shutil
@@ -130,10 +131,23 @@ def make_pyinstaller_command(platform: str, target: str = "app"):
     return [str(part) for part in cmd]
 
 
-def build_platform(platform: str):
+def build_platform(platform: str, targets: list[str] | None = None):
+    if platform not in PLATFORM_MAP:
+        raise ValueError(f"Unknown platform: {platform}")
     os_name, _arch = platform.split("-")
     ext = ".exe" if os_name == "win32" else ""
-    targets = ["app"] + (["launcher"] if os_name == "win32" else [])
+    selected_targets = (
+        list(targets)
+        if targets is not None
+        else ["app"] + (["launcher"] if os_name == "win32" else [])
+    )
+    allowed_targets = {"app", "launcher"}
+    if not selected_targets or any(
+        target not in allowed_targets for target in selected_targets
+    ):
+        raise ValueError("Unknown or empty build target selection")
+    if "launcher" in selected_targets and os_name != "win32":
+        raise ValueError("The graphical launcher is currently Windows-only")
     expected = {
         "app": f"wechat-cli{ext}",
         "launcher": f"wechat-cli-launcher{ext}",
@@ -146,14 +160,14 @@ def build_platform(platform: str):
     print(f"Building for {platform}...")
     print(f"{'='*60}")
 
-    for target in targets:
+    for target in selected_targets:
         try:
             ensure_target_dependencies(target)
         except RuntimeError as exc:
             print(f"[-] Cannot build {target} for {platform}: {exc}")
             return False
 
-    for target in targets:
+    for target in selected_targets:
         cmd = make_pyinstaller_command(platform, target)
         print(f"[+] Running ({target}): {' '.join(cmd)}")
         try:
@@ -172,9 +186,19 @@ def build_platform(platform: str):
 
 
 def main():
-    if len(sys.argv) > 1:
-        platforms = sys.argv[1:]
-    else:
+    parser = argparse.ArgumentParser(description="Build standalone WeChat CLI binaries.")
+    parser.add_argument("platforms", nargs="*", help="Target platform(s) to build.")
+    parser.add_argument(
+        "--target",
+        action="append",
+        choices=("app", "launcher"),
+        dest="targets",
+        help="Build only the selected target. May be repeated.",
+    )
+    args = parser.parse_args()
+    platforms = list(args.platforms)
+
+    if not platforms:
         # Default: build for current platform only
         import platform as _pf
         current = f"{_pf.system().lower()}-{_pf.machine()}"
@@ -194,7 +218,7 @@ def main():
                     break
             if not platforms:
                 print(f"Cannot determine platform from '{current}'")
-                print(f"Usage: {sys.argv[0]} [platform...]")
+                print(f"Usage: {sys.argv[0]} [platform...] [--target app|launcher]")
                 print(f"  Platforms: {', '.join(PLATFORM_MAP.keys())}")
                 sys.exit(1)
 
@@ -207,7 +231,7 @@ def main():
             print(f"[-] Unknown platform: {p}")
             results[p] = False
             continue
-        results[p] = build_platform(p)
+        results[p] = build_platform(p, targets=args.targets)
 
     print(f"\n{'='*60}")
     print("Build Summary:")

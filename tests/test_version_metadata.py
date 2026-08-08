@@ -1,9 +1,12 @@
 import importlib.util
+import os
+import runpy
 import tomllib
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
-from wechat_cli.version import APP_VERSION, PRODUCT, UPDATE_SCHEMA_VERSION
+from wechat_cli.version import APP_VERSION, BUILD_ID, LAUNCHER_VERSION, PRODUCT, UPDATE_SCHEMA_VERSION
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -22,7 +25,20 @@ class VersionMetadataTests(unittest.TestCase):
         with (ROOT / "pyproject.toml").open("rb") as stream:
             project_version = tomllib.load(stream)["project"]["version"]
 
+        self.assertEqual("0.5.1", APP_VERSION)
+        self.assertEqual("0.5.1", project_version)
         self.assertEqual(project_version, APP_VERSION)
+        self.assertEqual("0.1.0", LAUNCHER_VERSION)
+
+    def test_default_build_id_identifies_staging_051(self):
+        self.assertEqual("staging-051-20260808.1", BUILD_ID)
+
+    def test_build_id_environment_override_is_preserved(self):
+        version_path = ROOT / "wechat_cli" / "version.py"
+        with patch.dict(os.environ, {"WECHAT_CLI_BUILD_ID": "override-build"}):
+            loaded = runpy.run_path(str(version_path))
+
+        self.assertEqual("override-build", loaded["BUILD_ID"])
 
     def test_packager_uses_checked_shared_version(self):
         package = load_package_script()

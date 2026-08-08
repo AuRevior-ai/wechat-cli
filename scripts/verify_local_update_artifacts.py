@@ -15,11 +15,16 @@ import hashlib
 import json
 import shutil
 import subprocess
+import sys
 import tempfile
 import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 from Crypto.PublicKey import ECC
 
@@ -30,7 +35,6 @@ from wechat_cli.update.package import extract_update_zip
 from wechat_cli.version import APP_VERSION, LAUNCHER_VERSION, PRODUCT
 
 
-ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_BOOTSTRAP_DIR = ROOT / "dist" / f"wechat-cli-web-bootstrap-win32-x64-{APP_VERSION}"
 DEFAULT_BOOTSTRAP_ZIP = ROOT / "dist" / f"wechat-cli-web-bootstrap-win32-x64-{APP_VERSION}.zip"
 DEFAULT_UPDATE_ZIP = ROOT / "dist" / f"wechat-cli-app-{APP_VERSION}-win-x64.zip"
@@ -161,14 +165,7 @@ def _execute_version(executable: Path) -> str:
     return output
 
 
-def verify(
-    *,
-    bootstrap_dir: Path,
-    bootstrap_zip: Path,
-    update_zip: Path,
-) -> dict[str, Any]:
-    bootstrap_metadata = _verify_bootstrap_directory(bootstrap_dir)
-    _verify_bootstrap_zip(bootstrap_zip, bootstrap_dir)
+def _verify_update_zip(update_zip: Path) -> dict[str, Any]:
     _regular_file(update_zip, "update ZIP")
 
     with tempfile.TemporaryDirectory(prefix="wechat-cli-artifact-verify-") as raw_temp:
@@ -201,6 +198,10 @@ def verify(
         manifest = UpdateManifest.from_json_bytes(signed.manifest_bytes)
         if manifest.signing is None:
             raise ArtifactVerificationError("signed manifest omitted signing metadata")
+        if str(manifest.version) != APP_VERSION:
+            raise ArtifactVerificationError(
+                f"update manifest version mismatch: {manifest.version}"
+            )
         public_key = private_key.public_key().export_key(format="raw")
         if not isinstance(public_key, bytes):
             raise ArtifactVerificationError("Ed25519 public key export failed")
@@ -231,12 +232,6 @@ def verify(
             shutil.rmtree(extracted, ignore_errors=True)
 
     return {
-        "ok": True,
-        "product": bootstrap_metadata["product"],
-        "version": bootstrap_metadata["version"],
-        "legacy_version": bootstrap_metadata["legacy_version"],
-        "launcher_version": LAUNCHER_VERSION,
-        "bootstrap_zip_sha256": _sha256(bootstrap_zip),
         "update_zip_sha256": _sha256(update_zip),
         "update_zip_size": update_zip.stat().st_size,
         "manifest_signature_verified": True,
@@ -245,17 +240,56 @@ def verify(
     }
 
 
-def main() -> None:
+def verify_update_only(*, update_zip: Path) -> dict[str, Any]:
+    return {
+        "ok": True,
+        "product": PRODUCT,
+        "version": APP_VERSION,
+        "launcher_version": LAUNCHER_VERSION,
+        **_verify_update_zip(update_zip),
+    }
+
+
+def verify(
+    *,
+    bootstrap_dir: Path,
+    bootstrap_zip: Path,
+    update_zip: Path,
+) -> dict[str, Any]:
+    bootstrap_metadata = _verify_bootstrap_directory(bootstrap_dir)
+    _verify_bootstrap_zip(bootstrap_zip, bootstrap_dir)
+    update_evidence = _verify_update_zip(update_zip)
+
+    return {
+        "ok": True,
+        "product": bootstrap_metadata["product"],
+        "version": bootstrap_metadata["version"],
+        "legacy_version": bootstrap_metadata["legacy_version"],
+        "launcher_version": LAUNCHER_VERSION,
+        "bootstrap_zip_sha256": _sha256(bootstrap_zip),
+        **update_evidence,
+    }
+
+
+def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--bootstrap-dir", type=Path, default=DEFAULT_BOOTSTRAP_DIR)
     parser.add_argument("--bootstrap-zip", type=Path, default=DEFAULT_BOOTSTRAP_ZIP)
     parser.add_argument("--update-zip", type=Path, default=DEFAULT_UPDATE_ZIP)
-    args = parser.parse_args()
-    result = verify(
-        bootstrap_dir=args.bootstrap_dir.resolve(),
-        bootstrap_zip=args.bootstrap_zip.resolve(),
-        update_zip=args.update_zip.resolve(),
+    parser.add_argument(
+        "--update-only",
+        action="store_true",
+        help="Verify only the application update ZIP and skip bootstrap checks.",
     )
+    args = parser.parse_args(argv)
+    if args.update_only:
+        result = verify_update_only(update_zip=args.update_zip.resolve())
+    else:
+        result = verify(
+            bootstrap_dir=args.bootstrap_dir.resolve(),
+            bootstrap_zip=args.bootstrap_zip.resolve(),
+            update_zip=args.update_zip.resolve(),
+        )
     print(json.dumps(result, ensure_ascii=False, sort_keys=True))
 
 

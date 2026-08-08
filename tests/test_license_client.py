@@ -43,7 +43,7 @@ class LicenseApiClientTests(unittest.TestCase):
         self.assertEqual(200, status)
         self.assertTrue(payload["ok"])
         request = mocked_urlopen.call_args.args[0]
-        self.assertEqual("WeChatCliLicense/0.5.0", request.get_header("User-agent"))
+        self.assertEqual("WeChatCliLicense/0.5.1", request.get_header("User-agent"))
 
     def test_activate_sends_permanent_key_only_in_json_body(self):
         transport = FakeTransport(

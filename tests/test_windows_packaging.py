@@ -1,5 +1,8 @@
 import importlib.util
+import json
+import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 from unittest.mock import patch
 
@@ -21,7 +24,7 @@ class WindowsPackagingTests(unittest.TestCase):
             ROOT / "packaging" / "windows" / "README-APP.md"
         ).read_text(encoding="utf-8")
 
-        self.assertIn('version = "0.5.0"', pyproject)
+        self.assertIn('version = "0.5.1"', pyproject)
         self.assertIn('authors = [{ name = "Au Revior" }]', pyproject)
         self.assertIn("作者：Au Revior", guide)
         self.assertIn("关于与支持", guide)
@@ -85,10 +88,78 @@ class WindowsPackagingTests(unittest.TestCase):
             build,
             "ensure_target_dependencies",
             side_effect=dependency_check,
-        ), patch.object(build.subprocess, "check_call") as check_call:
+        ) as dependency_mock, patch.object(build.subprocess, "check_call") as check_call:
             self.assertFalse(build.build_platform("win32-x64"))
 
+        self.assertEqual(
+            [item.args[0] for item in dependency_mock.call_args_list],
+            ["app", "launcher"],
+        )
         check_call.assert_not_called()
+
+    def test_windows_app_only_build_preflights_and_builds_only_app(self):
+        build = load_module(
+            "npm_build_app_only",
+            ROOT / "npm" / "scripts" / "build.py",
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            output_root = Path(tmp)
+            binary = output_root / "win32-x64" / "bin" / "wechat-cli.exe"
+
+            def create_binary(*_args, **_kwargs):
+                binary.write_bytes(b"app")
+
+            with patch.object(build, "PLATFORMS_DIR", output_root), patch.object(
+                build, "ensure_target_dependencies"
+            ) as dependency_check, patch.object(
+                build.subprocess, "check_call", side_effect=create_binary
+            ) as check_call:
+                self.assertTrue(build.build_platform("win32-x64", targets=["app"]))
+
+        dependency_check.assert_called_once_with("app")
+        self.assertEqual(1, check_call.call_count)
+        joined = " ".join(check_call.call_args.args[0])
+        self.assertIn("wechat-cli", joined)
+        self.assertNotIn("wechat-cli-launcher", joined)
+
+    def test_windows_build_rejects_unknown_target_selection(self):
+        build = load_module(
+            "npm_build_unknown_target",
+            ROOT / "npm" / "scripts" / "build.py",
+        )
+
+        with self.assertRaisesRegex(ValueError, "Unknown or empty build target"):
+            build.build_platform("win32-x64", targets=["unknown"])
+
+    def test_build_cli_passes_explicit_app_target(self):
+        build = load_module(
+            "npm_build_cli_target",
+            ROOT / "npm" / "scripts" / "build.py",
+        )
+
+        with patch.object(
+            build.sys, "argv", ["build.py", "win32-x64", "--target", "app"]
+        ), patch.object(build, "ensure_pyinstaller"), patch.object(
+            build, "build_platform", return_value=True
+        ) as build_platform:
+            build.main()
+
+        build_platform.assert_called_once_with("win32-x64", targets=["app"])
+
+    def test_build_cli_rejects_unknown_target_before_build_setup(self):
+        build = load_module(
+            "npm_build_cli_unknown_target",
+            ROOT / "npm" / "scripts" / "build.py",
+        )
+
+        with patch.object(
+            build.sys, "argv", ["build.py", "win32-x64", "--target", "unknown"]
+        ), patch.object(build, "ensure_pyinstaller") as ensure_pyinstaller:
+            with self.assertRaises(SystemExit):
+                build.main()
+
+        ensure_pyinstaller.assert_not_called()
 
     def test_pyinstaller_command_omits_missing_legacy_sqlcipher_imports(self):
         build = load_module("npm_build", ROOT / "npm" / "scripts" / "build.py")
@@ -124,6 +195,110 @@ class WindowsPackagingTests(unittest.TestCase):
             )
         )
         self.assertNotIn("app/wechat-cli.exe", normalized)
+
+    def test_update_only_package_contains_only_app_and_manifest(self):
+        package = load_module(
+            "package_windows_update_only",
+            ROOT / "scripts" / "package_windows_app.py",
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            dist = root / "dist"
+            dist.mkdir()
+            app_binary = root / "wechat-cli.exe"
+            app_binary.write_bytes(b"app-binary")
+            bootstrap_dir = dist / "wechat-cli-web-bootstrap-win32-x64-0.5.1"
+            bootstrap_dir.mkdir()
+            bootstrap_marker = bootstrap_dir / "keep.txt"
+            bootstrap_marker.write_text("keep", encoding="utf-8")
+            bootstrap_zip = dist / "wechat-cli-web-bootstrap-win32-x64-0.5.1.zip"
+            bootstrap_zip.write_bytes(b"keep-bootstrap")
+
+            with patch.object(package, "DIST_DIR", dist), patch.object(
+                package, "_binary_path", return_value=app_binary
+            ) as binary_path:
+                update_zip = package.create_update_only_package(skip_build=True)
+
+            self.assertEqual("wechat-cli-app-0.5.1-win-x64.zip", update_zip.name)
+            binary_path.assert_called_once_with("wechat-cli.exe")
+            self.assertEqual("keep", bootstrap_marker.read_text(encoding="utf-8"))
+            self.assertEqual(b"keep-bootstrap", bootstrap_zip.read_bytes())
+            with zipfile.ZipFile(update_zip) as archive:
+                self.assertEqual(
+                    {"wechat-cli.exe", "app-manifest.json"},
+                    set(archive.namelist()),
+                )
+                manifest = json.loads(archive.read("app-manifest.json"))
+
+        self.assertEqual(
+            {
+                "product": "wechat-cli-web",
+                "version": "0.5.1",
+                "platform": "windows",
+                "architecture": "x86_64",
+                "entrypoint": "wechat-cli.exe",
+                "build_id": "staging-051-20260808.1",
+            },
+            manifest,
+        )
+
+    def test_update_only_rejects_existing_archive_without_touching_binary(self):
+        package = load_module(
+            "package_windows_update_existing",
+            ROOT / "scripts" / "package_windows_app.py",
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            dist = Path(tmp)
+            target = dist / "wechat-cli-app-0.5.1-win-x64.zip"
+            target.write_bytes(b"existing")
+            with patch.object(package, "DIST_DIR", dist), patch.object(
+                package, "_binary_path"
+            ) as binary_path:
+                with self.assertRaises(FileExistsError):
+                    package.create_update_only_package(skip_build=True)
+
+            self.assertEqual(b"existing", target.read_bytes())
+            binary_path.assert_not_called()
+
+    def test_update_only_builds_only_application_target(self):
+        package = load_module(
+            "package_windows_update_build",
+            ROOT / "scripts" / "package_windows_app.py",
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            dist = root / "dist"
+            dist.mkdir()
+            app_binary = root / "wechat-cli.exe"
+            app_binary.write_bytes(b"app-binary")
+            with patch.object(package, "DIST_DIR", dist), patch.object(
+                package, "build_binary"
+            ) as build_binary, patch.object(
+                package, "_binary_path", return_value=app_binary
+            ):
+                package.create_update_only_package(skip_build=False)
+
+        build_binary.assert_called_once_with(targets=["app"])
+
+    def test_update_only_cli_does_not_require_launcher_config(self):
+        package = load_module(
+            "package_windows_update_cli",
+            ROOT / "scripts" / "package_windows_app.py",
+        )
+
+        with patch.object(
+            package,
+            "create_update_only_package",
+            return_value=Path("dist/wechat-cli-app-0.5.1-win-x64.zip"),
+        ) as create_update, patch.object(
+            package, "create_package", side_effect=AssertionError("bootstrap path used")
+        ):
+            package.main(["--update-only", "--skip-build"])
+
+        create_update.assert_called_once_with(skip_build=True)
 
     def test_installer_stops_running_installed_exe_before_copying(self):
         script = (ROOT / "packaging" / "windows" / "install.ps1").read_text(encoding="utf-8")

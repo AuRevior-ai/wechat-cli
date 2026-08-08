@@ -9,6 +9,7 @@ import runpy
 import shutil
 import subprocess
 import sys
+import tempfile
 import tomllib
 from pathlib import Path
 
@@ -56,11 +57,11 @@ def build_manifest(version: str | None = None) -> list[str]:
     ]
 
 
-def build_binary() -> None:
-    subprocess.check_call(
-        [sys.executable, str(ROOT / "npm" / "scripts" / "build.py"), PLATFORM],
-        cwd=ROOT,
-    )
+def build_binary(*, targets: list[str] | None = None) -> None:
+    command = [sys.executable, str(ROOT / "npm" / "scripts" / "build.py"), PLATFORM]
+    for target in targets or []:
+        command.extend(["--target", target])
+    subprocess.check_call(command, cwd=ROOT)
 
 
 def _binary_path(name: str) -> Path:
@@ -164,8 +165,24 @@ def copy_package_files(
     )
 
 
-def create_update_package(version_dir: Path, version: str) -> Path:
-    archive_base = DIST_DIR / f"{UPDATE_PACKAGE_STEM}-{version}-win-x64"
+def _update_archive_base(version: str) -> Path:
+    return DIST_DIR / f"{UPDATE_PACKAGE_STEM}-{version}-win-x64"
+
+
+def _update_archive_path(version: str) -> Path:
+    return Path(str(_update_archive_base(version)) + ".zip")
+
+
+def create_update_package(
+    version_dir: Path,
+    version: str,
+    *,
+    allow_overwrite: bool = True,
+) -> Path:
+    archive_base = _update_archive_base(version)
+    archive_path = _update_archive_path(version)
+    if archive_path.exists() and not allow_overwrite:
+        raise FileExistsError(f"Update archive already exists: {archive_path}")
     return Path(
         shutil.make_archive(
             str(archive_base),
@@ -173,6 +190,36 @@ def create_update_package(version_dir: Path, version: str) -> Path:
             root_dir=version_dir,
         )
     )
+
+
+def create_update_only_package(*, skip_build: bool = False) -> Path:
+    version = read_version()
+    archive_path = _update_archive_path(version)
+    if archive_path.exists():
+        raise FileExistsError(f"Update archive already exists: {archive_path}")
+
+    if not skip_build:
+        build_binary(targets=["app"])
+
+    app_binary = _binary_path("wechat-cli.exe")
+    DIST_DIR.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix=f"wechat-cli-app-{version}-") as tmp:
+        assembly_dir = Path(tmp)
+        shutil.copy2(app_binary, assembly_dir / "wechat-cli.exe")
+        (assembly_dir / "app-manifest.json").write_text(
+            json.dumps(
+                _app_manifest(version),
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ),
+            encoding="utf-8",
+        )
+        return create_update_package(
+            assembly_dir,
+            version,
+            allow_overwrite=False,
+        )
 
 
 def create_package(
@@ -219,11 +266,23 @@ def main(argv: list[str] | None = None) -> None:
     )
     parser.add_argument(
         "--launcher-config",
-        required=True,
         type=Path,
         help="Validated launcher-config.json containing API URL and public keys.",
     )
+    parser.add_argument(
+        "--update-only",
+        action="store_true",
+        help="Build/package only the application update ZIP; do not create bootstrap assets.",
+    )
     args = parser.parse_args(argv)
+
+    if args.update_only:
+        update_zip = create_update_only_package(skip_build=args.skip_build)
+        print(f"[+] Update archive: {update_zip}")
+        return
+
+    if args.launcher_config is None:
+        parser.error("--launcher-config is required unless --update-only is used")
 
     package_dir, bootstrap_zip, update_zip = create_package(
         launcher_config_path=args.launcher_config,

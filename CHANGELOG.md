@@ -2,7 +2,16 @@
 
 This changelog is reconstructed from repository commits, design documents, implementation plans, and local acceptance reports. It records product changes, not the current execution state. Read [docs/PROJECT_STATE.md](docs/PROJECT_STATE.md) for current status.
 
-No `0.5.1` release is recorded because it has not been built or released.
+## 0.5.1 — 2026-08-08
+
+Local staging update-chain validation only; this version is not recorded as published or hosted.
+
+### Changed
+
+- Bumped the application version to 0.5.1 while keeping Launcher at 0.1.0.
+- Added an app-only Windows build target and update-only packaging path so staging can validate a real 0.5.0 → 0.5.1 application update without rebuilding Launcher or producing a bootstrap.
+- Fixed the default build identifier at `staging-051-20260808.1` while preserving explicit `WECHAT_CLI_BUILD_ID` overrides.
+- No business-facing application feature changed in 0.5.1.
 
 ## 0.5.0 — 2026-08-05
 
