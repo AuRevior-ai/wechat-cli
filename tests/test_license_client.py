@@ -1,11 +1,13 @@
 import unittest
 from datetime import datetime, timezone
+from unittest.mock import MagicMock, patch
 
 from tests.test_license_lease import lease_bytes
 from wechat_cli.license.client import (
     LicenseApiClient,
     LicenseRejected,
     LicenseServiceUnavailable,
+    UrllibJsonTransport,
     authorize_startup,
 )
 from wechat_cli.license.lease import OfflineLease, TrustedTimeState
@@ -27,6 +29,22 @@ class FakeTransport:
 
 
 class LicenseApiClientTests(unittest.TestCase):
+    @patch("wechat_cli.license.client.urlopen")
+    def test_urllib_transport_sets_application_user_agent(self, mocked_urlopen):
+        response = MagicMock()
+        response.status = 200
+        response.read.return_value = b'{"ok":true}'
+        response.__enter__.return_value = response
+        mocked_urlopen.return_value = response
+
+        transport = UrllibJsonTransport("https://example.com")
+        status, payload = transport("GET", "/v1/health", {}, None)
+
+        self.assertEqual(200, status)
+        self.assertTrue(payload["ok"])
+        request = mocked_urlopen.call_args.args[0]
+        self.assertEqual("WeChatCliLicense/0.5.0", request.get_header("User-agent"))
+
     def test_activate_sends_permanent_key_only_in_json_body(self):
         transport = FakeTransport(
             [

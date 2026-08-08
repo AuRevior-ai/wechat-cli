@@ -11,6 +11,7 @@ from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
 from ..update.errors import ErrorCode, UpdateError
+from ..version import APP_VERSION
 from .lease import OfflineLease, TrustedTimeState
 from .models import (
     ActivationResult,
@@ -86,6 +87,7 @@ class UrllibJsonTransport:
             body = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
             request_headers.setdefault("Content-Type", "application/json")
         request_headers.setdefault("Accept", "application/json")
+        request_headers.setdefault("User-Agent", f"WeChatCliLicense/{APP_VERSION}")
         request = Request(
             self.base_url + path,
             data=body,
