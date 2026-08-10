@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { ApiError } from "../src/http";
 import { d1BlobBytes, fetchGithubReleaseAsset } from "../src/updates";
@@ -108,19 +108,28 @@ describe("GitHub release asset fetch", () => {
   it("reports only the safe final upstream status on GitHub failure", async () => {
     const fakeFetch = async (): Promise<Response> =>
       new Response(null, { status: 403 });
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => undefined);
 
-    await expect(
-      fetchGithubReleaseAsset(
-        "https://api.github.com/repos/org/repo/releases/assets/123",
-        new Headers({ Authorization: "Bearer TEST_VALUE" }),
-        fakeFetch as typeof fetch,
-      ),
-    ).rejects.toMatchObject({
-      code: "DOWNLOAD_UPSTREAM_FAILED",
-      status: 502,
-      retryable: false,
-      details: { upstream_status: 403 },
-    });
+    try {
+      await expect(
+        fetchGithubReleaseAsset(
+          "https://api.github.com/repos/org/repo/releases/assets/123",
+          new Headers({ Authorization: "Bearer TEST_VALUE" }),
+          fakeFetch as typeof fetch,
+        ),
+      ).rejects.toMatchObject({
+        code: "DOWNLOAD_UPSTREAM_FAILED",
+        status: 502,
+        retryable: false,
+        details: { upstream_status: 403 },
+      });
+      const logged = errorLog.mock.calls.flat().join(" ");
+      expect(logged).toContain("github_release_asset_upstream_failed");
+      expect(logged).toContain('"upstream_status":403');
+      expect(logged).not.toContain("TEST_VALUE");
+    } finally {
+      errorLog.mockRestore();
+    }
   });
 
   it("fails closed after a bounded number of redirects", async () => {
