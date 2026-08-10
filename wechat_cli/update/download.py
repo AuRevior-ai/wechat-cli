@@ -13,6 +13,7 @@ from .crypto import verify_file_sha256
 from .errors import ErrorCode, UpdateError
 from .state import atomic_write_json, read_json_object
 from .versioning import SemanticVersion
+from ..version import APP_VERSION
 
 
 class DownloadResponse(Protocol):
@@ -202,6 +203,7 @@ def download_update(
     headers = {
         "Accept": "application/octet-stream",
         "Authorization": f"Download {request.download_ticket}",
+        "User-Agent": f"WeChatCliUpdate/{APP_VERSION}",
     }
     if state.downloaded_bytes:
         headers["Range"] = f"bytes={state.downloaded_bytes}-"
