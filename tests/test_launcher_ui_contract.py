@@ -143,6 +143,17 @@ class LauncherWindowTests(unittest.TestCase):
             fake.start_calls[0],
         )
 
+    def test_navigation_guard_allows_own_local_index_uri(self):
+        index_uri = (launcher_ui_directory() / "index.html").as_uri()
+
+        self.assertTrue(LauncherWindow._navigation_is_local(index_uri))
+
+    def test_navigation_guard_rejects_remote_file_authority(self):
+        index_uri = (launcher_ui_directory() / "index.html").as_uri()
+        remote_uri = index_uri.replace("file:///", "file://remote-host/", 1)
+
+        self.assertFalse(LauncherWindow._navigation_is_local(remote_uri))
+
     def test_navigation_guard_destroys_window_for_remote_navigation(self):
         fake = FakeWebview()
         window = LauncherWindow(webview_module=fake)

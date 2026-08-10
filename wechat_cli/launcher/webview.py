@@ -6,6 +6,7 @@ import importlib
 from pathlib import Path
 from typing import Any, Callable, Mapping
 from urllib.parse import unquote, urlparse
+from urllib.request import url2pathname
 
 
 class WebViewUnavailable(RuntimeError):
@@ -155,10 +156,10 @@ class LauncherWindow:
     @staticmethod
     def _navigation_is_local(url: str) -> bool:
         parsed = urlparse(url)
-        if parsed.scheme != "file":
+        if parsed.scheme != "file" or parsed.netloc:
             return False
         try:
-            current = Path(unquote(parsed.path)).resolve(strict=False)
+            current = Path(url2pathname(unquote(parsed.path))).resolve(strict=False)
             current.relative_to(launcher_ui_directory().resolve(strict=False))
             return True
         except (OSError, ValueError):
