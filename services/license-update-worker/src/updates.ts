@@ -231,7 +231,14 @@ export async function fetchGithubReleaseAsset(
       redirect: "manual",
     });
     if (!GITHUB_ASSET_REDIRECT_STATUSES.has(upstream.status)) {
-      return upstream;
+      if (upstream.status === 200 || upstream.status === 206) {
+        return upstream;
+      }
+      throw new ApiError("DOWNLOAD_UPSTREAM_FAILED", "发布资源下载失败。", {
+        status: upstream.status === 404 ? 404 : 502,
+        retryable: upstream.status >= 500 || upstream.status === 429,
+        details: { upstream_status: upstream.status },
+      });
     }
     if (redirects >= MAX_GITHUB_ASSET_REDIRECTS) {
       throw new ApiError("DOWNLOAD_UPSTREAM_FAILED", "GitHub 发布资源重定向次数过多。", {

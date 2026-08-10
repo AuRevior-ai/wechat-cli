@@ -105,6 +105,24 @@ describe("GitHub release asset fetch", () => {
     ).rejects.toMatchObject({ code: "DOWNLOAD_UPSTREAM_FAILED" });
   });
 
+  it("reports only the safe final upstream status on GitHub failure", async () => {
+    const fakeFetch = async (): Promise<Response> =>
+      new Response(null, { status: 403 });
+
+    await expect(
+      fetchGithubReleaseAsset(
+        "https://api.github.com/repos/org/repo/releases/assets/123",
+        new Headers({ Authorization: "Bearer TEST_VALUE" }),
+        fakeFetch as typeof fetch,
+      ),
+    ).rejects.toMatchObject({
+      code: "DOWNLOAD_UPSTREAM_FAILED",
+      status: 502,
+      retryable: false,
+      details: { upstream_status: 403 },
+    });
+  });
+
   it("fails closed after a bounded number of redirects", async () => {
     let calls = 0;
     const fakeFetch = async (): Promise<Response> => {
