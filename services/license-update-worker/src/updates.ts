@@ -199,6 +199,75 @@ function githubAssetUrl(repository: string, assetId: string): string {
   return `https://api.github.com/repos/${repository}/releases/assets/${assetId}`;
 }
 
+const GITHUB_ASSET_REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
+const MAX_GITHUB_ASSET_REDIRECTS = 3;
+
+export async function fetchGithubReleaseAsset(
+  initialUrl: string,
+  initialHeaders: Headers,
+  fetcher: typeof fetch = fetch,
+): Promise<Response> {
+  let current: URL;
+  try {
+    current = new URL(initialUrl);
+  } catch (error) {
+    throw new ApiError("DOWNLOAD_UPSTREAM_FAILED", "GitHub 发布资源地址无效。", {
+      status: 502,
+      retryable: false,
+      cause: error,
+    });
+  }
+  if (current.protocol !== "https:" || current.hostname !== "api.github.com") {
+    throw new ApiError("DOWNLOAD_UPSTREAM_FAILED", "GitHub 发布资源地址不受信任。", {
+      status: 502,
+      retryable: false,
+    });
+  }
+
+  let headers = new Headers(initialHeaders);
+  for (let redirects = 0; ; redirects += 1) {
+    const upstream = await fetcher(current.toString(), {
+      headers,
+      redirect: "manual",
+    });
+    if (!GITHUB_ASSET_REDIRECT_STATUSES.has(upstream.status)) {
+      return upstream;
+    }
+    if (redirects >= MAX_GITHUB_ASSET_REDIRECTS) {
+      throw new ApiError("DOWNLOAD_UPSTREAM_FAILED", "GitHub 发布资源重定向次数过多。", {
+        status: 502,
+        retryable: false,
+      });
+    }
+    const location = upstream.headers.get("Location");
+    if (location === null) {
+      throw new ApiError("DOWNLOAD_UPSTREAM_FAILED", "GitHub 发布资源重定向缺少地址。", {
+        status: 502,
+        retryable: false,
+      });
+    }
+    let next: URL;
+    try {
+      next = new URL(location, current);
+    } catch (error) {
+      throw new ApiError("DOWNLOAD_UPSTREAM_FAILED", "GitHub 发布资源重定向地址无效。", {
+        status: 502,
+        retryable: false,
+        cause: error,
+      });
+    }
+    if (next.protocol !== "https:" || next.username || next.password) {
+      throw new ApiError("DOWNLOAD_UPSTREAM_FAILED", "GitHub 发布资源重定向不受信任。", {
+        status: 502,
+        retryable: false,
+      });
+    }
+    headers = new Headers(headers);
+    headers.delete("Authorization");
+    current = next;
+  }
+}
+
 export function registerUpdateRoutes(app: WorkerApp): void {
   app.post("/v1/updates/check", async (c) => {
     const authenticated = await authenticateDevice(c);
@@ -385,9 +454,9 @@ export function registerUpdateRoutes(app: WorkerApp): void {
     const ifRange = c.req.header("If-Range");
     if (range !== undefined) headers.set("Range", range);
     if (ifRange !== undefined) headers.set("If-Range", ifRange);
-    const upstream = await fetch(
+    const upstream = await fetchGithubReleaseAsset(
       githubAssetUrl(String(row.github_repository), String(row.github_asset_id)),
-      { headers, redirect: "follow" },
+      headers,
     );
     if (upstream.status !== 200 && upstream.status !== 206) {
       throw new ApiError("DOWNLOAD_UPSTREAM_FAILED", "发布资源下载失败。", {
