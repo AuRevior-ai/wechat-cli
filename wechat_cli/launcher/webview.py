@@ -154,6 +154,18 @@ class LauncherWindow:
         return module
 
     @staticmethod
+    def _current_url_before_load(window: Any) -> str:
+        gui = getattr(window, "gui", None)
+        uid = getattr(window, "uid", None)
+        getter = getattr(gui, "get_current_url", None)
+        if not callable(getter) or uid is None:
+            raise WebViewUnavailable("pywebview backend URL is unavailable before load")
+        url = getter(uid)
+        if not isinstance(url, str) or not url:
+            raise WebViewUnavailable("pywebview backend returned an invalid URL before load")
+        return url
+
+    @staticmethod
     def _navigation_is_local(url: str) -> bool:
         parsed = urlparse(url)
         if parsed.scheme != "file" or parsed.netloc:
@@ -186,7 +198,7 @@ class LauncherWindow:
         def guard_navigation(window=None):
             target = window or self.window
             try:
-                url = target.get_current_url()
+                url = self._current_url_before_load(target)
             except Exception:
                 target.destroy()
                 return

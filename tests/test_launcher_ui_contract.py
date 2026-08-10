@@ -98,13 +98,27 @@ class FakeEvent:
         return self
 
 
+class FakeGui:
+    def __init__(self, window):
+        self.window = window
+
+    def get_current_url(self, uid):
+        if uid != self.window.uid:
+            raise AssertionError("unexpected window uid")
+        return self.window.url
+
+
 class FakeWindow:
     def __init__(self, url):
         self.url = url
+        self.uid = "fake-window"
+        self.gui = FakeGui(self)
         self.events = type("Events", (), {"before_load": FakeEvent()})()
         self.destroy_calls = 0
+        self.public_get_current_url_calls = 0
 
     def get_current_url(self):
+        self.public_get_current_url_calls += 1
         return self.url
 
     def destroy(self):
@@ -153,6 +167,17 @@ class LauncherWindowTests(unittest.TestCase):
         remote_uri = index_uri.replace("file:///", "file://remote-host/", 1)
 
         self.assertFalse(LauncherWindow._navigation_is_local(remote_uri))
+
+    def test_navigation_guard_reads_backend_url_before_loaded_event(self):
+        fake = FakeWebview()
+        window = LauncherWindow(webview_module=fake)
+        window.show(LauncherBridge(state_provider=lambda: {}))
+        handler = fake.window.events.before_load.handlers[0]
+
+        handler(fake.window)
+
+        self.assertEqual(0, fake.window.destroy_calls)
+        self.assertEqual(0, fake.window.public_get_current_url_calls)
 
     def test_navigation_guard_destroys_window_for_remote_navigation(self):
         fake = FakeWebview()
