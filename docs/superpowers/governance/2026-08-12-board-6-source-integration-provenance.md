@@ -177,3 +177,38 @@ Reason: the generic bootstrap-only packaging behavior is useful, but the commit'
 5. Do not resolve a dependency by merging the Board 5 branch or by cherry-picking an acceptance-only commit.
 6. `28415ca` is not part of the blind replay sequence; reusable behavior is deferred to the separately planned generic packaging cleanup.
 7. No push, main merge, cloud/staging/production mutation, credential operation, signing operation, or release operation is authorized by this provenance record.
+
+## 6. B6-G0 completion evidence
+
+B6-G0 completed locally on `board6/security-delivery-preparation` without modifying frozen main or rewriting Board 5 evidence.
+
+- source-integration provenance commit: `d66397f0deff80099eecff4686ee33b9ce920a7b`
+- eight approved product candidates selectively replayed; acceptance-only commits were not wholesale imported
+- integrated product baseline final replay HEAD: `446a5963e661f19a976af72368ae1b0fad0021fc`
+- generic packaging/path-safety cleanup commit: `c1d045895a044dbb4c9998a787c77775654074fa`
+- B6-G0 final technical HEAD before this governance-repair commit: `c1d045895a044dbb4c9998a787c77775654074fa`
+- frozen main remains `a579a25cb7f16e6fdf88d618252b4a5cbffef53d`
+- Board 5 accepted-complete evidence remains `67d3dec0fd1c4a02c87be1ab79c4f78ea63f49d6`
+- B6-G1 remains pending approval and is not part of B6-G0 closure.
+
+The final B6-G0 local technical verification before governance repair passed Python 504 run / 502 passed / 2 expected skips / 0 failures, Worker typecheck PASS, Vitest 21/21, packaging focused tests, `git diff --check`, Board 5 helper import scan, and sensitive-shape scan.
+
+## 7. Approved Board 6 document seed provenance and governance repair
+
+Before materialization into the Board 6 branch, the exact user-approved Board 6 design/plan seed files were reverified in the Board 5 evidence worktree:
+
+- design seed SHA-256: `032b23fd485c39700ffcb5d319832b78c6812edc38afc99d4696a4aeaa9775d0`
+- plan seed SHA-256: `9faa73f733fa714a49accc91b532471e097ea28f8224d6317908ad57a0261b89`
+
+The Git blob payloads used to materialize those files in Board 6 matched those exact SHA-256 values before any approved edits. Windows checkout line-ending conversion can change the SHA-256 of the working-tree representation, so seed provenance is defined over the original source bytes / Git blob payload, not the CRLF working-tree bytes.
+
+This B6-G0 closure/governance repair intentionally revises the tracked canonical copies only in the following authorized ways:
+
+1. replace stale DRAFT/pre-B6-G0 status with approved/current gate state;
+2. record Board 5 accepted complete, Board 6 in progress, B6-G0 complete, B6-G1 pending approval;
+3. change the release lifecycle to require R2 transport readiness before immutable GitHub provenance publication, with release enable remaining an independent gate;
+4. add the complete Cloudflare Access JWT cryptographic verification contract;
+5. make production legacy-admin break-glass default-off, non-permanent, time/scope bounded, and independently authorized;
+6. bring forward the selected Board 5 accepted-complete canonical external memory and fix the stale Board 5 acceptance-report `draft` link label.
+
+The original two Board 6 seed files remain untracked and untouched in the Board 5 worktree. Their deletion remains outside this closure and requires a separate cleanup authorization.
