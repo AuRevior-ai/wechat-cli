@@ -300,6 +300,126 @@ class WindowsPackagingTests(unittest.TestCase):
 
         create_update.assert_called_once_with(skip_build=True)
 
+    def _write_bootstrap_only_inputs(self, root: Path):
+        source_root = root / "source"
+        source_root.mkdir()
+        binary_root = root / "bin"
+        binary_root.mkdir()
+        (binary_root / "wechat-cli.exe").write_bytes(b"app")
+        (binary_root / "wechat-cli-launcher.exe").write_bytes(b"launcher")
+        config = root / "launcher-config.json"
+        config.write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "api_base_url": "https://staging.example.test",
+                    "port": 18787,
+                    "channel": "stable",
+                    "fingerprint_salt": "board6-staging-v1",
+                    "release_public_keys": {"release-key-staging-01": "release"},
+                    "lease_public_keys": {"lease-key-staging-01": "lease"},
+                }
+            ),
+            encoding="utf-8",
+        )
+        return source_root, binary_root, config
+
+    def test_bootstrap_only_writes_only_bootstrap_to_external_output(self):
+        package = load_module(
+            "package_windows_bootstrap_only",
+            ROOT / "scripts" / "package_windows_app.py",
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source_root, binary_root, config = self._write_bootstrap_only_inputs(root)
+            output_root = root / "external"
+            with patch.object(package, "WINDOWS_PACKAGE_FILES", ()), patch.object(
+                package, "create_update_package"
+            ) as update:
+                package_dir, bootstrap_zip = package.create_bootstrap_package(
+                    launcher_config_path=config,
+                    source_root=source_root,
+                    binary_root=binary_root,
+                    output_dir=output_root,
+                    version="0.5.1",
+                    build_id="board6-bootstrap-test",
+                )
+
+            self.assertTrue(package_dir.is_dir())
+            self.assertTrue(bootstrap_zip.is_file())
+            self.assertEqual([], list(output_root.glob("wechat-cli-app-*.zip")))
+            update.assert_not_called()
+            manifest = json.loads(
+                (package_dir / "versions" / "0.5.1" / "app-manifest.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertEqual("board6-bootstrap-test", manifest["build_id"])
+
+    def test_bootstrap_only_rejects_repository_outputs(self):
+        package = load_module(
+            "package_windows_bootstrap_guards",
+            ROOT / "scripts" / "package_windows_app.py",
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source_root, binary_root, config = self._write_bootstrap_only_inputs(root)
+            for output_dir in (ROOT, ROOT / "dist", ROOT / "foo"):
+                with self.subTest(output_dir=output_dir):
+                    with self.assertRaisesRegex(ValueError, "outside the repository"):
+                        package.create_bootstrap_package(
+                            launcher_config_path=config,
+                            source_root=source_root,
+                            binary_root=binary_root,
+                            output_dir=output_dir,
+                            version="0.5.1",
+                            build_id="board6-bootstrap-test",
+                        )
+
+    def test_bootstrap_only_cli_passes_explicit_external_inputs_without_building(self):
+        package = load_module(
+            "package_windows_bootstrap_cli",
+            ROOT / "scripts" / "package_windows_app.py",
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source_root, binary_root, config = self._write_bootstrap_only_inputs(root)
+            output_root = root / "external"
+            expected_dir = output_root / "wechat-cli-web-bootstrap-win32-x64-0.5.1"
+            expected_zip = Path(str(expected_dir) + ".zip")
+            with patch.object(
+                package,
+                "create_bootstrap_package",
+                return_value=(expected_dir, expected_zip),
+            ) as create_bootstrap, patch.object(package, "build_binary") as build_binary:
+                package.main(
+                    [
+                        "--bootstrap-only",
+                        "--launcher-config",
+                        str(config),
+                        "--source-root",
+                        str(source_root),
+                        "--binary-root",
+                        str(binary_root),
+                        "--output-dir",
+                        str(output_root),
+                        "--version",
+                        "0.5.1",
+                        "--build-id",
+                        "board6-bootstrap-test",
+                    ]
+                )
+
+            create_bootstrap.assert_called_once_with(
+                launcher_config_path=config,
+                source_root=source_root,
+                binary_root=binary_root,
+                output_dir=output_root,
+                version="0.5.1",
+                build_id="board6-bootstrap-test",
+            )
+            build_binary.assert_not_called()
+
     def test_installer_stops_running_installed_exe_before_copying(self):
         script = (ROOT / "packaging" / "windows" / "install.ps1").read_text(encoding="utf-8")
 

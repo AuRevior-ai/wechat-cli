@@ -13,6 +13,11 @@ import tempfile
 import tomllib
 from pathlib import Path
 
+try:
+    from scripts.packaging_paths import assert_outside_repository
+except ModuleNotFoundError:  # Direct execution: python scripts/package_windows_app.py
+    from packaging_paths import assert_outside_repository
+
 
 ROOT = Path(__file__).resolve().parent.parent
 DIST_DIR = ROOT / "dist"
@@ -64,9 +69,17 @@ def build_binary(*, targets: list[str] | None = None) -> None:
     subprocess.check_call(command, cwd=ROOT)
 
 
-def _binary_path(name: str) -> Path:
-    path = ROOT / "npm" / "platforms" / PLATFORM / "bin" / name
-    if not path.is_file():
+def _source_path(source_root: Path, relative: str) -> Path:
+    path = source_root / relative
+    if path.is_symlink() or not path.exists():
+        raise FileNotFoundError(path)
+    return path
+
+
+def _binary_path(name: str, *, binary_root: Path | None = None) -> Path:
+    root = binary_root or (ROOT / "npm" / "platforms" / PLATFORM / "bin")
+    path = root / name
+    if path.is_symlink() or not path.is_file():
         raise FileNotFoundError(f"Missing binary: {path}")
     return path
 
@@ -93,14 +106,24 @@ def _validate_launcher_config(path: str | Path) -> Path:
     return source
 
 
-def _app_manifest(version: str) -> dict[str, object]:
+def _app_manifest(
+    version: str,
+    *,
+    build_id: str | None = None,
+    source_root: Path = ROOT,
+) -> dict[str, object]:
+    resolved_build_id = build_id
+    if resolved_build_id is None:
+        resolved_build_id = runpy.run_path(
+            str(source_root / "wechat_cli" / "version.py")
+        )["BUILD_ID"]
     return {
         "product": "wechat-cli-web",
         "version": version,
         "platform": "windows",
         "architecture": "x86_64",
         "entrypoint": "wechat-cli.exe",
-        "build_id": runpy.run_path(str(ROOT / "wechat_cli" / "version.py"))["BUILD_ID"],
+        "build_id": resolved_build_id,
     }
 
 
@@ -109,6 +132,9 @@ def copy_package_files(
     *,
     launcher_config_path: str | Path,
     version: str,
+    build_id: str | None = None,
+    source_root: Path = ROOT,
+    binary_root: Path | None = None,
 ) -> None:
     launcher_config = _validate_launcher_config(launcher_config_path)
     launcher_dir = package_dir / "launcher"
@@ -117,17 +143,17 @@ def copy_package_files(
     version_dir.mkdir(parents=True, exist_ok=True)
 
     shutil.copy2(
-        _binary_path("wechat-cli-launcher.exe"),
+        _binary_path("wechat-cli-launcher.exe", binary_root=binary_root),
         launcher_dir / "wechat-cli-launcher.exe",
     )
     shutil.copy2(launcher_config, launcher_dir / "launcher-config.json")
     shutil.copy2(
-        _binary_path("wechat-cli.exe"),
+        _binary_path("wechat-cli.exe", binary_root=binary_root),
         version_dir / "wechat-cli.exe",
     )
     (version_dir / "app-manifest.json").write_text(
         json.dumps(
-            _app_manifest(version),
+            _app_manifest(version, build_id=build_id, source_root=source_root),
             ensure_ascii=False,
             sort_keys=True,
             separators=(",", ":"),
@@ -136,11 +162,12 @@ def copy_package_files(
     )
 
     for name in WINDOWS_PACKAGE_FILES:
-        source = (
-            ROOT / name
+        relative = (
+            name
             if name in {"LICENSE", "THIRD_PARTY_NOTICES.md"}
-            else WINDOWS_TEMPLATES / name
+            else f"packaging/windows/{name}"
         )
+        source = _source_path(source_root, relative)
         if not source.is_file():
             raise FileNotFoundError(f"Missing package template: {source}")
         shutil.copy2(source, package_dir / name)
@@ -222,6 +249,43 @@ def create_update_only_package(*, skip_build: bool = False) -> Path:
         )
 
 
+def create_bootstrap_package(
+    *,
+    launcher_config_path: str | Path,
+    source_root: Path,
+    binary_root: Path,
+    output_dir: Path,
+    version: str,
+    build_id: str,
+) -> tuple[Path, Path]:
+    output_dir = assert_outside_repository(output_dir, repository_root=ROOT)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    package_dir = output_dir / f"{PACKAGE_STEM}-{version}"
+    if package_dir.exists():
+        raise FileExistsError(f"Bootstrap directory already exists: {package_dir}")
+    package_dir.mkdir()
+
+    copy_package_files(
+        package_dir,
+        launcher_config_path=launcher_config_path,
+        version=version,
+        build_id=build_id,
+        source_root=source_root,
+        binary_root=binary_root,
+    )
+
+    archive_base = output_dir / f"{PACKAGE_STEM}-{version}"
+    bootstrap_zip = Path(
+        shutil.make_archive(
+            str(archive_base),
+            "zip",
+            root_dir=package_dir.parent,
+            base_dir=package_dir.name,
+        )
+    )
+    return package_dir, bootstrap_zip
+
+
 def create_package(
     *,
     launcher_config_path: str | Path,
@@ -274,11 +338,48 @@ def main(argv: list[str] | None = None) -> None:
         action="store_true",
         help="Build/package only the application update ZIP; do not create bootstrap assets.",
     )
+    parser.add_argument(
+        "--bootstrap-only",
+        action="store_true",
+        help="Package only a bootstrap from explicit source/binary roots into external output.",
+    )
+    parser.add_argument("--output-dir", type=Path)
+    parser.add_argument("--source-root", type=Path)
+    parser.add_argument("--binary-root", type=Path)
+    parser.add_argument("--version")
+    parser.add_argument("--build-id")
     args = parser.parse_args(argv)
+
+    if args.update_only and args.bootstrap_only:
+        parser.error("--update-only and --bootstrap-only are mutually exclusive")
 
     if args.update_only:
         update_zip = create_update_only_package(skip_build=args.skip_build)
         print(f"[+] Update archive: {update_zip}")
+        return
+
+    if args.bootstrap_only:
+        required = {
+            "--launcher-config": args.launcher_config,
+            "--source-root": args.source_root,
+            "--binary-root": args.binary_root,
+            "--output-dir": args.output_dir,
+            "--version": args.version,
+            "--build-id": args.build_id,
+        }
+        missing = [flag for flag, value in required.items() if value is None]
+        if missing:
+            parser.error(f"--bootstrap-only requires {' '.join(missing)}")
+        package_dir, bootstrap_zip = create_bootstrap_package(
+            launcher_config_path=args.launcher_config,
+            source_root=args.source_root,
+            binary_root=args.binary_root,
+            output_dir=args.output_dir,
+            version=args.version,
+            build_id=args.build_id,
+        )
+        print(f"[+] Bootstrap directory: {package_dir}")
+        print(f"[+] Bootstrap archive: {bootstrap_zip}")
         return
 
     if args.launcher_config is None:
