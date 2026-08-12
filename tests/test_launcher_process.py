@@ -18,6 +18,7 @@ class FakeProcess:
         self.command = command
         self.kwargs = kwargs
         self.returncode = None
+        self.pid = kwargs.pop("pid", 1234)
         self.terminate_calls = 0
         self.kill_calls = 0
         self.wait_calls = []
@@ -126,10 +127,40 @@ class LauncherProcessTests(unittest.TestCase):
         manager = ApplicationProcessManager(popen=lambda *_args, **_kwargs: None)
         process = FakeProcess([], shell=False)
 
-        manager.stop(process, timeout_seconds=1)
+        with patch("wechat_cli.launcher.process.os.name", "posix"):
+            manager.stop(process, timeout_seconds=1)
 
         self.assertEqual(1, process.terminate_calls)
         self.assertEqual(0, process.kill_calls)
+
+    def test_windows_stop_terminates_entire_process_tree(self):
+        calls = []
+        manager = ApplicationProcessManager(
+            popen=lambda *_args, **_kwargs: None,
+            tree_terminator=lambda pid: calls.append(pid),
+        )
+        process = FakeProcess([], shell=False, pid=4242)
+
+        with patch("wechat_cli.launcher.process.os.name", "nt"):
+            manager.stop(process, timeout_seconds=1)
+
+        self.assertEqual([4242], calls)
+        self.assertEqual(0, process.terminate_calls)
+        self.assertEqual([1], process.wait_calls)
+
+    def test_windows_stop_propagates_tree_termination_failure(self):
+        def fail_tree_stop(_pid):
+            raise OSError("tree stop failed")
+
+        manager = ApplicationProcessManager(
+            popen=lambda *_args, **_kwargs: None,
+            tree_terminator=fail_tree_stop,
+        )
+        process = FakeProcess([], shell=False, pid=4242)
+
+        with patch("wechat_cli.launcher.process.os.name", "nt"):
+            with self.assertRaisesRegex(OSError, "tree stop failed"):
+                manager.stop(process, timeout_seconds=1)
 
     def test_local_runtime_builds_launch_and_waits_for_expected_health(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -175,6 +206,58 @@ class LauncherProcessTests(unittest.TestCase):
             self.assertIs(process, started[0])
             self.assertEqual("ok", payload["status"])
             self.assertEqual(["http://127.0.0.1:8787/api/health"], health_calls)
+
+    def test_local_runtime_stop_waits_until_port_is_released(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            layout, _ = self.make_layout(Path(tmp))
+            process = FakeProcess([], shell=False)
+
+            class Manager:
+                def stop(self, stopped, timeout_seconds=5):
+                    stopped.terminate()
+
+            probes = []
+            states = iter([True, False])
+            runtime = LocalApplicationRuntime(
+                layout,
+                port=8787,
+                process_manager=Manager(),
+                port_probe=lambda port: probes.append(port) or next(states),
+                stop_timeout_seconds=1.0,
+                stop_interval_seconds=0.001,
+                sleep=lambda _seconds: None,
+            )
+            runtime._process = process
+
+            runtime.stop(process)
+
+            self.assertEqual([8787, 8787], probes)
+            self.assertIsNone(runtime._process)
+
+    def test_local_runtime_stop_fails_if_port_remains_occupied(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            layout, _ = self.make_layout(Path(tmp))
+            process = FakeProcess([], shell=False)
+
+            class Manager:
+                def stop(self, stopped, timeout_seconds=5):
+                    stopped.terminate()
+
+            runtime = LocalApplicationRuntime(
+                layout,
+                port=8787,
+                process_manager=Manager(),
+                port_probe=lambda _port: True,
+                stop_timeout_seconds=0.01,
+                stop_interval_seconds=0.001,
+                sleep=lambda _seconds: None,
+            )
+            runtime._process = process
+
+            with self.assertRaisesRegex(OSError, "port.*release"):
+                runtime.stop(process)
+
+            self.assertIs(process, runtime._process)
 
     def test_local_runtime_detects_process_exit_during_health_check(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -222,7 +305,8 @@ class LauncherProcessTests(unittest.TestCase):
         manager = ApplicationProcessManager(popen=lambda *_args, **_kwargs: None)
         process = StubbornProcess([], shell=False)
 
-        manager.stop(process, timeout_seconds=0.1)
+        with patch("wechat_cli.launcher.process.os.name", "posix"):
+            manager.stop(process, timeout_seconds=0.1)
 
         self.assertEqual(1, process.terminate_calls)
         self.assertEqual(1, process.kill_calls)

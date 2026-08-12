@@ -57,8 +57,9 @@ class FakeLicenseClient:
 
 
 class FakeRuntime:
-    def __init__(self, unhealthy_versions=()):
+    def __init__(self, unhealthy_versions=(), stop_error=None):
         self.unhealthy_versions = set(unhealthy_versions)
+        self.stop_error = stop_error
         self.starts = []
         self.stops = []
         self.health_checks = []
@@ -76,6 +77,8 @@ class FakeRuntime:
 
     def stop(self, process):
         self.stops.append(process)
+        if self.stop_error is not None:
+            raise self.stop_error
 
 
 class LauncherServiceTests(unittest.TestCase):
@@ -290,6 +293,38 @@ class LauncherServiceTests(unittest.TestCase):
                     "0.5.0", "22" * 32
                 )
             )
+
+    def test_candidate_stop_failure_rolls_pointer_back_but_does_not_start_previous(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            layout = self.make_layout(Path(tmp))
+            self.add_pending_update(layout)
+            storage = self.make_storage(layout)
+            self.save_state(storage)
+            runtime = FakeRuntime(
+                unhealthy_versions={"0.5.0"},
+                stop_error=OSError("candidate port still occupied"),
+            )
+
+            result = self.make_service(
+                layout,
+                storage,
+                FakeLicenseClient(self.online_result()),
+                runtime,
+            ).start()
+
+            self.assertEqual(LauncherStatus.FAILED, result.status)
+            self.assertEqual("0.4.2", layout.load_current().current_version)
+            self.assertEqual(
+                ["0.5.0"],
+                [item["version"] for item in runtime.starts],
+            )
+            self.assertEqual(1, len(runtime.stops))
+            self.assertTrue(
+                UpdateTransactionEngine(layout).failed_versions.is_failed(
+                    "0.5.0", "22" * 32
+                )
+            )
+            self.assertIn("candidate port still occupied", result.reason or "")
 
 
 if __name__ == "__main__":

@@ -388,17 +388,18 @@ class LauncherService:
                 )
             self.runtime.wait_healthy(active.current_version)
         except Exception as exc:
+            stop_error = None
             if process is not None:
                 try:
                     self.runtime.stop(process)
-                except Exception:
-                    pass
+                except Exception as candidate_stop_error:
+                    stop_error = candidate_stop_error
             if transaction is None:
                 return LauncherResult(
                     LauncherStatus.FAILED,
                     version=active.current_version,
                     license_state=authorization.state,
-                    reason=str(exc),
+                    reason=str(stop_error or exc),
                 )
             rolled_back = self.transactions.rollback(
                 transaction,
@@ -406,6 +407,16 @@ class LauncherService:
                 reason=str(exc) or "new_version_health_failed",
             )
             restored = self.layout.load_current()
+            if stop_error is not None:
+                return LauncherResult(
+                    LauncherStatus.FAILED,
+                    version=restored.current_version,
+                    license_state=authorization.state,
+                    reason=(
+                        "candidate stop failed after update health failure: "
+                        f"{stop_error}"
+                    ),
+                )
             rollback_session = self._session_for(
                 authorization.local_state,
                 restored.current_version,

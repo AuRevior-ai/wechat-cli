@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import os
+import socket
 import subprocess
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Mapping, MutableMapping, Sequence
@@ -59,6 +61,24 @@ def build_application_launch(
     )
 
 
+def _loopback_port_is_occupied(port: int) -> bool:
+    try:
+        with socket.create_connection(("127.0.0.1", port), timeout=0.2):
+            return True
+    except OSError:
+        return False
+
+
+def _terminate_windows_process_tree(pid: int) -> None:
+    subprocess.run(
+        ["taskkill.exe", "/PID", str(pid), "/T", "/F"],
+        check=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        shell=False,
+    )
+
+
 class LocalApplicationRuntime:
     def __init__(
         self,
@@ -69,17 +89,27 @@ class LocalApplicationRuntime:
         health_fetcher: Callable[[str], Mapping[str, object]] = fetch_health_json,
         timeout_seconds: float = 30.0,
         interval_seconds: float = 0.5,
+        port_probe: Callable[[int], bool] = _loopback_port_is_occupied,
+        stop_timeout_seconds: float = 5.0,
+        stop_interval_seconds: float = 0.05,
+        sleep: Callable[[float], None] = time.sleep,
     ) -> None:
         if not 1 <= port <= 65535:
             raise ValueError("port must be between 1 and 65535")
         if timeout_seconds <= 0 or interval_seconds <= 0:
             raise ValueError("health timeout and interval must be positive")
+        if stop_timeout_seconds <= 0 or stop_interval_seconds <= 0:
+            raise ValueError("stop timeout and interval must be positive")
         self.layout = layout
         self.port = port
         self.process_manager = process_manager or ApplicationProcessManager()
         self.health_fetcher = health_fetcher
         self.timeout_seconds = timeout_seconds
         self.interval_seconds = interval_seconds
+        self._port_probe = port_probe
+        self._stop_timeout_seconds = stop_timeout_seconds
+        self._stop_interval_seconds = stop_interval_seconds
+        self._sleep = sleep
         self._process = None
 
     @property
@@ -115,6 +145,11 @@ class LocalApplicationRuntime:
 
     def stop(self, process) -> None:
         self.process_manager.stop(process)
+        deadline = time.monotonic() + self._stop_timeout_seconds
+        while self._port_probe(self.port):
+            if time.monotonic() >= deadline:
+                raise OSError("application port did not release after process stop")
+            self._sleep(self._stop_interval_seconds)
         if process is self._process:
             self._process = None
 
@@ -124,8 +159,10 @@ class ApplicationProcessManager:
         self,
         *,
         popen: Callable[..., subprocess.Popen] = subprocess.Popen,
+        tree_terminator: Callable[[int], None] = _terminate_windows_process_tree,
     ) -> None:
         self._popen = popen
+        self._tree_terminator = tree_terminator
 
     def start(self, launch: ApplicationLaunch):
         stdin = open(os.devnull, "rb")
@@ -148,6 +185,13 @@ class ApplicationProcessManager:
         if timeout_seconds <= 0:
             raise ValueError("timeout_seconds must be positive")
         if process is None or process.poll() is not None:
+            return
+        if os.name == "nt":
+            self._tree_terminator(int(process.pid))
+            try:
+                process.wait(timeout=timeout_seconds)
+            except subprocess.TimeoutExpired as exc:
+                raise OSError("application process tree did not stop in time") from exc
             return
         process.terminate()
         try:
