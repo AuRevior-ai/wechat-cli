@@ -1,7 +1,208 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { createDeviceToken, hmacSha256Hex } from "../src/crypto";
 import { ApiError } from "../src/http";
+import { createApp } from "../src/index";
+import type { Env } from "../src/types";
 import { d1BlobBytes, fetchGithubReleaseAsset } from "../src/updates";
+
+interface FakeDbState {
+  prepared: string[];
+  runs: string[];
+}
+
+async function makeUpdateCheckEnv(options: {
+  licensedChannel: "stable" | "beta";
+  releaseChannel: "stable" | "beta";
+  tokenId: string;
+  tokenSecret: string;
+}): Promise<{ env: Env; state: FakeDbState }> {
+  const state: FakeDbState = { prepared: [], runs: [] };
+  const devicePepper = "device-pepper-for-update-tests";
+  const tokenDigest = await hmacSha256Hex(devicePepper, options.tokenSecret);
+  const authRow = {
+    id: "dev_test_1",
+    license_id: "lic_test_1",
+    client_install_id_digest: "install-digest",
+    fingerprint_digest: "fingerprint-digest",
+    display_name: "test-device",
+    status: "active",
+    token_id: options.tokenId,
+    token_secret_digest: tokenDigest,
+    token_version: 1,
+    device_revision: 1,
+    first_activated_at: "2026-08-12T00:00:00.000Z",
+    last_validated_at: "2026-08-12T00:00:00.000Z",
+    last_app_version: "0.5.0",
+    last_launcher_version: "0.1.0",
+    disabled_at: null,
+    unbound_at: null,
+    license_row_id: "lic_test_1",
+    key_digest: "license-digest",
+    key_hint: "TEST",
+    license_status: "active",
+    max_devices: 1,
+    release_channel: options.licensedChannel,
+    revision: 1,
+    license_created_at: "2026-08-12T00:00:00.000Z",
+    license_updated_at: "2026-08-12T00:00:00.000Z",
+    suspended_at: null,
+    revoked_at: null,
+    created_by_admin_id: null,
+  };
+  const releaseRow = {
+    id: "rel_test_beta",
+    version: "0.6.0",
+    channel: options.releaseChannel,
+    manifest_content: [123, 125],
+    manifest_signature: [1, 2, 3],
+    manifest_sha256: "a".repeat(64),
+    package_sha256: "b".repeat(64),
+    package_size: 1234,
+    github_repository: "org/repo",
+    github_release_id: "123",
+    github_asset_id: "456",
+    github_asset_name: "package.zip",
+    rollout_percentage: 100,
+    rollout_seed: "seed",
+    paused: 0,
+    enabled: 1,
+    published_at: "2026-08-12T00:00:00.000Z",
+    created_at: "2026-08-12T00:00:00.000Z",
+  };
+
+  const db = {
+    prepare(sql: string) {
+      state.prepared.push(sql);
+      let bindings: unknown[] = [];
+      return {
+        bind(...values: unknown[]) {
+          bindings = values;
+          return this;
+        },
+        async first<T>() {
+          if (sql.includes("FROM devices d")) {
+            return authRow as T;
+          }
+          if (sql.includes("INSERT INTO rate_limit_windows")) {
+            return { count: 1 } as T;
+          }
+          throw new Error(`unexpected first(): ${sql} ${JSON.stringify(bindings)}`);
+        },
+        async all<T>() {
+          if (sql.includes("FROM releases")) {
+            return {
+              results: [releaseRow as T],
+              success: true,
+              meta: {},
+            };
+          }
+          throw new Error(`unexpected all(): ${sql} ${JSON.stringify(bindings)}`);
+        },
+        async run() {
+          state.runs.push(sql);
+          return { success: true, meta: { changes: 1 } };
+        },
+      };
+    },
+  } as unknown as D1Database;
+
+  return {
+    env: {
+      DB: db,
+      DIAGNOSTICS: {} as R2Bucket,
+      ENVIRONMENT: "local",
+      LEASE_SIGNING_KEY_ID: "lease-test",
+      CONTACT_ENCRYPTION_KEY_VERSION: "1",
+      MAX_DIAGNOSTIC_BYTES: "1024",
+      LICENSE_KEY_PEPPER: "license-pepper-for-tests",
+      DEVICE_TOKEN_PEPPER: devicePepper,
+      ADMIN_TOKEN_PEPPER: "admin-pepper-for-tests",
+      CONTACT_LOOKUP_PEPPER: "contact-pepper-for-tests",
+      CONTACT_ENCRYPTION_KEY_V1: "contact-encryption-key-for-tests",
+      LEASE_SIGNING_PRIVATE_KEY: "lease-private-key-for-tests",
+      DOWNLOAD_TICKET_SECRET: "download-ticket-secret-for-tests",
+      GITHUB_RELEASE_READ_TOKEN: "github-test-token",
+    },
+    state,
+  };
+}
+
+async function updateCheck(options: {
+  licensedChannel: "stable" | "beta";
+  requestedChannel: "stable" | "beta";
+}): Promise<{ response: Response; state: FakeDbState }> {
+  const token = createDeviceToken();
+  const { env, state } = await makeUpdateCheckEnv({
+    licensedChannel: options.licensedChannel,
+    releaseChannel: options.requestedChannel,
+    tokenId: token.tokenId,
+    tokenSecret: token.tokenSecret,
+  });
+  const response = await createApp().request(
+    "/v1/updates/check",
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token.value}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        current_version: "0.5.0",
+        launcher_version: "0.1.0",
+        channel: options.requestedChannel,
+        platform: "windows",
+        architecture: "x86_64",
+        product: "wechat-cli-web",
+        device_id: "dev_test_1",
+        failed_versions: [],
+      }),
+    },
+    env,
+  );
+  return { response, state };
+}
+
+describe("update channel authorization", () => {
+  it("rejects a stable license requesting beta before release selection or ticket creation", async () => {
+    const { response, state } = await updateCheck({
+      licensedChannel: "stable",
+      requestedChannel: "beta",
+    });
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: "UPDATE_CHANNEL_MISMATCH", retryable: false },
+    });
+    expect(state.prepared.some((sql) => sql.includes("FROM releases"))).toBe(false);
+    expect(state.runs.some((sql) => sql.includes("INSERT INTO download_tickets"))).toBe(false);
+  });
+
+  it("rejects a beta license requesting stable before release selection or ticket creation", async () => {
+    const { response, state } = await updateCheck({
+      licensedChannel: "beta",
+      requestedChannel: "stable",
+    });
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: "UPDATE_CHANNEL_MISMATCH", retryable: false },
+    });
+    expect(state.prepared.some((sql) => sql.includes("FROM releases"))).toBe(false);
+    expect(state.runs.some((sql) => sql.includes("INSERT INTO download_tickets"))).toBe(false);
+  });
+
+  it("uses the authenticated license channel when request and license agree", async () => {
+    const { response, state } = await updateCheck({
+      licensedChannel: "stable",
+      requestedChannel: "stable",
+    });
+
+    expect(response.status).toBe(200);
+    expect(state.prepared.some((sql) => sql.includes("FROM releases"))).toBe(true);
+    expect(state.runs.some((sql) => sql.includes("INSERT INTO download_tickets"))).toBe(true);
+  });
+});
 
 describe("D1 BLOB decoding", () => {
   it("accepts ArrayBuffer and typed-array values", () => {

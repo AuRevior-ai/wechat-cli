@@ -307,7 +307,15 @@ export function registerUpdateRoutes(app: WorkerApp): void {
         cause: error,
       });
     }
-    const channel = validTargetValue(request, "channel", ["stable", "beta"]);
+    const requestedChannel = validTargetValue(request, "channel", ["stable", "beta"]);
+    const effectiveChannel = authenticated.license.release_channel;
+    if (requestedChannel !== effectiveChannel) {
+      throw new ApiError(
+        "UPDATE_CHANNEL_MISMATCH",
+        "更新通道与许可证授权不匹配。",
+        { status: 409, retryable: false },
+      );
+    }
     validTargetValue(request, "platform", ["windows"]);
     validTargetValue(request, "architecture", ["x86_64", "arm64"]);
     const product = requiredString(request, "product", { maximum: 64 });
@@ -326,7 +334,7 @@ export function registerUpdateRoutes(app: WorkerApp): void {
       stringArray(request.failed_versions ?? [], "failed_versions"),
     );
     const release = await selectRelease(c.env, {
-      channel,
+      channel: effectiveChannel,
       currentVersion,
       failedVersions,
       licenseId: authenticated.license.id,
@@ -337,7 +345,7 @@ export function registerUpdateRoutes(app: WorkerApp): void {
       return c.json({
         update_available: false,
         current_version: currentVersion,
-        channel,
+        channel: effectiveChannel,
         checked_at: checkedAt,
       });
     }
@@ -378,7 +386,7 @@ export function registerUpdateRoutes(app: WorkerApp): void {
         current_version: currentVersion,
         target_version: release.version,
         launcher_version: launcherVersion,
-        channel,
+        channel: effectiveChannel,
       },
     });
     return c.json({
