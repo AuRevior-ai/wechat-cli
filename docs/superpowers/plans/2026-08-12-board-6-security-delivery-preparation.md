@@ -1,6 +1,6 @@
 # Board 6 Security & Delivery Preparation Implementation Plan
 
-> **APPROVED IMPLEMENTATION PLAN — B6-G0 complete; B6-G1 pending approval; every later gate remains independently authorized.**
+> **APPROVED IMPLEMENTATION PLAN — B6-G0 and B6-G1 complete; B6-G2 pending approval; every later gate remains independently authorized.**
 >
 > Approved seed content SHA-256: `9faa73f733fa714a49accc91b532471e097ea28f8224d6317908ad57a0261b89`. The exact approved seed remains retained, untracked and untouched, in the Board 5 evidence worktree. This tracked canonical copy originates from that exact seed and contains only the explicitly authorized B6-G0 governance/status corrections plus the approved lifecycle and Access/JWT/break-glass revisions.
 >
@@ -14,7 +14,7 @@
 
 **Design source:** `docs/superpowers/specs/2026-08-12-board-6-security-delivery-preparation-design.md`
 
-**Current execution status (2026-08-12):** Board 5 accepted-complete evidence remains frozen at `67d3dec0fd1c4a02c87be1ab79c4f78ea63f49d6`; frozen main remains `a579a25cb7f16e6fdf88d618252b4a5cbffef53d`. Board 6 runs on `board6/security-delivery-preparation`. B6-G0 source integration and generic packaging-boundary cleanup are complete through local HEAD `c1d045895a044dbb4c9998a787c77775654074fa`. B6-G1 is **pending approval and has not started**. The B6-G0 task checklists below are retained as the approved execution map; the authoritative completion evidence is the Board 6 commit lineage and `docs/superpowers/governance/2026-08-12-board-6-source-integration-provenance.md`.
+**Current execution status (2026-08-12):** Board 5 accepted-complete evidence remains frozen at `67d3dec0fd1c4a02c87be1ab79c4f78ea63f49d6`; frozen main remains `a579a25cb7f16e6fdf88d618252b4a5cbffef53d`. Board 6 runs on `board6/security-delivery-preparation`. B6-G0 source integration and generic packaging-boundary cleanup are complete through `c1d045895a044dbb4c9998a787c77775654074fa`. B6-G1 Update Trust Local Gate is complete through `bdc98afc0d945c4c86f1e3b21686d2fe798ccdd1` with three local implementation commits: `a23b6ff` (server-authoritative channel), `988a504` (exact failed-release identity + release-version immutability), and `bdc98af` (dual GitHub provenance/R2 distribution + corrected readiness-before-provenance lifecycle). Fresh gate verification passed Python 510 run / 2 expected skips / 0 failures, Worker typecheck, Vitest 5 files / 40 tests, `git diff e25f2ae..bdc98af --check`, and targeted non-test sensitive-shape scanning. No cloud/staging/production mutation, real R2 creation, credential change, signing, release publication/register/enable, push, or merge occurred. **B6-G2 is pending approval and has not started.** The B6-G0/B6-G1 task checklists below remain the approved execution map; authoritative completion evidence is the Board 6 commit lineage, gate verification, and canonical project/roadmap state.
 
 ---
 
@@ -569,6 +569,28 @@ git add services/license-update-worker/migrations/0004_release_distribution.sql 
 git diff --cached --check
 git commit -m "feat: add private r2 release distribution backend"
 ```
+
+### B6-G1 completion evidence — 2026-08-12
+
+B6-G1 was separately authorized and completed locally. The plan checkboxes above are retained as the approved execution map rather than rewritten after execution; the authoritative evidence is:
+
+```text
+Task 2: a23b6ff fix: enforce licensed update channel
+Task 3: 988a504 feat: suppress exact failed update manifests
+Task 4: bdc98af feat: add private r2 release distribution backend
+
+Fresh gate verification:
+Python: 510 run / 2 expected skips / 0 failures
+Worker typecheck: PASS
+Vitest: 5 files / 40 tests PASS
+git diff e25f2ae..bdc98af --check: PASS
+non-test sensitive-shape scan: 0 target matches
+Board 6 worktree after implementation commits: clean
+```
+
+Task 2 makes the authenticated license channel authoritative and rejects client-channel mismatch before release selection/ticket creation. Task 3 adds exact `(version, manifest_sha256)` failure identity while retaining bounded legacy `failed_versions` compatibility and rejects channel/version manifest replacement. Task 4 adds the local R2 distribution schema/backend, exact R2 package preparation/readiness checks, byte-range support, production rejection of the legacy GitHub runtime backend, and the corrected future lifecycle `Draft inspection -> R2 readiness -> immutable GitHub provenance -> disabled/paused registration -> independently authorized enable`.
+
+This local gate created no R2 bucket, applied no staging migration, deployed no Worker, changed no real Secret/credential, published/registered/enabled no real release, signed no real artifact, and performed no push or merge.
 
 ---
 
@@ -1706,10 +1728,10 @@ Board 7 remains unstarted. Present Board 6 closure evidence and request a separa
 
 # 21. Current next implementation authorization request
 
-The design/plan are approved and **B6-G0 Source Integration Gate is complete** through local Board 6 HEAD `c1d045895a044dbb4c9998a787c77775654074fa`. This governance closure does not authorize the next gate.
+The design/plan are approved and **B6-G0 Source Integration Gate plus B6-G1 Update Trust Local Gate are complete**. B6-G1 implementation ends at local Board 6 HEAD `bdc98afc0d945c4c86f1e3b21686d2fe798ccdd1`; the following governance closure commit only records that verified state and does not authorize the next gate.
 
 The **first and only next implementation authorization request** is now:
 
-> **B6-G1 Update Trust Local Gate** — local TDD/code/schema work for Task 2 server-authoritative channel, Task 3 exact failed-release identity, and Task 4 dual distribution/R2 model with the corrected readiness-before-provenance lifecycle. No cloud/staging/production mutation, no push/merge to main, no real credential mutation, no signing procurement/use, and no release publication/registration/enablement.
+> **B6-G2 Admin & Data Security Local Gate** — local TDD/code/schema work for Task 5 short-lived administrator sessions + full Access JWT verification/default-off break-glass policy, Task 6 explicit Origin/CORS and complete purpose-separated admin rate limits, Task 7 diagnostics upload/retention/privacy split, and Task 8 versioned purpose-separated secret-rotation framework. No cloud/staging/production mutation, no Access app/policy creation, no staging migration/deploy, no real Secret add/switch/retire, no credential rotation, no release action, no signing action, and no push/merge to main.
 
-No B6-G2 or later gate is implied by any future B6-G1 approval.
+No B6-G3 or later gate is implied by any future B6-G2 approval.
