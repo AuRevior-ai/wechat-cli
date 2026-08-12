@@ -79,6 +79,35 @@ def _timestamp(value: Any, name: str) -> str:
 
 
 @dataclass(frozen=True)
+class FailedReleaseIdentity:
+    version: str
+    manifest_sha256: str
+
+    def __post_init__(self) -> None:
+        SemanticVersion.parse(self.version)
+        digest = self.manifest_sha256.lower()
+        if _SHA256_RE.fullmatch(digest) is None:
+            raise ValueError("manifest_sha256 must contain 64 hexadecimal characters")
+        object.__setattr__(self, "manifest_sha256", digest)
+
+    @classmethod
+    def from_mapping(cls, value: Mapping[str, Any]) -> "FailedReleaseIdentity":
+        version = value.get("version")
+        manifest_sha256 = value.get("manifest_sha256")
+        if not isinstance(version, str):
+            raise ValueError("failed release version must be a string")
+        if not isinstance(manifest_sha256, str):
+            raise ValueError("failed release manifest_sha256 must be a string")
+        return cls(version=version, manifest_sha256=manifest_sha256)
+
+    def to_mapping(self) -> dict[str, str]:
+        return {
+            "version": self.version,
+            "manifest_sha256": self.manifest_sha256,
+        }
+
+
+@dataclass(frozen=True)
 class PackageInfo:
     filename: str
     size: int

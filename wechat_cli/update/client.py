@@ -10,7 +10,7 @@ from typing import Any, Mapping, Protocol
 from .crypto import TrustedEd25519Keys
 from .errors import ErrorCode, UpdateError
 from .manifest import verify_signed_manifest
-from .models import UpdateManifest
+from .models import FailedReleaseIdentity, UpdateManifest
 from .versioning import SemanticVersion
 
 
@@ -138,7 +138,8 @@ class UpdateApiClient:
         architecture: str,
         product: str,
         device_id: str,
-        failed_versions: list[str],
+        failed_versions: list[str] | None = None,
+        failed_releases: list[FailedReleaseIdentity | Mapping[str, Any]] | None = None,
     ) -> UpdateCheckResult:
         SemanticVersion.parse(current_version)
         SemanticVersion.parse(launcher_version)
@@ -146,8 +147,17 @@ class UpdateApiClient:
             raise ValueError("channel must be stable or beta")
         if not device_id:
             raise ValueError("device_id is required")
-        for failed in failed_versions:
+        legacy_failed_versions = list(failed_versions or [])
+        for failed in legacy_failed_versions:
             SemanticVersion.parse(failed)
+        exact_failed_releases: list[FailedReleaseIdentity] = []
+        for failed in failed_releases or []:
+            if isinstance(failed, FailedReleaseIdentity):
+                exact_failed_releases.append(failed)
+            elif isinstance(failed, Mapping):
+                exact_failed_releases.append(FailedReleaseIdentity.from_mapping(failed))
+            else:
+                raise ValueError("failed release identity must be a mapping")
         response = self._request(
             device_token=device_token,
             payload={
@@ -158,7 +168,8 @@ class UpdateApiClient:
                 "architecture": architecture,
                 "product": product,
                 "device_id": device_id,
-                "failed_versions": list(failed_versions),
+                "failed_versions": legacy_failed_versions,
+                "failed_releases": [item.to_mapping() for item in exact_failed_releases],
             },
         )
         available = response.get("update_available")

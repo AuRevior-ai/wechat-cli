@@ -77,6 +77,11 @@ function releaseFromRow(row: Record<string, unknown>): ReleaseRow {
   };
 }
 
+interface FailedReleaseIdentity {
+  version: string;
+  manifest_sha256: string;
+}
+
 function stringArray(value: unknown, name: string, maximum = 32): string[] {
   if (!Array.isArray(value) || value.length > maximum) {
     throw new ApiError("INVALID_REQUEST", `${name} 必须是有限数组。`, {
@@ -103,6 +108,54 @@ function stringArray(value: unknown, name: string, maximum = 32): string[] {
   return result;
 }
 
+function failedReleaseArray(
+  value: unknown,
+  name: string,
+  maximum = 32,
+): FailedReleaseIdentity[] {
+  if (!Array.isArray(value) || value.length > maximum) {
+    throw new ApiError("INVALID_REQUEST", `${name} 必须是有限数组。`, {
+      status: 400,
+    });
+  }
+  const result: FailedReleaseIdentity[] = [];
+  for (const item of value) {
+    if (typeof item !== "object" || item === null || Array.isArray(item)) {
+      throw new ApiError("INVALID_REQUEST", `${name} 包含无效值。`, {
+        status: 400,
+      });
+    }
+    const record = item as Record<string, unknown>;
+    const version = record.version;
+    const manifestSha256 = record.manifest_sha256;
+    if (typeof version !== "string" || typeof manifestSha256 !== "string") {
+      throw new ApiError("INVALID_REQUEST", `${name} 包含无效值。`, {
+        status: 400,
+      });
+    }
+    try {
+      parseSemanticVersion(version);
+    } catch (error) {
+      throw new ApiError("INVALID_REQUEST", `${name} 包含无效版本。`, {
+        status: 400,
+        cause: error,
+      });
+    }
+    const normalizedSha = manifestSha256.toLowerCase();
+    if (!/^[0-9a-f]{64}$/u.test(normalizedSha)) {
+      throw new ApiError("INVALID_REQUEST", `${name} 包含无效清单摘要。`, {
+        status: 400,
+      });
+    }
+    result.push({ version, manifest_sha256: normalizedSha });
+  }
+  return result;
+}
+
+function failedReleaseKey(version: string, manifestSha256: string): string {
+  return `${version}|${manifestSha256.toLowerCase()}`;
+}
+
 function validTargetValue(
   request: Record<string, unknown>,
   name: string,
@@ -121,6 +174,7 @@ async function selectRelease(
     channel: string;
     currentVersion: string;
     failedVersions: Set<string>;
+    failedReleases: Set<string>;
     licenseId: string;
     deviceId: string;
   },
@@ -151,7 +205,13 @@ async function selectRelease(
         cause: error,
       });
     }
-    if (options.failedVersions.has(release.version) || release.paused !== 0) {
+    if (
+      options.failedVersions.has(release.version) ||
+      options.failedReleases.has(
+        failedReleaseKey(release.version, release.manifest_sha256),
+      ) ||
+      release.paused !== 0
+    ) {
       continue;
     }
     if (release.rollout_percentage <= 0) {
@@ -333,10 +393,16 @@ export function registerUpdateRoutes(app: WorkerApp): void {
     const failedVersions = new Set(
       stringArray(request.failed_versions ?? [], "failed_versions"),
     );
+    const failedReleases = new Set(
+      failedReleaseArray(request.failed_releases ?? [], "failed_releases").map(
+        (item) => failedReleaseKey(item.version, item.manifest_sha256),
+      ),
+    );
     const release = await selectRelease(c.env, {
       channel: effectiveChannel,
       currentVersion,
       failedVersions,
+      failedReleases,
       licenseId: authenticated.license.id,
       deviceId: authenticated.device.id,
     });

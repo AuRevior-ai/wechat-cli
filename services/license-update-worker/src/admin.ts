@@ -45,6 +45,33 @@ function parseBoolean(value: unknown, name: string): boolean | undefined {
   return value;
 }
 
+export async function assertReleaseVersionImmutable(
+  env: Env,
+  channel: "stable" | "beta",
+  version: string,
+  manifestSha256: string,
+): Promise<void> {
+  const existing = await env.DB.prepare(
+    `SELECT id, manifest_sha256
+       FROM releases
+      WHERE channel = ? AND version = ?
+      ORDER BY created_at ASC
+      LIMIT 1`,
+  )
+    .bind(channel, version)
+    .first<Record<string, unknown>>();
+  if (
+    existing !== null &&
+    String(existing.manifest_sha256).toLowerCase() !== manifestSha256.toLowerCase()
+  ) {
+    throw new ApiError(
+      "RELEASE_VERSION_IMMUTABLE",
+      "同一发布通道与版本不能替换为不同清单。",
+      { status: 409, retryable: false },
+    );
+  }
+}
+
 function databaseBytes(value: unknown, name: string): Uint8Array<ArrayBuffer> {
   if (value instanceof ArrayBuffer) {
     return new Uint8Array(value);
@@ -804,6 +831,12 @@ export function registerAdminRoutes(app: WorkerApp): void {
         rolloutPercentage,
       },
       operation: async () => {
+        await assertReleaseVersionImmutable(
+          c.env,
+          channel,
+          version,
+          manifestSha256,
+        );
         const now = isoNow();
         await c.env.DB.prepare(
           `INSERT INTO releases (

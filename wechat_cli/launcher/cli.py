@@ -145,9 +145,8 @@ def _run_update_download(
         _transport(config),
         trusted_keys=config.release_keys,
     )
-    failed_versions = UpdateTransactionEngine(
-        layout
-    ).failed_versions.failed_versions()
+    failed_registry = UpdateTransactionEngine(layout).failed_versions
+    failed_releases = failed_registry.failed_releases()
     result = client.check(
         device_token=state.device_token,
         current_version=current.current_version,
@@ -157,7 +156,8 @@ def _run_update_download(
         architecture=ARCHITECTURE,
         product=PRODUCT,
         device_id=state.device_id,
-        failed_versions=failed_versions,
+        failed_versions=[],
+        failed_releases=failed_releases,
     )
     if not result.update_available:
         return 0

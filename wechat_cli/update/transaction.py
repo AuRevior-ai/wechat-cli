@@ -158,6 +158,28 @@ class FailedVersionRegistry:
             valid.append(version)
         return sorted(valid, key=SemanticVersion.parse)
 
+    def failed_releases(self) -> list[dict[str, str]]:
+        exact: dict[str, dict[str, str]] = {}
+        for entry in self._load()["failures"].values():
+            if not isinstance(entry, Mapping):
+                continue
+            version = entry.get("version")
+            manifest_sha256 = entry.get("manifest_sha256")
+            if not isinstance(version, str) or not isinstance(manifest_sha256, str):
+                continue
+            try:
+                key = self._key(version, manifest_sha256)
+            except (ValueError, TypeError):
+                continue
+            exact[key] = {
+                "version": version,
+                "manifest_sha256": manifest_sha256.lower(),
+            }
+        return sorted(
+            exact.values(),
+            key=lambda item: (SemanticVersion.parse(item["version"]), item["manifest_sha256"]),
+        )
+
     def mark_failed(
         self,
         *,

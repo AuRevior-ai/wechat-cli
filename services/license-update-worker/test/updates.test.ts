@@ -16,6 +16,8 @@ async function makeUpdateCheckEnv(options: {
   releaseChannel: "stable" | "beta";
   tokenId: string;
   tokenSecret: string;
+  releaseVersion?: string | undefined;
+  releaseManifestSha256?: string | undefined;
 }): Promise<{ env: Env; state: FakeDbState }> {
   const state: FakeDbState = { prepared: [], runs: [] };
   const devicePepper = "device-pepper-for-update-tests";
@@ -52,11 +54,11 @@ async function makeUpdateCheckEnv(options: {
   };
   const releaseRow = {
     id: "rel_test_beta",
-    version: "0.6.0",
+    version: options.releaseVersion ?? "0.6.0",
     channel: options.releaseChannel,
     manifest_content: [123, 125],
     manifest_signature: [1, 2, 3],
-    manifest_sha256: "a".repeat(64),
+    manifest_sha256: options.releaseManifestSha256 ?? "a".repeat(64),
     package_sha256: "b".repeat(64),
     package_size: 1234,
     github_repository: "org/repo",
@@ -131,6 +133,10 @@ async function makeUpdateCheckEnv(options: {
 async function updateCheck(options: {
   licensedChannel: "stable" | "beta";
   requestedChannel: "stable" | "beta";
+  failedVersions?: string[];
+  failedReleases?: Array<{ version: string; manifest_sha256: string }>;
+  releaseVersion?: string;
+  releaseManifestSha256?: string;
 }): Promise<{ response: Response; state: FakeDbState }> {
   const token = createDeviceToken();
   const { env, state } = await makeUpdateCheckEnv({
@@ -138,6 +144,8 @@ async function updateCheck(options: {
     releaseChannel: options.requestedChannel,
     tokenId: token.tokenId,
     tokenSecret: token.tokenSecret,
+    releaseVersion: options.releaseVersion,
+    releaseManifestSha256: options.releaseManifestSha256,
   });
   const response = await createApp().request(
     "/v1/updates/check",
@@ -155,7 +163,8 @@ async function updateCheck(options: {
         architecture: "x86_64",
         product: "wechat-cli-web",
         device_id: "dev_test_1",
-        failed_versions: [],
+        failed_versions: options.failedVersions ?? [],
+        failed_releases: options.failedReleases ?? [],
       }),
     },
     env,
@@ -201,6 +210,74 @@ describe("update channel authorization", () => {
     expect(response.status).toBe(200);
     expect(state.prepared.some((sql) => sql.includes("FROM releases"))).toBe(true);
     expect(state.runs.some((sql) => sql.includes("INSERT INTO download_tickets"))).toBe(true);
+  });
+});
+
+describe("exact failed release suppression", () => {
+  it("suppresses the exact failed version and manifest pair", async () => {
+    const manifestSha = "a".repeat(64);
+    const { response, state } = await updateCheck({
+      licensedChannel: "stable",
+      requestedChannel: "stable",
+      failedReleases: [{ version: "0.6.0", manifest_sha256: manifestSha }],
+      releaseVersion: "0.6.0",
+      releaseManifestSha256: manifestSha,
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({ update_available: false });
+    expect(state.runs.some((sql) => sql.includes("INSERT INTO download_tickets"))).toBe(false);
+  });
+
+  it("does not suppress the same version when the manifest differs", async () => {
+    const { response, state } = await updateCheck({
+      licensedChannel: "stable",
+      requestedChannel: "stable",
+      failedReleases: [{ version: "0.6.0", manifest_sha256: "c".repeat(64) }],
+      releaseVersion: "0.6.0",
+      releaseManifestSha256: "a".repeat(64),
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({ update_available: true });
+    expect(state.runs.some((sql) => sql.includes("INSERT INTO download_tickets"))).toBe(true);
+  });
+
+  it("keeps legacy failed_versions suppression for old clients", async () => {
+    const { response, state } = await updateCheck({
+      licensedChannel: "stable",
+      requestedChannel: "stable",
+      failedVersions: ["0.6.0"],
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({ update_available: false });
+    expect(state.runs.some((sql) => sql.includes("INSERT INTO download_tickets"))).toBe(false);
+  });
+
+  it("rejects malformed failed release hashes", async () => {
+    const { response } = await updateCheck({
+      licensedChannel: "stable",
+      requestedChannel: "stable",
+      failedReleases: [{ version: "0.6.0", manifest_sha256: "bad" }],
+    });
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({ error: { code: "INVALID_REQUEST" } });
+  });
+
+  it("rejects more than 32 exact failed releases", async () => {
+    const { response } = await updateCheck({
+      licensedChannel: "stable",
+      requestedChannel: "stable",
+      failedReleases: Array.from({ length: 33 }, (_, index) => ({
+        version: `0.6.${index}`,
+        manifest_sha256: "d".repeat(64),
+      })),
+    });
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({ error: { code: "INVALID_REQUEST" } });
   });
 });
 
