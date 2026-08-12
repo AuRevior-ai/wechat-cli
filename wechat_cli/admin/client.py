@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import tempfile
@@ -25,6 +26,16 @@ class AdminJsonTransport(Protocol):
         headers: Mapping[str, str],
         payload: Mapping[str, Any] | None,
     ) -> tuple[int, Mapping[str, Any]]: ...
+
+
+class AdminUploadTransport(Protocol):
+    def __call__(
+        self,
+        path: str,
+        headers: Mapping[str, str],
+        source: str | Path,
+        metadata_headers: Mapping[str, str],
+    ) -> Mapping[str, Any]: ...
 
 
 class AdminDownloadTransport(Protocol):
@@ -138,6 +149,92 @@ class UrllibAdminJsonTransport:
         return status, value
 
 
+class UrllibAdminUploadTransport:
+    def __init__(
+        self,
+        base_url: str,
+        *,
+        timeout_seconds: float = 120.0,
+        allow_insecure_loopback: bool = False,
+    ) -> None:
+        self._json_transport = UrllibAdminJsonTransport(
+            base_url,
+            timeout_seconds=timeout_seconds,
+            allow_insecure_loopback=allow_insecure_loopback,
+        )
+        self.base_url = self._json_transport.base_url
+        self.timeout_seconds = timeout_seconds
+
+    def __call__(
+        self,
+        path: str,
+        headers: Mapping[str, str],
+        source: str | Path,
+        metadata_headers: Mapping[str, str],
+    ) -> Mapping[str, Any]:
+        if not path.startswith("/") or path.startswith("//"):
+            raise ValueError("administrator upload path must stay under the configured origin")
+        package = Path(source)
+        if package.is_symlink() or not package.is_file():
+            raise ValueError("release package must be a regular file")
+        body = package.read_bytes()
+        request_headers = {**headers, **metadata_headers}
+        request_headers.setdefault("Accept", "application/json")
+        request_headers.setdefault("Content-Type", "application/zip")
+        request_headers.setdefault("Content-Length", str(len(body)))
+        request_headers.setdefault("User-Agent", _ADMIN_USER_AGENT)
+        request = Request(
+            self.base_url + path,
+            data=body,
+            headers=request_headers,
+            method="PUT",
+        )
+        try:
+            response = urlopen(request, timeout=self.timeout_seconds)
+        except HTTPError as exc:
+            response = exc
+        except URLError as exc:
+            raise AdminApiError(
+                "SERVICE_UNAVAILABLE",
+                str(exc.reason) or "administrator API unavailable",
+                retryable=True,
+            ) from exc
+        with response:
+            status = int(response.status)
+            raw = response.read(1024 * 1024 + 1)
+        try:
+            value = json.loads(raw.decode("utf-8")) if raw else {}
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise AdminApiError(
+                "INVALID_RESPONSE",
+                "administrator API response must be JSON",
+                retryable=True,
+                status=status,
+            ) from exc
+        if not isinstance(value, Mapping):
+            raise AdminApiError(
+                "INVALID_RESPONSE",
+                "administrator API response must be an object",
+                retryable=True,
+                status=status,
+            )
+        if 200 <= status < 300:
+            return value
+        error = value.get("error")
+        data = error if isinstance(error, Mapping) else {}
+        raise AdminApiError(
+            str(data.get("code") or "ADMIN_API_ERROR"),
+            str(data.get("message") or f"administrator API returned HTTP {status}"),
+            retryable=data.get("retryable") is True,
+            request_id=(
+                str(data.get("request_id"))
+                if data.get("request_id") is not None
+                else None
+            ),
+            status=status,
+        )
+
+
 class UrllibAdminDownloadTransport:
     def __init__(
         self,
@@ -228,6 +325,7 @@ class AdminApiClient:
     transport: AdminJsonTransport = field(repr=False)
     admin_token: str = field(repr=False)
     download_transport: AdminDownloadTransport | None = field(default=None, repr=False)
+    upload_transport: AdminUploadTransport | None = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
         if not isinstance(self.admin_token, str) or not self.admin_token.startswith(
@@ -399,6 +497,45 @@ class AdminApiClient:
         if not isinstance(releases, list):
             raise AdminApiError("INVALID_RESPONSE", "release list response is invalid")
         return [item for item in releases if isinstance(item, Mapping)]
+
+    def upload_release_package(
+        self,
+        release_id: str,
+        *,
+        channel: str,
+        package_path: str | Path,
+        package_sha256: str,
+        operation_nonce: str,
+    ) -> Mapping[str, Any]:
+        if self.upload_transport is None:
+            raise RuntimeError("release package upload transport is not configured")
+        if channel not in {"stable", "beta"}:
+            raise ValueError("channel must be stable or beta")
+        if not release_id or len(release_id) > 128:
+            raise ValueError("release_id is invalid")
+        digest = package_sha256.lower()
+        if len(digest) != 64:
+            raise ValueError("package_sha256 must contain 64 hexadecimal characters")
+        int(digest, 16)
+        if not operation_nonce or len(operation_nonce) < 8:
+            raise ValueError("operation_nonce is invalid")
+        package = Path(package_path)
+        if package.is_symlink() or not package.is_file():
+            raise ValueError("release package must be a regular file")
+        actual_digest = hashlib.sha256(package.read_bytes()).hexdigest()
+        if actual_digest != digest:
+            raise ValueError("release package bytes no longer match package_sha256")
+        return self.upload_transport(
+            f"/v1/admin/releases/{release_id}/package",
+            self._headers,
+            package,
+            {
+                "X-Release-Channel": channel,
+                "X-Package-Sha256": digest,
+                "X-Operation-Nonce": operation_nonce,
+                "Content-Length": str(package.stat().st_size),
+            },
+        )
 
     def register_release(
         self,

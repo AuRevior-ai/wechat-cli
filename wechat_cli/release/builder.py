@@ -94,6 +94,8 @@ class SignedRelease:
         github_asset_name: str,
         operation_nonce: str,
         rollout_percentage: int = 100,
+        distribution_backend: str = "github",
+        distribution_object_key: str | None = None,
     ) -> dict[str, Any]:
         """Return the Worker admin registration body without any private key."""
 
@@ -112,6 +114,8 @@ class SignedRelease:
             "github_release_id": github_release_id,
             "github_asset_id": github_asset_id,
             "github_asset_name": github_asset_name,
+            "distribution_backend": distribution_backend,
+            "distribution_object_key": distribution_object_key,
             "rollout_percentage": rollout_percentage,
             "operation_nonce": operation_nonce,
         }

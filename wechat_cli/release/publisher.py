@@ -13,6 +13,16 @@ from .github import GitHubAsset, GitHubReleaseClient
 
 
 class ReleaseAdminClient(Protocol):
+    def upload_release_package(
+        self,
+        release_id: str,
+        *,
+        channel: str,
+        package_path: str | Path,
+        package_sha256: str,
+        operation_nonce: str,
+    ): ...
+
     def register_release(self, payload): ...
 
     def update_release(
@@ -65,14 +75,15 @@ def publish_signed_release(
     release_name: str,
     release_body: str,
     operation_nonce: str,
+    upload_operation_nonce: str,
     enable: bool = False,
     enable_operation_nonce: str | None = None,
     rollout_percentage: int = 100,
 ) -> PublishedRelease:
-    """Create a draft release, upload assets, and register it with the Worker.
+    """Prepare R2 transport, publish immutable GitHub provenance, then register disabled.
 
-    The Worker record is created disabled and paused. Enabling is a distinct,
-    explicit step so an upload can be inspected before clients are eligible.
+    Enabling is deliberately not part of this orchestration. It remains a separate
+    independently authorized operation after registration and read-only reconcile.
     """
 
     if not isinstance(signed, SignedRelease):
@@ -83,15 +94,16 @@ def publish_signed_release(
         raise ValueError("operation_nonce is invalid")
     if not 0 <= rollout_percentage <= 100:
         raise ValueError("rollout_percentage must be between 0 and 100")
-    if enable and (
-        not isinstance(enable_operation_nonce, str)
-        or len(enable_operation_nonce) < 8
-    ):
-        raise ValueError("enable_operation_nonce is required when enabling")
+    if not isinstance(upload_operation_nonce, str) or len(upload_operation_nonce) < 8:
+        raise ValueError("upload_operation_nonce is invalid")
+    if enable:
+        raise ValueError("release enablement is a separate independently authorized operation")
+    if enable_operation_nonce is not None:
+        raise ValueError("enable_operation_nonce is not accepted during publication")
 
     release_id: int | None = None
     uploaded: list[GitHubAsset] = []
-    worker_registered = False
+    github_published = False
     try:
         release = github_client.create_release(
             tag_name=f"v{signed.version}",
@@ -128,6 +140,34 @@ def publish_signed_release(
             )
             uploaded.append(signature_asset)
 
+        readiness = admin_client.upload_release_package(
+            signed.release_id,
+            channel=signed.channel,
+            package_path=signed.package_path,
+            package_sha256=signed.package_sha256,
+            operation_nonce=upload_operation_nonce,
+        )
+        if readiness.get("ready") is not True:
+            raise RuntimeError("R2 release package readiness was not confirmed")
+        if readiness.get("distribution_backend") != "r2":
+            raise RuntimeError("R2 release package returned another distribution backend")
+        object_key = readiness.get("distribution_object_key")
+        if not isinstance(object_key, str) or not object_key:
+            raise RuntimeError("R2 release package object key is missing")
+        if readiness.get("package_sha256") != signed.package_sha256:
+            raise RuntimeError("R2 release package hash drifted")
+        if readiness.get("package_size") != signed.package_size:
+            raise RuntimeError("R2 release package size drifted")
+
+        published = github_client.publish_release(
+            release.release_id,
+            prerelease=signed.channel == "beta",
+            make_latest=False,
+        )
+        if published.draft:
+            raise RuntimeError("GitHub provenance release remained a draft")
+        github_published = True
+
         payload = signed.registration_payload(
             github_repository=repository,
             github_release_id=str(release.release_id),
@@ -135,21 +175,12 @@ def publish_signed_release(
             github_asset_name=package_asset.name,
             operation_nonce=operation_nonce,
             rollout_percentage=rollout_percentage,
+            distribution_backend="r2",
+            distribution_object_key=object_key,
         )
         registered = admin_client.register_release(payload)
-        worker_registered = True
         enabled = bool(registered.get("enabled", False))
         paused = bool(registered.get("paused", True))
-        if enable:
-            updated = admin_client.update_release(
-                signed.release_id,
-                enabled=True,
-                paused=False,
-                rollout_percentage=rollout_percentage,
-                operation_nonce=enable_operation_nonce,
-            )
-            enabled = bool(updated.get("enabled", True))
-            paused = bool(updated.get("paused", False))
         return PublishedRelease(
             release_id=signed.release_id,
             version=signed.version,
@@ -161,10 +192,10 @@ def publish_signed_release(
             paused=paused,
         )
     except Exception:
-        # Before Worker registration, deleting the draft avoids orphaned assets.
-        # After registration, preserve the private draft and registered metadata:
-        # an enable failure must leave a recoverable disabled/paused release.
-        if not worker_registered:
+        # Before immutable GitHub publication, the Draft and its assets are disposable.
+        # After publication, preserve immutable provenance and the already-readied R2
+        # object even if Worker registration fails; no client can select it without a row.
+        if not github_published:
             _best_effort_github_rollback(
                 github_client,
                 release_id,

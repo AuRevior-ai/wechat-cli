@@ -113,6 +113,7 @@ async function makeUpdateCheckEnv(options: {
     env: {
       DB: db,
       DIAGNOSTICS: {} as R2Bucket,
+      RELEASES: {} as R2Bucket,
       ENVIRONMENT: "local",
       LEASE_SIGNING_KEY_ID: "lease-test",
       CONTACT_ENCRYPTION_KEY_VERSION: "1",

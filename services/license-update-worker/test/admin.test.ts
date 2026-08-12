@@ -1,7 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import * as adminModule from "../src/admin";
+import { hmacSha256Hex, sha256Hex } from "../src/crypto";
 import { ApiError } from "../src/http";
+import { createApp } from "../src/index";
 import type { Env } from "../src/types";
 
 interface QueryState {
@@ -42,6 +44,90 @@ function releaseLookupEnv(existingManifestSha256: string | null): {
   return { env: { DB: db } as Env, state };
 }
 
+async function adminRouteEnv(options?: {
+  releaseRow?: Record<string, unknown> | null;
+}): Promise<{
+  env: Env;
+  token: string;
+  sql: string[];
+  runs: string[];
+  r2Put: ReturnType<typeof vi.fn>;
+}> {
+  const adminPepper = "admin-pepper-route-test";
+  const tokenId = "adm_abcdefghijkl";
+  const tokenSecret = "s".repeat(32);
+  const token = `wcadmin_${tokenId}.${tokenSecret}`;
+  const tokenDigest = await hmacSha256Hex(adminPepper, tokenSecret);
+  const sql: string[] = [];
+  const runs: string[] = [];
+  const db = {
+    prepare(statement: string) {
+      sql.push(statement);
+      let bindings: unknown[] = [];
+      return {
+        bind(...values: unknown[]) {
+          bindings = values;
+          return this;
+        },
+        async first<T>() {
+          if (statement.includes("FROM admin_tokens")) {
+            return {
+              id: "admin_test",
+              token_digest: tokenDigest,
+              scopes_json: JSON.stringify(["releases:upload", "releases:write"]),
+              status: "active",
+            } as T;
+          }
+          if (statement.includes("FROM releases") && options?.releaseRow !== undefined) {
+            return (options.releaseRow ?? null) as T;
+          }
+          throw new Error(`unexpected first(): ${statement} ${JSON.stringify(bindings)}`);
+        },
+        async run() {
+          runs.push(statement);
+          return { success: true, meta: { changes: 1 } };
+        },
+      };
+    },
+  } as unknown as D1Database;
+
+  let stored: R2Object | null = null;
+  const r2Put = vi.fn(async (key: string, value: ArrayBuffer, putOptions?: R2PutOptions) => {
+    stored = {
+      key,
+      version: "v1",
+      size: value.byteLength,
+      etag: "etag",
+      httpEtag: '"etag"',
+      checksums: {} as R2Checksums,
+      uploaded: new Date("2026-08-12T00:00:00Z"),
+      customMetadata: putOptions?.customMetadata,
+      storageClass: "Standard",
+      writeHttpMetadata() {},
+    } as R2Object;
+    return stored;
+  });
+  const releases = {
+    async head() {
+      return stored;
+    },
+    put: r2Put,
+  } as unknown as R2Bucket;
+
+  return {
+    env: {
+      DB: db,
+      RELEASES: releases,
+      ENVIRONMENT: "local",
+      ADMIN_TOKEN_PEPPER: adminPepper,
+    } as Env,
+    token,
+    sql,
+    runs,
+    r2Put,
+  };
+}
+
 function immutabilityAssertion(): (
   env: Env,
   channel: "stable" | "beta",
@@ -61,6 +147,82 @@ function immutabilityAssertion(): (
   expect(candidate).toBeTypeOf("function");
   return candidate as NonNullable<typeof candidate>;
 }
+
+describe("R2 release administration", () => {
+  it("uploads exact package bytes under a server-generated R2 key", async () => {
+    const { env, token, r2Put } = await adminRouteEnv();
+    const bytes = Uint8Array.from([1, 2, 3]);
+    const packageSha256 = await sha256Hex(bytes);
+    const response = await createApp().request(
+      "/v1/admin/releases/rel_051/package",
+      {
+        method: "PUT",
+        headers: {
+          Authorization: `Admin ${token}`,
+          "Content-Type": "application/zip",
+          "Content-Length": "3",
+          "X-Release-Channel": "stable",
+          "X-Package-Sha256": packageSha256,
+          "X-Operation-Nonce": "nonce_upload_01",
+        },
+        body: bytes,
+      },
+      env,
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      release_id: "rel_051",
+      distribution_backend: "r2",
+      distribution_object_key: `releases/stable/rel_051/${packageSha256}.zip`,
+      package_sha256: packageSha256,
+      package_size: 3,
+      ready: true,
+    });
+    expect(r2Put).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses R2 release registration until the exact object is ready", async () => {
+    const { env, token, sql } = await adminRouteEnv();
+    const manifest = "{}";
+    const manifestSha256 = await sha256Hex(manifest);
+    const packageSha256 = "a".repeat(64);
+    const response = await createApp().request(
+      "/v1/admin/releases",
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Admin ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          release_id: "rel_051",
+          version: "0.5.1",
+          channel: "stable",
+          manifest_content_base64: btoa(manifest),
+          manifest_signature_base64: btoa("s".repeat(64)),
+          manifest_sha256: manifestSha256,
+          package_sha256: packageSha256,
+          package_size: 3,
+          github_repository: "org/repo",
+          github_release_id: "123",
+          github_asset_id: "456",
+          github_asset_name: "package.zip",
+          distribution_backend: "r2",
+          distribution_object_key: `releases/stable/rel_051/${packageSha256}.zip`,
+          operation_nonce: "nonce_register_01",
+        }),
+      },
+      env,
+    );
+
+    expect(response.status).toBe(500);
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: "RELEASE_STATE_INVALID" },
+    });
+    expect(sql.some((statement) => statement.includes("INSERT INTO releases"))).toBe(false);
+  });
+});
 
 describe("release version immutability", () => {
   it("rejects the same channel and version with a different manifest", async () => {

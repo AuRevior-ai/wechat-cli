@@ -16,6 +16,7 @@ from ..admin.client import (
     AdminApiClient,
     UrllibAdminDownloadTransport,
     UrllibAdminJsonTransport,
+    UrllibAdminUploadTransport,
 )
 from ..admin.config import AdminConfigStorage, default_admin_config_path
 from ..windows.dpapi import WindowsDpapiProtector
@@ -64,6 +65,10 @@ def _admin_client(admin_config_path: str | None) -> AdminApiClient:
         ),
         admin_token=config.admin_token,
         download_transport=UrllibAdminDownloadTransport(
+            config.api_base_url,
+            allow_insecure_loopback=config.allow_insecure_loopback,
+        ),
+        upload_transport=UrllibAdminUploadTransport(
             config.api_base_url,
             allow_insecure_loopback=config.allow_insecure_loopback,
         ),
@@ -316,11 +321,6 @@ def prepare_command(
 @common_options
 @click.option("--name", "release_name")
 @click.option("--body", "release_body", default="")
-@click.option(
-    "--enable",
-    is_flag=True,
-    help="注册后立即启用并解除暂停；默认仅注册为禁用草稿。",
-)
 @click.pass_context
 def publish_command(
     ctx: click.Context,
@@ -335,7 +335,6 @@ def publish_command(
     rollout_percentage: int,
     release_name: str | None,
     release_body: str,
-    enable: bool,
 ) -> None:
     config = _load_config(ctx.find_root().obj.get("config_path"))
     signed = build_signed_release(
@@ -362,8 +361,7 @@ def publish_command(
         release_name=release_name or f"WeChat CLI Web {signed.version}",
         release_body=release_body or summary,
         operation_nonce=_nonce(),
-        enable=enable,
-        enable_operation_nonce=_nonce() if enable else None,
+        upload_operation_nonce=_nonce(),
         rollout_percentage=rollout_percentage,
     )
     _emit(ctx, asdict(published))

@@ -5,6 +5,7 @@ export interface WorkerVariables {
 export interface Env {
   DB: D1Database;
   DIAGNOSTICS: R2Bucket;
+  RELEASES: R2Bucket;
 
   ENVIRONMENT: string;
   LEASE_SIGNING_KEY_ID: string;
@@ -72,6 +73,8 @@ export interface ReleaseRow {
   github_release_id: string;
   github_asset_id: string;
   github_asset_name: string;
+  distribution_backend: "github" | "r2";
+  distribution_object_key: string | null;
   rollout_percentage: number;
   rollout_seed: string;
   paused: number;

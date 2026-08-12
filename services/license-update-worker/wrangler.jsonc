@@ -29,6 +29,10 @@
     {
       "binding": "DIAGNOSTICS",
       "bucket_name": "wechat-cli-diagnostics-local"
+    },
+    {
+      "binding": "RELEASES",
+      "bucket_name": "wechat-cli-releases-local"
     }
   ],
   "env": {
@@ -52,6 +56,10 @@
         {
           "binding": "DIAGNOSTICS",
           "bucket_name": "wechat-cli-diagnostics-staging"
+        },
+        {
+          "binding": "RELEASES",
+          "bucket_name": "wechat-cli-releases-staging"
         }
       ]
     },
@@ -75,6 +83,10 @@
         {
           "binding": "DIAGNOSTICS",
           "bucket_name": "wechat-cli-diagnostics-production"
+        },
+        {
+          "binding": "RELEASES",
+          "bucket_name": "wechat-cli-releases-production"
         }
       ]
     }

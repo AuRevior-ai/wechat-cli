@@ -1,3 +1,4 @@
+import hashlib
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -22,6 +23,21 @@ class FakeJsonTransport:
         if isinstance(response, Exception):
             raise response
         return response
+
+
+class FakeUploadTransport:
+    def __init__(self):
+        self.calls = []
+
+    def __call__(self, path, headers, source, metadata_headers):
+        source = Path(source)
+        self.calls.append((path, dict(headers), source, dict(metadata_headers)))
+        return {
+            "release_id": source.stem,
+            "distribution_backend": "r2",
+            "distribution_object_key": "releases/stable/rel_01/object.zip",
+            "ready": True,
+        }
 
 
 class FakeDownloadTransport:
@@ -146,6 +162,36 @@ class AdminApiClientTests(unittest.TestCase):
             ],
             [(method, path) for method, path, _headers, _payload in transport.calls],
         )
+
+    def test_release_package_upload_uses_binary_transport_and_exact_metadata(self):
+        transport = FakeJsonTransport([])
+        upload = FakeUploadTransport()
+        client = AdminApiClient(
+            transport,
+            admin_token="wcadmin_adm_id.secret",
+            upload_transport=upload,
+        )
+        with TemporaryDirectory() as tmp:
+            package = Path(tmp) / "rel_01.zip"
+            package.write_bytes(b"signed package bytes")
+            digest = hashlib.sha256(package.read_bytes()).hexdigest()
+            result = client.upload_release_package(
+                "rel_01",
+                channel="stable",
+                package_path=package,
+                package_sha256=digest,
+                operation_nonce="nonce_upload_01",
+            )
+
+        path, headers, source, metadata = upload.calls[0]
+        self.assertEqual("/v1/admin/releases/rel_01/package", path)
+        self.assertEqual("Admin wcadmin_adm_id.secret", headers["Authorization"])
+        self.assertEqual(package, source)
+        self.assertEqual("stable", metadata["X-Release-Channel"])
+        self.assertEqual(digest, metadata["X-Package-Sha256"])
+        self.assertEqual("nonce_upload_01", metadata["X-Operation-Nonce"])
+        self.assertEqual(str(len(b"signed package bytes")), metadata["Content-Length"])
+        self.assertTrue(result["ready"])
 
     def test_release_and_diagnostic_operations(self):
         transport = FakeJsonTransport(

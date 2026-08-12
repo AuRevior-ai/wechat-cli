@@ -14,6 +14,10 @@ import {
   sha256Hex,
 } from "./crypto";
 import {
+  assertR2ReleaseReady,
+  prepareR2ReleasePackage,
+} from "./distribution";
+import {
   ApiError,
   optionalString,
   readJsonObject,
@@ -755,6 +759,84 @@ export function registerAdminRoutes(app: WorkerApp): void {
     return c.json(response.body, response.status as 200);
   });
 
+  app.put("/v1/admin/releases/:releaseId/package", async (c) => {
+    const admin = await authenticateAdmin(c, "releases:upload");
+    const releaseId = c.req.param("releaseId");
+    if (!/^[A-Za-z0-9._-]{1,128}$/u.test(releaseId)) {
+      throw new ApiError("INVALID_REQUEST", "发布标识无效。", { status: 400 });
+    }
+    const channel = c.req.header("X-Release-Channel");
+    if (channel !== "stable" && channel !== "beta") {
+      throw new ApiError("INVALID_REQUEST", "发布通道无效。", { status: 400 });
+    }
+    const packageSha256 = c.req.header("X-Package-Sha256")?.toLowerCase();
+    if (packageSha256 === undefined || !/^[0-9a-f]{64}$/u.test(packageSha256)) {
+      throw new ApiError("INVALID_REQUEST", "发布包摘要无效。", { status: 400 });
+    }
+    const nonce = c.req.header("X-Operation-Nonce");
+    if (nonce === undefined || nonce.length < 8 || nonce.length > 256) {
+      throw new ApiError("INVALID_IDEMPOTENCY_KEY", "幂等操作编号格式无效。", {
+        status: 400,
+      });
+    }
+    const contentLength = Number(c.req.header("Content-Length") ?? "");
+    const maximumBytes = 64 * 1024 * 1024;
+    if (
+      !Number.isSafeInteger(contentLength) ||
+      contentLength <= 0 ||
+      contentLength > maximumBytes
+    ) {
+      throw new ApiError("INVALID_REQUEST", "发布包大小无效或超过当前上传上限。", {
+        status: 400,
+      });
+    }
+    const response = await runIdempotent(c.env, {
+      scope: `admin-release-upload:${admin.id}`,
+      key: nonce,
+      request: { releaseId, channel, packageSha256, contentLength },
+      operation: async () => {
+        const body = await c.req.raw.arrayBuffer();
+        if (body.byteLength !== contentLength) {
+          throw new ApiError("INVALID_REQUEST", "发布包实际大小与 Content-Length 不一致。", {
+            status: 400,
+          });
+        }
+        const prepared = await prepareR2ReleasePackage(c.env, {
+          channel,
+          releaseId,
+          packageSha256,
+          bytes: body,
+        });
+        await writeAudit(c.env, {
+          actorType: "admin",
+          actorId: admin.id,
+          action: "release.package_ready",
+          targetType: "release",
+          targetId: releaseId,
+          result: "success",
+          requestId: c.get("requestId"),
+          metadata: {
+            channel,
+            distribution_backend: "r2",
+            package_sha256: packageSha256,
+            package_size: contentLength,
+          },
+        });
+        return {
+          body: {
+            release_id: releaseId,
+            distribution_backend: "r2",
+            distribution_object_key: prepared.distribution_object_key,
+            package_sha256: prepared.package_sha256,
+            package_size: prepared.package_size,
+            ready: prepared.ready,
+          },
+        };
+      },
+    });
+    return c.json(response.body, response.status as 200);
+  });
+
   app.post("/v1/admin/releases", async (c) => {
     const admin = await authenticateAdmin(c, "releases:write");
     const request = await readJsonObject(c.req.raw, { maximumBytes: 2 * 1024 * 1024 });
@@ -808,6 +890,31 @@ export function registerAdminRoutes(app: WorkerApp): void {
       pattern: /^\d+$/u,
     });
     const assetName = requiredString(request, "github_asset_name", { maximum: 256 });
+    const distributionBackend =
+      request.distribution_backend === undefined
+        ? "github"
+        : requiredString(request, "distribution_backend", { maximum: 16 });
+    if (distributionBackend !== "github" && distributionBackend !== "r2") {
+      throw new ApiError("INVALID_REQUEST", "发布分发后端无效。", { status: 400 });
+    }
+    const distributionObjectKey =
+      distributionBackend === "r2"
+        ? requiredString(request, "distribution_object_key", { maximum: 512 })
+        : null;
+    if (distributionBackend === "r2") {
+      await assertR2ReleaseReady(
+        c.env,
+        distributionObjectKey as string,
+        packageSha256,
+        packageSize,
+      );
+    }
+    if (distributionBackend === "github" && c.env.ENVIRONMENT === "production") {
+      throw new ApiError("RELEASE_STATE_INVALID", "生产环境禁止 GitHub runtime 分发后端。", {
+        status: 409,
+        retryable: false,
+      });
+    }
     const rolloutPercentage =
       request.rollout_percentage === undefined
         ? 100
@@ -828,6 +935,8 @@ export function registerAdminRoutes(app: WorkerApp): void {
         githubReleaseId,
         githubAssetId,
         assetName,
+        distributionBackend,
+        distributionObjectKey,
         rolloutPercentage,
       },
       operation: async () => {
@@ -843,9 +952,10 @@ export function registerAdminRoutes(app: WorkerApp): void {
              id, version, channel, manifest_content, manifest_signature,
              manifest_sha256, package_sha256, package_size,
              github_repository, github_release_id, github_asset_id,
-             github_asset_name, rollout_percentage, rollout_seed,
+             github_asset_name, distribution_backend, distribution_object_key,
+             rollout_percentage, rollout_seed,
              paused, enabled, published_at, created_at
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?)`,
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?)`,
         )
           .bind(
             releaseId,
@@ -860,6 +970,8 @@ export function registerAdminRoutes(app: WorkerApp): void {
             githubReleaseId,
             githubAssetId,
             assetName,
+            distributionBackend,
+            distributionObjectKey,
             rolloutPercentage,
             rolloutSeed,
             now,
@@ -874,7 +986,13 @@ export function registerAdminRoutes(app: WorkerApp): void {
           targetId: releaseId,
           result: "success",
           requestId: c.get("requestId"),
-          metadata: { version, channel, enabled: false, paused: true },
+          metadata: {
+            version,
+            channel,
+            distribution_backend: distributionBackend,
+            enabled: false,
+            paused: true,
+          },
         });
         return {
           status: 201,
@@ -884,6 +1002,8 @@ export function registerAdminRoutes(app: WorkerApp): void {
             channel,
             enabled: false,
             paused: true,
+            distribution_backend: distributionBackend,
+            distribution_object_key: distributionObjectKey,
             rollout_percentage: rolloutPercentage,
             created_at: now,
           },
@@ -898,7 +1018,8 @@ export function registerAdminRoutes(app: WorkerApp): void {
     const rows = await c.env.DB.prepare(
       `SELECT id, version, channel, manifest_sha256, package_sha256,
               package_size, github_repository, github_release_id,
-              github_asset_id, github_asset_name, rollout_percentage,
+              github_asset_id, github_asset_name, distribution_backend,
+              distribution_object_key, rollout_percentage,
               paused, enabled, published_at, created_at
          FROM releases ORDER BY published_at DESC LIMIT 200`,
     ).all<Record<string, unknown>>();
@@ -914,6 +1035,11 @@ export function registerAdminRoutes(app: WorkerApp): void {
         github_release_id: String(row.github_release_id),
         github_asset_id: String(row.github_asset_id),
         github_asset_name: String(row.github_asset_name),
+        distribution_backend: String(row.distribution_backend ?? "github"),
+        distribution_object_key:
+          row.distribution_object_key === null || row.distribution_object_key === undefined
+            ? null
+            : String(row.distribution_object_key),
         rollout_percentage: Number(row.rollout_percentage),
         paused: Number(row.paused) === 1,
         enabled: Number(row.enabled) === 1,
@@ -942,6 +1068,40 @@ export function registerAdminRoutes(app: WorkerApp): void {
       key: nonce,
       request: { releaseId, enabled, paused, rolloutPercentage },
       operation: async () => {
+        if (enabled === true) {
+          const release = await c.env.DB.prepare(
+            `SELECT distribution_backend, distribution_object_key,
+                    package_sha256, package_size
+               FROM releases
+              WHERE id = ?
+              LIMIT 1`,
+          )
+            .bind(releaseId)
+            .first<Record<string, unknown>>();
+          if (release === null) {
+            throw new ApiError("RELEASE_NOT_FOUND", "发布不存在。", { status: 404 });
+          }
+          const backend = String(release.distribution_backend ?? "github");
+          if (backend === "r2") {
+            if (release.distribution_object_key === null) {
+              throw new ApiError("RELEASE_STATE_INVALID", "R2 发布对象标识缺失。", {
+                status: 409,
+                retryable: false,
+              });
+            }
+            await assertR2ReleaseReady(
+              c.env,
+              String(release.distribution_object_key),
+              String(release.package_sha256),
+              Number(release.package_size),
+            );
+          } else if (backend === "github" && c.env.ENVIRONMENT === "production") {
+            throw new ApiError("RELEASE_STATE_INVALID", "生产环境禁止 GitHub runtime 分发后端。", {
+              status: 409,
+              retryable: false,
+            });
+          }
+        }
         const updated = await c.env.DB.prepare(
           `UPDATE releases
               SET enabled = COALESCE(?, enabled),
