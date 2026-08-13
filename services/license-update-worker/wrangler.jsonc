@@ -1,6 +1,6 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "wechat-cli-license-update",
+  "name": "wechat-cli-license-update-local",
   "main": "src/index.ts",
   "compatibility_date": "2026-08-04",
   "compatibility_flags": ["nodejs_compat"],
@@ -93,6 +93,8 @@
     },
     "production": {
       "name": "wechat-cli-license-update",
+      "workers_dev": false,
+      "routes": [],
       "vars": {
         "ENVIRONMENT": "production",
         "LEASE_SIGNING_KEY_ID": "lease-key-production-01",
