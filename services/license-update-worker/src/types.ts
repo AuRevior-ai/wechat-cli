@@ -15,6 +15,14 @@ export interface Env {
   LICENSE_KEY_PEPPER: string;
   DEVICE_TOKEN_PEPPER: string;
   ADMIN_TOKEN_PEPPER: string;
+  ADMIN_SESSION_PEPPER_V1?: string;
+  ALLOW_LEGACY_ADMIN_AUTH?: string;
+  ADMIN_BREAK_GLASS_POLICY?: string;
+  ACCESS_JWT_ISSUER?: string;
+  ACCESS_JWKS_URL?: string;
+  ACCESS_AUDIENCES?: string;
+  ACCESS_IDENTITY_CLAIM?: string;
+  ACCESS_ADMIN_ORIGIN?: string;
   CONTACT_LOOKUP_PEPPER: string;
   CONTACT_ENCRYPTION_KEY_V1: string;
   LEASE_SIGNING_PRIVATE_KEY: string;
@@ -91,6 +99,8 @@ export interface AuthenticatedDevice {
 export interface AuthenticatedAdmin {
   id: string;
   scopes: Set<string>;
+  authMode: "session" | "legacy_local" | "legacy_staging" | "legacy_break_glass";
+  authenticatedAt: string;
 }
 
 export interface ApiErrorBody {

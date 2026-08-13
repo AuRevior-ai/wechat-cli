@@ -58,12 +58,16 @@ def _admin_client(admin_config_path: str | None) -> AdminApiClient:
         raise click.ClickException(
             "尚未配置管理员 API。请先运行 wechat-cli-admin config set。"
         )
+    try:
+        credential = config.api_credential()
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
     return AdminApiClient(
         UrllibAdminJsonTransport(
             config.api_base_url,
             allow_insecure_loopback=config.allow_insecure_loopback,
         ),
-        admin_token=config.admin_token,
+        admin_token=credential,
         download_transport=UrllibAdminDownloadTransport(
             config.api_base_url,
             allow_insecure_loopback=config.allow_insecure_loopback,

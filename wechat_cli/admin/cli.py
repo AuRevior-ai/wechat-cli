@@ -19,6 +19,7 @@ from .client import (
 )
 from .config import AdminConfig, AdminConfigStorage, default_admin_config_path
 from .csv_export import export_license_csv
+from .session import login_and_store_admin_session
 
 
 def _nonce() -> str:
@@ -36,12 +37,16 @@ def _load_client(config_path: str | None) -> AdminApiClient:
         raise click.ClickException(
             "尚未配置管理员 API。请先运行 wechat-cli-admin config set。"
         )
+    try:
+        credential = config.api_credential()
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
     return AdminApiClient(
         UrllibAdminJsonTransport(
             config.api_base_url,
             allow_insecure_loopback=config.allow_insecure_loopback,
         ),
-        admin_token=config.admin_token,
+        admin_token=credential,
         download_transport=UrllibAdminDownloadTransport(
             config.api_base_url,
             allow_insecure_loopback=config.allow_insecure_loopback,
@@ -149,10 +154,11 @@ def config_set(
     api_url: str,
     allow_insecure_loopback: bool,
 ) -> None:
-    token = click.prompt("管理员令牌", hide_input=True).strip()
+    token = click.prompt("本地管理员令牌", hide_input=True).strip()
     config = AdminConfig(
         api_base_url=api_url,
-        admin_token=token,
+        environment="local",
+        legacy_admin_token=token,
         allow_insecure_loopback=allow_insecure_loopback,
     )
     storage = _storage(ctx.find_root().obj.get("config_path"))
@@ -174,12 +180,47 @@ def config_show(ctx: click.Context) -> None:
     config = storage.load()
     if config is None:
         raise click.ClickException("管理员配置不存在。")
+    credential = config.session_token or config.legacy_admin_token or ""
     _emit(
         ctx,
         {
             "api_base_url": config.api_base_url,
-            "admin_token_hint": "••••" + config.admin_token[-4:],
+            "environment": config.environment,
+            "credential_type": "session" if config.session_token else "legacy_local",
+            "credential_hint": "••••" + credential[-4:],
+            "session_expires_at": config.session_expires_at,
             "allow_insecure_loopback": config.allow_insecure_loopback,
+            "config_path": str(storage.path),
+        },
+    )
+
+
+@cli.command("login")
+@click.option("--api-url", required=True, help="Access 保护的 Worker HTTPS API 根地址。")
+@click.option(
+    "--environment",
+    type=click.Choice(["staging", "production"]),
+    required=True,
+    help="目标管理员环境。",
+)
+@click.pass_context
+def login_command(ctx: click.Context, api_url: str, environment: str) -> None:
+    storage = _storage(ctx.find_root().obj.get("config_path"))
+    try:
+        result = login_and_store_admin_session(
+            api_base_url=api_url,
+            environment=environment,
+            storage=storage,
+        )
+    except (AdminApiError, OSError, TimeoutError, ValueError, RuntimeError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    _emit(
+        ctx,
+        {
+            "principal_id": result.get("principal_id"),
+            "expires_at": result.get("expires_at"),
+            "api_base_url": api_url.rstrip("/"),
+            "environment": environment,
             "config_path": str(storage.path),
         },
     )

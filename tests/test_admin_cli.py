@@ -104,6 +104,7 @@ class AdminCliTests(unittest.TestCase):
         for command in (
             "bootstrap",
             "config",
+            "login",
             "licenses",
             "devices",
             "releases",
@@ -111,6 +112,33 @@ class AdminCliTests(unittest.TestCase):
             "contacts",
         ):
             self.assertIn(command, result.output)
+
+    @patch("wechat_cli.admin.cli.login_and_store_admin_session", create=True)
+    def test_login_uses_browser_session_flow_without_echoing_session_token(self, login):
+        login.return_value = {
+            "principal_id": "prn_admin_1",
+            "expires_at": "2099-01-01T00:30:00Z",
+            "session_token": "wcas_adms_identifier123456.secret_value_abcdefghijklmnopqrstuvwxyz123456",
+        }
+        result = self.runner.invoke(
+            cli,
+            [
+                "--json",
+                "login",
+                "--api-url",
+                "https://admin.example.test",
+                "--environment",
+                "production",
+            ],
+        )
+
+        self.assertEqual(0, result.exit_code, result.output)
+        payload = json.loads(result.output)
+        self.assertEqual("prn_admin_1", payload["principal_id"])
+        self.assertEqual("2099-01-01T00:30:00Z", payload["expires_at"])
+        self.assertNotIn("session_token", payload)
+        self.assertNotIn("secret_value", result.output)
+        login.assert_called_once()
 
     @patch("wechat_cli.admin.cli.write_demo_bootstrap")
     @patch("wechat_cli.admin.cli.generate_demo_bootstrap")

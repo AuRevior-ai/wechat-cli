@@ -52,6 +52,18 @@ class FakeDownloadTransport:
 
 
 class AdminApiClientTests(unittest.TestCase):
+    def test_short_lived_session_token_uses_existing_admin_authorization_scheme(self):
+        transport = FakeJsonTransport([(200, {"releases": []})])
+        token = "wcas_adms_identifier123456.secret_value_abcdefghijklmnopqrstuvwxyz123456"
+        try:
+            client = AdminApiClient(transport, admin_token=token)
+        except ValueError as exc:
+            self.fail(f"short-lived admin session token should be accepted: {exc}")
+
+        self.assertEqual([], client.list_releases())
+        self.assertEqual(f"Admin {token}", transport.calls[0][2]["Authorization"])
+        self.assertNotIn("secret_value", repr(client))
+
     @patch("wechat_cli.admin.client.urlopen")
     def test_json_transport_sets_application_user_agent(self, mocked_urlopen):
         response = MagicMock()

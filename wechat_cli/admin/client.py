@@ -329,7 +329,7 @@ class AdminApiClient:
 
     def __post_init__(self) -> None:
         if not isinstance(self.admin_token, str) or not self.admin_token.startswith(
-            "wcadmin_"
+            ("wcadmin_", "wcas_")
         ):
             raise ValueError("administrator token format is invalid")
 

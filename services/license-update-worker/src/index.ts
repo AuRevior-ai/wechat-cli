@@ -1,6 +1,10 @@
 import { Hono } from "hono";
 
 import { registerAdminRoutes } from "./admin";
+import {
+  registerAdminLoginRoutes,
+  type AdminLoginRouteOptions,
+} from "./admin_login";
 import { registerDiagnosticRoutes } from "./diagnostics";
 import { ApiError, apiErrorResponse, requestId } from "./http";
 import { registerLicenseRoutes } from "./licenses";
@@ -12,7 +16,7 @@ interface WorkerVariables {
   requestId: string;
 }
 
-export function createApp(): Hono<{
+export function createApp(options: AdminLoginRouteOptions = {}): Hono<{
   Bindings: Env;
   Variables: WorkerVariables;
 }> {
@@ -40,6 +44,7 @@ export function createApp(): Hono<{
   registerLicenseRoutes(app);
   registerUpdateRoutes(app);
   registerDiagnosticRoutes(app);
+  registerAdminLoginRoutes(app, options);
   registerAdminRoutes(app);
 
   app.notFound((c) => {
