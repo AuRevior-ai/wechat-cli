@@ -90,8 +90,15 @@ export async function enforceRateLimit(
     c.req.header("CF-Connecting-IP") ??
     c.req.header("X-Forwarded-For")?.split(",", 1)[0]?.trim() ??
     "unknown";
+  const rateLimitPepper = c.env.RATE_LIMIT_PEPPER;
+  if (typeof rateLimitPepper !== "string" || rateLimitPepper.length < 16) {
+    throw new ApiError("RATE_LIMIT_CONFIG_INVALID", "速率限制安全配置未完成。", {
+      status: 500,
+      retryable: false,
+    });
+  }
   const identityDigest = await hmacSha256Hex(
-    c.env.DEVICE_TOKEN_PEPPER,
+    rateLimitPepper,
     `rate-limit\u0000${identity}`,
   );
   const epochSeconds = Math.floor(Date.now() / 1000);

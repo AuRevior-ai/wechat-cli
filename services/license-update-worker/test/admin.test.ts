@@ -70,6 +70,9 @@ async function adminRouteEnv(options?: {
           return this;
         },
         async first<T>() {
+          if (statement.includes("INSERT INTO rate_limit_windows")) {
+            return { count: 1 } as T;
+          }
           if (statement.includes("FROM admin_tokens")) {
             return {
               id: "admin_test",
@@ -120,6 +123,7 @@ async function adminRouteEnv(options?: {
       RELEASES: releases,
       ENVIRONMENT: "local",
       ADMIN_TOKEN_PEPPER: adminPepper,
+      RATE_LIMIT_PEPPER: "rate-limit-pepper-admin-tests",
     } as Env,
     token,
     sql,

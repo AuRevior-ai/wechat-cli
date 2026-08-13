@@ -31,6 +31,9 @@ function routeEnv() {
           return this;
         },
         async first<T>() {
+          if (statement.includes("INSERT INTO rate_limit_windows")) {
+            return { count: 1 } as T;
+          }
           if (statement.includes("FROM admin_principals") && statement.includes("identity = ?")) {
             return (bindings[0] === principal.identity ? principal : null) as T;
           }
@@ -91,6 +94,7 @@ function routeEnv() {
       ENVIRONMENT: "local",
       ACCESS_ADMIN_ORIGIN: "https://admin.example.com",
       ADMIN_SESSION_PEPPER_V1: "session-pepper-route-test",
+      RATE_LIMIT_PEPPER: "rate-limit-pepper-login-route-tests",
     } as Env,
     codes,
     sessions,

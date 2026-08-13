@@ -14,6 +14,7 @@ export interface Env {
 
   LICENSE_KEY_PEPPER: string;
   DEVICE_TOKEN_PEPPER: string;
+  RATE_LIMIT_PEPPER?: string;
   ADMIN_TOKEN_PEPPER: string;
   ADMIN_SESSION_PEPPER_V1?: string;
   ALLOW_LEGACY_ADMIN_AUTH?: string;

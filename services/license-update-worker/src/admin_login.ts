@@ -9,6 +9,7 @@ import {
   sha256Hex,
 } from "./crypto";
 import { ApiError, readJsonObject, requiredString } from "./http";
+import { enforceAdminLoginRateLimit } from "./security_policy";
 import { writeAudit } from "./service";
 import type { Env, WorkerVariables } from "./types";
 
@@ -427,6 +428,7 @@ export function registerAdminLoginRoutes(
 ): void {
   app.get("/v1/admin/login/start", async (c) => {
     exactAdminLoginOrigin(c.env, c.req.url);
+    await enforceAdminLoginRateLimit(c);
     const assertion = c.req.header("Cf-Access-Jwt-Assertion");
     if (typeof assertion !== "string" || assertion.length === 0) {
       throw invalidIdentity();
@@ -468,6 +470,7 @@ export function registerAdminLoginRoutes(
 
   app.post("/v1/admin/login/exchange", async (c) => {
     exactAdminLoginOrigin(c.env, c.req.url);
+    await enforceAdminLoginRateLimit(c);
     const request = await readJsonObject(c.req.raw);
     const code = requiredString(request, "code", { minimum: 20, maximum: 160 });
     const verifier = requiredString(request, "verifier", { minimum: 43, maximum: 128 });

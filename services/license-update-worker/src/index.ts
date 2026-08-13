@@ -8,6 +8,7 @@ import {
 import { registerDiagnosticRoutes } from "./diagnostics";
 import { ApiError, apiErrorResponse, requestId } from "./http";
 import { registerLicenseRoutes } from "./licenses";
+import { assertWorkerOriginAllowed } from "./security_policy";
 import { isoNow } from "./service";
 import type { Env } from "./types";
 import { registerUpdateRoutes } from "./updates";
@@ -30,6 +31,11 @@ export function createApp(options: AdminLoginRouteOptions = {}): Hono<{
     c.header("X-Content-Type-Options", "nosniff");
     c.header("Referrer-Policy", "no-referrer");
     c.header("Cache-Control", "no-store");
+  });
+
+  app.use("/v1/*", async (c, next) => {
+    assertWorkerOriginAllowed(c.req.raw, c.env);
+    await next();
   });
 
   app.get("/v1/health", (c) =>

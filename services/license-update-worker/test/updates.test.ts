@@ -120,6 +120,7 @@ async function makeUpdateCheckEnv(options: {
       MAX_DIAGNOSTIC_BYTES: "1024",
       LICENSE_KEY_PEPPER: "license-pepper-for-tests",
       DEVICE_TOKEN_PEPPER: devicePepper,
+      RATE_LIMIT_PEPPER: "rate-limit-pepper-update-tests",
       ADMIN_TOKEN_PEPPER: "admin-pepper-for-tests",
       CONTACT_LOOKUP_PEPPER: "contact-pepper-for-tests",
       CONTACT_ENCRYPTION_KEY_V1: "contact-encryption-key-for-tests",

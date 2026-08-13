@@ -1,6 +1,5 @@
 import type { Hono } from "hono";
 
-import { authenticateAdmin } from "./auth";
 import {
   base64ToBytes,
   decryptContacts,
@@ -25,8 +24,8 @@ import {
   requiredString,
 } from "./http";
 import { parseSemanticVersion } from "./semver";
+import { authenticateAdminForRoute } from "./security_policy";
 import {
-  enforceRateLimit,
   isoNow,
   runIdempotent,
   runSecretIdempotent,
@@ -390,13 +389,7 @@ function licenseSummary(row: Record<string, unknown>): Record<string, unknown> {
 
 export function registerAdminRoutes(app: WorkerApp): void {
   app.post("/v1/admin/licenses", async (c) => {
-    const admin = await authenticateAdmin(c, "licenses:write");
-    await enforceRateLimit(c, {
-      name: "admin-license-create",
-      maximum: 120,
-      windowSeconds: 60,
-      identity: admin.id,
-    });
+    const admin = await authenticateAdminForRoute(c, "licenses:write", "write");
     const request = await readJsonObject(c.req.raw);
     const maximumDevices =
       request.maximum_devices === undefined
@@ -480,7 +473,7 @@ export function registerAdminRoutes(app: WorkerApp): void {
   });
 
   app.post("/v1/admin/licenses/batch", async (c) => {
-    const admin = await authenticateAdmin(c, "licenses:write");
+    const admin = await authenticateAdminForRoute(c, "licenses:write", "write");
     const request = await readJsonObject(c.req.raw);
     const count = requiredInteger(request, "count", { minimum: 1, maximum: 100 });
     const maximumDevices =
@@ -558,7 +551,7 @@ export function registerAdminRoutes(app: WorkerApp): void {
   });
 
   app.get("/v1/admin/licenses", async (c) => {
-    await authenticateAdmin(c, "licenses:read");
+    await authenticateAdminForRoute(c, "licenses:read", "read");
     const status = c.req.query("status")?.trim();
     const query = c.req.query("query")?.trim();
     const limit = Math.min(200, Math.max(1, Number.parseInt(c.req.query("limit") ?? "50", 10) || 50));
@@ -603,7 +596,7 @@ export function registerAdminRoutes(app: WorkerApp): void {
   });
 
   app.patch("/v1/admin/licenses/:licenseId/status", async (c) => {
-    const admin = await authenticateAdmin(c, "licenses:write");
+    const admin = await authenticateAdminForRoute(c, "licenses:write", "high-risk");
     const licenseId = requiredString(
       { license_id: c.req.param("licenseId") },
       "license_id",
@@ -652,7 +645,7 @@ export function registerAdminRoutes(app: WorkerApp): void {
   });
 
   app.get("/v1/admin/licenses/:licenseId/devices", async (c) => {
-    await authenticateAdmin(c, "devices:read");
+    await authenticateAdminForRoute(c, "devices:read", "read");
     const licenseId = c.req.param("licenseId");
     const rows = await c.env.DB.prepare(
       `SELECT id, display_name, status, first_activated_at,
@@ -679,7 +672,7 @@ export function registerAdminRoutes(app: WorkerApp): void {
   });
 
   app.patch("/v1/admin/devices/:deviceId/status", async (c) => {
-    const admin = await authenticateAdmin(c, "devices:write");
+    const admin = await authenticateAdminForRoute(c, "devices:write", "write");
     const deviceId = c.req.param("deviceId");
     const request = await readJsonObject(c.req.raw);
     const status = requiredString(request, "status", { maximum: 16 });
@@ -722,7 +715,7 @@ export function registerAdminRoutes(app: WorkerApp): void {
   });
 
   app.post("/v1/admin/devices/:deviceId/unbind", async (c) => {
-    const admin = await authenticateAdmin(c, "devices:write");
+    const admin = await authenticateAdminForRoute(c, "devices:write", "write");
     const deviceId = c.req.param("deviceId");
     const request = await readJsonObject(c.req.raw);
     const nonce = requiredString(request, "operation_nonce", { minimum: 8, maximum: 256 });
@@ -760,7 +753,7 @@ export function registerAdminRoutes(app: WorkerApp): void {
   });
 
   app.put("/v1/admin/releases/:releaseId/package", async (c) => {
-    const admin = await authenticateAdmin(c, "releases:upload");
+    const admin = await authenticateAdminForRoute(c, "releases:upload", "write");
     const releaseId = c.req.param("releaseId");
     if (!/^[A-Za-z0-9._-]{1,128}$/u.test(releaseId)) {
       throw new ApiError("INVALID_REQUEST", "发布标识无效。", { status: 400 });
@@ -838,7 +831,7 @@ export function registerAdminRoutes(app: WorkerApp): void {
   });
 
   app.post("/v1/admin/releases", async (c) => {
-    const admin = await authenticateAdmin(c, "releases:write");
+    const admin = await authenticateAdminForRoute(c, "releases:write", "high-risk");
     const request = await readJsonObject(c.req.raw, { maximumBytes: 2 * 1024 * 1024 });
     const releaseId = requiredString(request, "release_id", { maximum: 128 });
     const version = requiredString(request, "version", { maximum: 64 });
@@ -1014,7 +1007,7 @@ export function registerAdminRoutes(app: WorkerApp): void {
   });
 
   app.get("/v1/admin/releases", async (c) => {
-    await authenticateAdmin(c, "releases:read");
+    await authenticateAdminForRoute(c, "releases:read", "read");
     const rows = await c.env.DB.prepare(
       `SELECT id, version, channel, manifest_sha256, package_sha256,
               package_size, github_repository, github_release_id,
@@ -1050,7 +1043,7 @@ export function registerAdminRoutes(app: WorkerApp): void {
   });
 
   app.patch("/v1/admin/releases/:releaseId", async (c) => {
-    const admin = await authenticateAdmin(c, "releases:write");
+    const admin = await authenticateAdminForRoute(c, "releases:write", "high-risk");
     const releaseId = c.req.param("releaseId");
     const request = await readJsonObject(c.req.raw);
     const enabled = parseBoolean(request.enabled, "enabled");
@@ -1146,7 +1139,7 @@ export function registerAdminRoutes(app: WorkerApp): void {
   });
 
   app.get("/v1/admin/diagnostics", async (c) => {
-    await authenticateAdmin(c, "diagnostics:read");
+    await authenticateAdminForRoute(c, "diagnostics:read", "read");
     const rows = await c.env.DB.prepare(
       `SELECT id, license_id, device_id, size, sha256,
               client_version, launcher_version, status,
@@ -1173,7 +1166,7 @@ export function registerAdminRoutes(app: WorkerApp): void {
   });
 
   app.get("/v1/admin/diagnostics/:submissionId/content", async (c) => {
-    const admin = await authenticateAdmin(c, "diagnostics:read");
+    const admin = await authenticateAdminForRoute(c, "diagnostics:read", "read");
     const submissionId = c.req.param("submissionId");
     const row = await c.env.DB.prepare(
       `SELECT object_key, status FROM diagnostic_submissions
@@ -1218,7 +1211,7 @@ export function registerAdminRoutes(app: WorkerApp): void {
   });
 
   app.delete("/v1/admin/diagnostics/:submissionId", async (c) => {
-    const admin = await authenticateAdmin(c, "diagnostics:delete");
+    const admin = await authenticateAdminForRoute(c, "diagnostics:delete", "high-risk");
     const submissionId = c.req.param("submissionId");
     const row = await c.env.DB.prepare(
       "SELECT object_key FROM diagnostic_submissions WHERE id = ? LIMIT 1",
@@ -1247,7 +1240,7 @@ export function registerAdminRoutes(app: WorkerApp): void {
   });
 
   app.post("/v1/admin/contact-encryption/rotate", async (c) => {
-    const admin = await authenticateAdmin(c, "contacts:rotate");
+    const admin = await authenticateAdminForRoute(c, "contacts:rotate", "high-risk");
     const request = await readJsonObject(c.req.raw);
     const limit =
       request.limit === undefined
@@ -1349,7 +1342,7 @@ export function registerAdminRoutes(app: WorkerApp): void {
   });
 
   app.get("/v1/admin/contact-encryption/status", async (c) => {
-    await authenticateAdmin(c, "contacts:rotate");
+    await authenticateAdminForRoute(c, "contacts:rotate", "read");
     const current = currentContactKey(c.env);
     const rows = await c.env.DB.prepare(
       `SELECT encryption_key_version, COUNT(*) AS count
