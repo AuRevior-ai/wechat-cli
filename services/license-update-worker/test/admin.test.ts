@@ -228,6 +228,41 @@ describe("R2 release administration", () => {
   });
 });
 
+describe("diagnostic admin metadata", () => {
+  it("exposes retention policy fields for read-only audit", () => {
+    const serializer = (
+      adminModule as unknown as {
+        diagnosticAdminRecord?: (row: Record<string, unknown>) => Record<string, unknown>;
+      }
+    ).diagnosticAdminRecord;
+    expect(serializer).toBeTypeOf("function");
+    expect(
+      serializer!({
+        id: "diagnostic-sample",
+        license_id: "sample-license",
+        device_id: "sample-device",
+        size: 3,
+        sha256: "a".repeat(64),
+        client_version: "0.5.1",
+        launcher_version: "0.1.0",
+        status: "complete",
+        submitted_at: "2026-08-13T00:05:00Z",
+        upload_expires_at: "2026-08-13T00:15:00Z",
+        retention_expires_at: "2026-08-20T00:00:00Z",
+        consent_version: "diagnostics-consent-v1",
+        downloaded_at: null,
+        created_at: "2026-08-13T00:00:00Z",
+      }),
+    ).toMatchObject({
+      submission_id: "diagnostic-sample",
+      upload_expires_at: "2026-08-13T00:15:00Z",
+      retention_expires_at: "2026-08-20T00:00:00Z",
+      retention_days: 7,
+      consent_version: "diagnostics-consent-v1",
+    });
+  });
+});
+
 describe("release version immutability", () => {
   it("rejects the same channel and version with a different manifest", async () => {
     const { env, state } = releaseLookupEnv("a".repeat(64));

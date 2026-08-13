@@ -339,9 +339,10 @@
               <div><span>DIAGNOSTICS</span><h3>诊断与支持</h3></div>
               <small>默认只保存到本机，不会自动上传</small>
             </div>
-            <p>诊断包仅包含版本摘要和经过脱敏的启动、更新及回滚日志，不包含微信聊天记录、数据库密钥、完整许可证或设备令牌。</p>
+            <p>诊断包仅包含版本摘要和经过脱敏的启动、更新及回滚日志，不包含微信聊天记录、数据库密钥、完整许可证或设备令牌。只有你明确提交后才会上传；云端诊断内容最多保留 7 天，也可由维护者提前删除。本地生成的 ZIP 不会因为提交凭证过期而自动删除。</p>
             <div class="diagnostics-actions">
               <button id="diagnostics-generate" class="ghost" type="button">生成本地诊断包</button>
+              <button id="diagnostics-delete" class="ghost" type="button" disabled>删除本地诊断包</button>
               <button id="diagnostics-submit" class="primary" type="button" disabled>明确同意并提交</button>
             </div>
             <small id="diagnostics-status">尚未生成诊断包。</small>

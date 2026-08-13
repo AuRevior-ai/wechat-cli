@@ -5,7 +5,10 @@ import {
   registerAdminLoginRoutes,
   type AdminLoginRouteOptions,
 } from "./admin_login";
-import { registerDiagnosticRoutes } from "./diagnostics";
+import {
+  cleanupExpiredDiagnostics,
+  registerDiagnosticRoutes,
+} from "./diagnostics";
 import { ApiError, apiErrorResponse, requestId } from "./http";
 import { registerLicenseRoutes } from "./licenses";
 import { assertWorkerOriginAllowed } from "./security_policy";
@@ -101,24 +104,7 @@ const app = createApp();
 
 async function cleanupExpired(env: Env): Promise<void> {
   const now = isoNow();
-  const expiredDiagnostics = await env.DB.prepare(
-    `SELECT id, object_key, status
-       FROM diagnostic_submissions
-      WHERE expires_at <= ? AND status != 'deleted'
-      LIMIT 500`,
-  )
-    .bind(now)
-    .all<Record<string, unknown>>();
-  for (const row of expiredDiagnostics.results) {
-    if (row.status === "complete") {
-      await env.DIAGNOSTICS.delete(String(row.object_key));
-    }
-    await env.DB.prepare(
-      "UPDATE diagnostic_submissions SET status = 'deleted' WHERE id = ?",
-    )
-      .bind(String(row.id))
-      .run();
-  }
+  await cleanupExpiredDiagnostics(env, new Date(now));
   await env.DB.batch([
     env.DB.prepare("DELETE FROM rate_limit_windows WHERE expires_at <= ?").bind(now),
     env.DB.prepare("DELETE FROM idempotency_records WHERE expires_at <= ?").bind(now),

@@ -152,6 +152,10 @@ class DiagnosticUploadClientTests(unittest.TestCase):
                         "upload_url": "/v1/diagnostics/diag_01/content",
                         "upload_token": "diag_9999999999.nonce.signature",
                         "expires_at": "2026-08-05T12:15:00Z",
+                        "upload_expires_at": "2026-08-05T12:15:00Z",
+                        "retention_expires_at": "2026-08-12T12:00:00Z",
+                        "retention_days": 7,
+                        "consent_version": "diagnostics-consent-v1",
                         "maximum_bytes": 20 * 1024 * 1024,
                     },
                 )
@@ -189,6 +193,7 @@ class DiagnosticUploadClientTests(unittest.TestCase):
         self.assertEqual(("POST", "/v1/diagnostics/sessions"), (method, path))
         self.assertEqual("Bearer wcdt_token.secret", headers["Authorization"])
         self.assertEqual(bundle_size, payload["size_bytes"])
+        self.assertEqual("diagnostics-consent-v1", payload.get("consent_version"))
         self.assertEqual(
             hashlib.sha256(b"diagnostic bundle bytes").hexdigest(),
             payload["sha256"],
@@ -205,6 +210,55 @@ class DiagnosticUploadClientTests(unittest.TestCase):
         self.assertEqual("diag_01", result.submission_id)
         self.assertNotIn("upload_token", repr(result))
 
+    def test_rejects_server_retention_policy_drift(self):
+        client = DiagnosticUploadClient(
+            FakeJsonTransport(
+                [
+                    (
+                        201,
+                        {
+                            "submission_id": "diag_01",
+                            "upload_url": "/v1/diagnostics/diag_01/content",
+                            "upload_token": "diag_token",
+                            "expires_at": "2026-08-05T12:15:00Z",
+                            "upload_expires_at": "2026-08-05T12:15:00Z",
+                            "retention_expires_at": "2026-09-05T12:00:00Z",
+                            "retention_days": 30,
+                            "consent_version": "diagnostics-consent-v1",
+                            "maximum_bytes": 1000,
+                        },
+                    )
+                ]
+            ),
+            FakeUploadTransport(
+                [
+                    (
+                        200,
+                        {
+                            "ok": True,
+                            "submission_id": "diag_01",
+                            "status": "complete",
+                            "size_bytes": len(b"diagnostic bundle bytes"),
+                            "sha256": hashlib.sha256(
+                                b"diagnostic bundle bytes"
+                            ).hexdigest(),
+                        },
+                    )
+                ]
+            ),
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            bundle = self.make_bundle(Path(tmp))
+            with self.assertRaises(DiagnosticUploadError) as caught:
+                client.submit(
+                    bundle,
+                    device_token="token",
+                    client_version="0.5.0",
+                    launcher_version="0.1.0",
+                )
+
+        self.assertEqual("DIAGNOSTIC_SESSION_INVALID", caught.exception.code)
+
     def test_rejects_absolute_or_cross_origin_upload_url(self):
         client = DiagnosticUploadClient(
             FakeJsonTransport(
@@ -216,6 +270,10 @@ class DiagnosticUploadClientTests(unittest.TestCase):
                             "upload_url": "https://malicious.example/upload",
                             "upload_token": "diag_token",
                             "expires_at": "2026-08-05T12:15:00Z",
+                            "upload_expires_at": "2026-08-05T12:15:00Z",
+                            "retention_expires_at": "2026-08-12T12:00:00Z",
+                            "retention_days": 7,
+                            "consent_version": "diagnostics-consent-v1",
                             "maximum_bytes": 1000,
                         },
                     )
@@ -247,6 +305,10 @@ class DiagnosticUploadClientTests(unittest.TestCase):
                             "upload_url": "/v1/diagnostics/diag_01/content",
                             "upload_token": "diag_token",
                             "expires_at": "2026-08-05T12:15:00Z",
+                            "upload_expires_at": "2026-08-05T12:15:00Z",
+                            "retention_expires_at": "2026-08-12T12:00:00Z",
+                            "retention_days": 7,
+                            "consent_version": "diagnostics-consent-v1",
                             "maximum_bytes": 1,
                         },
                     )

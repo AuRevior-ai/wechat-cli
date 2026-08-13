@@ -387,6 +387,28 @@ function licenseSummary(row: Record<string, unknown>): Record<string, unknown> {
   };
 }
 
+export function diagnosticAdminRecord(
+  row: Record<string, unknown>,
+): Record<string, unknown> {
+  return {
+    submission_id: String(row.id),
+    license_id: String(row.license_id),
+    device_id: String(row.device_id),
+    size_bytes: row.size === null ? null : Number(row.size),
+    sha256: row.sha256,
+    client_version: String(row.client_version),
+    launcher_version: String(row.launcher_version),
+    status: String(row.status),
+    submitted_at: row.submitted_at,
+    upload_expires_at: String(row.upload_expires_at),
+    retention_expires_at: String(row.retention_expires_at),
+    retention_days: 7,
+    consent_version: String(row.consent_version),
+    downloaded_at: row.downloaded_at,
+    created_at: String(row.created_at),
+  };
+}
+
 export function registerAdminRoutes(app: WorkerApp): void {
   app.post("/v1/admin/licenses", async (c) => {
     const admin = await authenticateAdminForRoute(c, "licenses:write", "write");
@@ -1143,25 +1165,13 @@ export function registerAdminRoutes(app: WorkerApp): void {
     const rows = await c.env.DB.prepare(
       `SELECT id, license_id, device_id, size, sha256,
               client_version, launcher_version, status,
-              submitted_at, expires_at, downloaded_at, created_at
+              submitted_at, upload_expires_at, retention_expires_at,
+              consent_version, downloaded_at, created_at
          FROM diagnostic_submissions
         ORDER BY created_at DESC LIMIT 200`,
     ).all<Record<string, unknown>>();
     return c.json({
-      diagnostics: rows.results.map((row) => ({
-        submission_id: String(row.id),
-        license_id: String(row.license_id),
-        device_id: String(row.device_id),
-        size_bytes: row.size === null ? null : Number(row.size),
-        sha256: row.sha256,
-        client_version: String(row.client_version),
-        launcher_version: String(row.launcher_version),
-        status: String(row.status),
-        submitted_at: row.submitted_at,
-        expires_at: String(row.expires_at),
-        downloaded_at: row.downloaded_at,
-        created_at: String(row.created_at),
-      })),
+      diagnostics: rows.results.map(diagnosticAdminRecord),
     });
   });
 

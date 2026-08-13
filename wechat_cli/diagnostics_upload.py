@@ -351,6 +351,7 @@ class DiagnosticUploadClient:
                     "launcher_version": launcher_version,
                     "size_bytes": size,
                     "sha256": digest,
+                    "consent_version": "diagnostics-consent-v1",
                 },
             )
         except DiagnosticUploadError:
@@ -367,6 +368,10 @@ class DiagnosticUploadClient:
         upload_url = session.get("upload_url")
         upload_token = session.get("upload_token")
         maximum_bytes = session.get("maximum_bytes")
+        upload_expires_at = session.get("upload_expires_at")
+        retention_expires_at = session.get("retention_expires_at")
+        retention_days = session.get("retention_days")
+        consent_version = session.get("consent_version")
         if (
             not isinstance(submission_id, str)
             or not submission_id
@@ -376,6 +381,12 @@ class DiagnosticUploadClient:
             or isinstance(maximum_bytes, bool)
             or not isinstance(maximum_bytes, int)
             or maximum_bytes <= 0
+            or not isinstance(upload_expires_at, str)
+            or not upload_expires_at
+            or not isinstance(retention_expires_at, str)
+            or not retention_expires_at
+            or retention_days != 7
+            or consent_version != "diagnostics-consent-v1"
         ):
             raise DiagnosticUploadError(
                 "DIAGNOSTIC_SESSION_INVALID",
