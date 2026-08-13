@@ -2,6 +2,7 @@ import type { Context } from "hono";
 
 import { hmacSha256Hex, randomId, sha256Hex } from "./crypto";
 import { ApiError } from "./http";
+import { versionedSecretSet } from "./secret_versions";
 import type { Env, WorkerVariables } from "./types";
 
 export function isoNow(now = new Date()): string {
@@ -90,15 +91,9 @@ export async function enforceRateLimit(
     c.req.header("CF-Connecting-IP") ??
     c.req.header("X-Forwarded-For")?.split(",", 1)[0]?.trim() ??
     "unknown";
-  const rateLimitPepper = c.env.RATE_LIMIT_PEPPER;
-  if (typeof rateLimitPepper !== "string" || rateLimitPepper.length < 16) {
-    throw new ApiError("RATE_LIMIT_CONFIG_INVALID", "速率限制安全配置未完成。", {
-      status: 500,
-      retryable: false,
-    });
-  }
+  const rateLimitSecret = versionedSecretSet(c.env, "rate-limit-pepper").current();
   const identityDigest = await hmacSha256Hex(
-    rateLimitPepper,
+    rateLimitSecret.value,
     `rate-limit\u0000${identity}`,
   );
   const epochSeconds = Math.floor(Date.now() / 1000);

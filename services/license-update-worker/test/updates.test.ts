@@ -9,6 +9,7 @@ import { d1BlobBytes, fetchGithubReleaseAsset } from "../src/updates";
 interface FakeDbState {
   prepared: string[];
   runs: string[];
+  runBindings: Array<{ sql: string; bindings: unknown[] }>;
 }
 
 async function makeUpdateCheckEnv(options: {
@@ -19,7 +20,7 @@ async function makeUpdateCheckEnv(options: {
   releaseVersion?: string | undefined;
   releaseManifestSha256?: string | undefined;
 }): Promise<{ env: Env; state: FakeDbState }> {
-  const state: FakeDbState = { prepared: [], runs: [] };
+  const state: FakeDbState = { prepared: [], runs: [], runBindings: [] };
   const devicePepper = "device-pepper-for-update-tests";
   const tokenDigest = await hmacSha256Hex(devicePepper, options.tokenSecret);
   const authRow = {
@@ -31,6 +32,7 @@ async function makeUpdateCheckEnv(options: {
     status: "active",
     token_id: options.tokenId,
     token_secret_digest: tokenDigest,
+    token_secret_version: 1,
     token_version: 1,
     device_revision: 1,
     first_activated_at: "2026-08-12T00:00:00.000Z",
@@ -41,6 +43,7 @@ async function makeUpdateCheckEnv(options: {
     unbound_at: null,
     license_row_id: "lic_test_1",
     key_digest: "license-digest",
+    key_secret_version: 1,
     key_hint: "TEST",
     license_status: "active",
     max_devices: 1,
@@ -103,6 +106,7 @@ async function makeUpdateCheckEnv(options: {
         },
         async run() {
           state.runs.push(sql);
+          state.runBindings.push({ sql, bindings: [...bindings] });
           return { success: true, meta: { changes: 1 } };
         },
       };
@@ -118,14 +122,19 @@ async function makeUpdateCheckEnv(options: {
       LEASE_SIGNING_KEY_ID: "lease-test",
       CONTACT_ENCRYPTION_KEY_VERSION: "1",
       MAX_DIAGNOSTIC_BYTES: "1024",
-      LICENSE_KEY_PEPPER: "license-pepper-for-tests",
-      DEVICE_TOKEN_PEPPER: devicePepper,
-      RATE_LIMIT_PEPPER: "rate-limit-pepper-update-tests",
+      DEVICE_TOKEN_PEPPER_CURRENT_VERSION: "1",
+      DEVICE_TOKEN_PEPPER_READABLE_VERSIONS: "1",
+      DEVICE_TOKEN_PEPPER_V1: devicePepper,
+      RATE_LIMIT_PEPPER_CURRENT_VERSION: "1",
+      RATE_LIMIT_PEPPER_READABLE_VERSIONS: "1",
+      RATE_LIMIT_PEPPER_V1: "rate-limit-pepper-update-tests",
       ADMIN_TOKEN_PEPPER: "admin-pepper-for-tests",
-      CONTACT_LOOKUP_PEPPER: "contact-pepper-for-tests",
       CONTACT_ENCRYPTION_KEY_V1: "contact-encryption-key-for-tests",
       LEASE_SIGNING_PRIVATE_KEY: "lease-private-key-for-tests",
-      DOWNLOAD_TICKET_SECRET: "download-ticket-secret-for-tests",
+      DOWNLOAD_TICKET_SECRET_CURRENT_VERSION: "2",
+      DOWNLOAD_TICKET_SECRET_READABLE_VERSIONS: "1,2",
+      DOWNLOAD_TICKET_SECRET_V1: "download-ticket-secret-old-tests",
+      DOWNLOAD_TICKET_SECRET_V2: "download-ticket-secret-new-tests",
       GITHUB_RELEASE_READ_TOKEN: "github-test-token",
     },
     state,
@@ -212,6 +221,11 @@ describe("update channel authorization", () => {
     expect(response.status).toBe(200);
     expect(state.prepared.some((sql) => sql.includes("FROM releases"))).toBe(true);
     expect(state.runs.some((sql) => sql.includes("INSERT INTO download_tickets"))).toBe(true);
+    const ticketInsert = state.runBindings.find((item) =>
+      item.sql.includes("INSERT INTO download_tickets"),
+    );
+    expect(ticketInsert?.sql).toContain("secret_version");
+    expect(ticketInsert?.bindings[2]).toBe(2);
   });
 });
 

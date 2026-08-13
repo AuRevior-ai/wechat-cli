@@ -133,9 +133,11 @@ describe("purpose-separated rate limiting", () => {
     const { db, keys } = rateDb();
     const env = {
       DB: db,
-      RATE_LIMIT_PEPPER: "rate-limit-pepper-test-value",
-      DEVICE_TOKEN_PEPPER: "different-device-token-pepper",
-    } as Env;
+      RATE_LIMIT_PEPPER_CURRENT_VERSION: "1",
+      RATE_LIMIT_PEPPER_READABLE_VERSIONS: "1",
+      RATE_LIMIT_PEPPER_V1: "rate-limit-pepper-test-value",
+      DEVICE_TOKEN_PEPPER_V1: "different-device-token-pepper",
+    } as unknown as Env;
     await enforceRateLimit(context(env), {
       name: "purpose-test",
       maximum: 5,
@@ -160,8 +162,10 @@ describe("purpose-separated rate limiting", () => {
     const { db } = rateDb();
     const env = {
       DB: db,
-      RATE_LIMIT_PEPPER: "rate-limit-pepper-login-value",
-    } as Env;
+      RATE_LIMIT_PEPPER_CURRENT_VERSION: "1",
+      RATE_LIMIT_PEPPER_READABLE_VERSIONS: "1",
+      RATE_LIMIT_PEPPER_V1: "rate-limit-pepper-login-value",
+    } as unknown as Env;
     for (const path of [
       "/v1/admin/login/start",
       "/v1/admin/login/exchange",
@@ -183,8 +187,10 @@ describe("purpose-separated rate limiting", () => {
     const { db, keys } = rateDb();
     const env = {
       DB: db,
-      RATE_LIMIT_PEPPER: "rate-limit-pepper-admin-value",
-    } as Env;
+      RATE_LIMIT_PEPPER_CURRENT_VERSION: "1",
+      RATE_LIMIT_PEPPER_READABLE_VERSIONS: "1",
+      RATE_LIMIT_PEPPER_V1: "rate-limit-pepper-admin-value",
+    } as unknown as Env;
     const admin: AuthenticatedAdmin = {
       id: "prn_admin_1",
       scopes: new Set(["*"]),

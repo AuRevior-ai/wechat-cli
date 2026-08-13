@@ -17,6 +17,8 @@ from wechat_cli.update.errors import ErrorCode, UpdateError
 
 TEST_PRIVATE_KEY = ECC.construct(curve="Ed25519", seed=bytes(reversed(range(32))))
 TEST_PUBLIC_KEY = TEST_PRIVATE_KEY.public_key().export_key(format="raw")
+NEXT_PRIVATE_KEY = ECC.construct(curve="Ed25519", seed=bytes(range(32)))
+NEXT_PUBLIC_KEY = NEXT_PRIVATE_KEY.public_key().export_key(format="raw")
 
 
 def lease_bytes(**overrides):
@@ -104,6 +106,41 @@ class OfflineLeaseTests(unittest.TestCase):
             ClientLicenseState.OFFLINE_EXPIRED,
             lease.client_state_at(datetime(2026, 8, 11, 15, 0, 1, tzinfo=timezone.utc)),
         )
+
+    def test_lease_signing_key_overlap_accepts_old_and_new_then_retirement_rejects_old(self):
+        old_raw = lease_bytes(key_id="lease-key-old")
+        new_raw = lease_bytes(key_id="lease-key-new")
+        old_signature = eddsa.new(TEST_PRIVATE_KEY, "rfc8032").sign(old_raw)
+        new_signature = eddsa.new(NEXT_PRIVATE_KEY, "rfc8032").sign(new_raw)
+        overlap = TrustedEd25519Keys(
+            {
+                "lease-key-old": TEST_PUBLIC_KEY,
+                "lease-key-new": NEXT_PUBLIC_KEY,
+            }
+        )
+
+        verify_signed_lease(
+            old_raw,
+            old_signature,
+            overlap,
+            expected_device_id="dev_01",
+        )
+        verify_signed_lease(
+            new_raw,
+            new_signature,
+            overlap,
+            expected_device_id="dev_01",
+        )
+
+        retired = TrustedEd25519Keys({"lease-key-new": NEXT_PUBLIC_KEY})
+        with self.assertRaises(UpdateError) as caught:
+            verify_signed_lease(
+                old_raw,
+                old_signature,
+                retired,
+                expected_device_id="dev_01",
+            )
+        self.assertEqual(ErrorCode.UPDATE_SIGNING_KEY_UNKNOWN, caught.exception.code)
 
     def test_suspended_or_revoked_lease_never_authorizes_offline(self):
         for status, expected in (

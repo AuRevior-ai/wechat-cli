@@ -26,6 +26,10 @@ import {
 import { parseSemanticVersion } from "./semver";
 import { authenticateAdminForRoute } from "./security_policy";
 import {
+  readableHmacDigests,
+  versionedSecretSet,
+} from "./secret_versions";
+import {
   isoNow,
   runIdempotent,
   runSecretIdempotent,
@@ -149,23 +153,30 @@ interface GeneratedLicense {
   licenseKey: string;
   keyHint: string;
   keyDigest: string;
+  keySecretVersion: number;
   generationIndex: number;
 }
 
-async function deriveGeneratedLicense(
+export async function deriveGeneratedLicense(
   env: Env,
   adminId: string,
   generationRequestId: string,
   generationIndex: number,
+  secretVersion?: number,
 ): Promise<GeneratedLicense> {
   if (!Number.isInteger(generationIndex) || generationIndex < 0) {
     throw new Error("generationIndex must be a non-negative integer");
   }
   const context = `${adminId}\u0000${generationRequestId}\u0000${generationIndex}`;
-  const licenseKey = await deriveLicenseKey(env.LICENSE_KEY_PEPPER, context);
+  const secretSet = versionedSecretSet(env, "license-key-pepper");
+  const licenseSecret =
+    secretVersion === undefined
+      ? secretSet.current()
+      : { version: secretVersion, value: secretSet.value(secretVersion) };
+  const licenseKey = await deriveLicenseKey(licenseSecret.value, context);
   const licenseId = await deriveOpaqueId(
     "lic_",
-    env.LICENSE_KEY_PEPPER,
+    licenseSecret.value,
     context,
   );
   const normalized = normalizeLicenseKey(licenseKey);
@@ -174,9 +185,10 @@ async function deriveGeneratedLicense(
     licenseKey,
     keyHint: licenseKeyHint(licenseKey),
     keyDigest: await hmacSha256Hex(
-      env.LICENSE_KEY_PEPPER,
+      licenseSecret.value,
       `license-key\u0000${normalized}`,
     ),
+    keySecretVersion: licenseSecret.version,
     generationIndex,
   };
 }
@@ -194,13 +206,14 @@ function licenseInsertStatement(
 ): D1PreparedStatement {
   return env.DB.prepare(
     `INSERT INTO licenses (
-       id, key_digest, key_hint, status, max_devices,
+       id, key_digest, key_secret_version, key_hint, status, max_devices,
        release_channel, revision, created_at, updated_at,
        created_by_admin_id, generation_request_id, generation_index
-     ) VALUES (?, ?, ?, 'active', ?, ?, 1, ?, ?, ?, ?, ?)`,
+     ) VALUES (?, ?, ?, ?, 'active', ?, ?, 1, ?, ?, ?, ?, ?)`,
   ).bind(
     generated.licenseId,
     generated.keyDigest,
+    generated.keySecretVersion,
     generated.keyHint,
     options.maximumDevices,
     options.channel,
@@ -240,19 +253,20 @@ async function createSingleLicenseRecord(
   ];
   if (Object.keys(options.contacts).length > 0) {
     const encryption = currentContactKey(env);
+    const lookupSecret = versionedSecretSet(env, "contact-lookup-pepper").current();
     const encrypted = await encryptContacts(options.contacts, {
       licenseId: generated.licenseId,
       keyVersion: encryption.version,
       encryptionKeyBase64: encryption.key,
-      lookupPepper: env.CONTACT_LOOKUP_PEPPER,
+      lookupPepper: lookupSecret.value,
     });
     statements.push(
       env.DB.prepare(
         `INSERT INTO license_contacts (
            license_id, ciphertext, iv, encryption_key_version,
            email_lookup_digest, wechat_lookup_digest,
-           other_lookup_digest, updated_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+           other_lookup_digest, lookup_secret_version, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).bind(
         generated.licenseId,
         encrypted.ciphertext,
@@ -261,6 +275,7 @@ async function createSingleLicenseRecord(
         encrypted.emailLookupDigest,
         encrypted.wechatLookupDigest,
         encrypted.otherLookupDigest,
+        lookupSecret.version,
         options.now,
       ),
     );
@@ -314,7 +329,7 @@ async function replayGeneratedLicenses(
   >
 > {
   const rows = await env.DB.prepare(
-    `SELECT generation_index, max_devices, release_channel, created_at
+    `SELECT generation_index, key_secret_version, max_devices, release_channel, created_at
        FROM licenses
       WHERE created_by_admin_id = ? AND generation_request_id = ?
       ORDER BY generation_index ASC`,
@@ -343,6 +358,7 @@ async function replayGeneratedLicenses(
         adminId,
         generationRequestId,
         generationIndex,
+        Number(row.key_secret_version),
       );
       return {
         ...generated,
@@ -384,6 +400,21 @@ function licenseSummary(row: Record<string, unknown>): Record<string, unknown> {
     revision: Number(row.revision),
     created_at: String(row.created_at),
     updated_at: String(row.updated_at),
+  };
+}
+
+export function contactRotationSelection(
+  encryptionVersion: number,
+  lookupVersion: number,
+  limit: number,
+): { sql: string; bindings: unknown[] } {
+  return {
+    sql: `SELECT license_id, ciphertext, iv, encryption_key_version, lookup_secret_version
+            FROM license_contacts
+           WHERE (encryption_key_version != ? OR lookup_secret_version != ?)
+           ORDER BY updated_at ASC
+           LIMIT ?`,
+    bindings: [encryptionVersion, lookupVersion, limit],
   };
 }
 
@@ -588,16 +619,23 @@ export function registerAdminRoutes(app: WorkerApp): void {
     }
     if (query !== undefined && query.length > 0) {
       const normalizedQuery = query.normalize("NFKC").trim().toLowerCase();
-      const lookupDigest = await hmacSha256Hex(
-        c.env.CONTACT_LOOKUP_PEPPER,
+      const lookupDigests = await readableHmacDigests(
+        c.env,
+        "contact-lookup-pepper",
         normalizedQuery,
       );
       const hint = query.replace(/[^A-Za-z0-9]/gu, "").slice(-4).toUpperCase();
-      clauses.push(
-        `(l.id = ? OR l.key_hint = ? OR lc.email_lookup_digest = ? OR
-          lc.wechat_lookup_digest = ? OR lc.other_lookup_digest = ?)`,
+      const lookupClauses = lookupDigests.flatMap(() => [
+        "lc.email_lookup_digest = ?",
+        "lc.wechat_lookup_digest = ?",
+        "lc.other_lookup_digest = ?",
+      ]);
+      clauses.push(`(l.id = ? OR l.key_hint = ? OR ${lookupClauses.join(" OR ")})`);
+      bindings.push(
+        query,
+        hint,
+        ...lookupDigests.flatMap((item) => [item.digest, item.digest, item.digest]),
       );
-      bindings.push(query, hint, lookupDigest, lookupDigest, lookupDigest);
     }
     const where = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
     const rows = await c.env.DB.prepare(
@@ -1261,25 +1299,30 @@ export function registerAdminRoutes(app: WorkerApp): void {
       maximum: 256,
     });
     const current = currentContactKey(c.env);
+    const currentLookup = versionedSecretSet(c.env, "contact-lookup-pepper").current();
     const response = await runIdempotent(c.env, {
       scope: `admin-contact-rotation:${admin.id}`,
       key: nonce,
-      request: { limit, currentKeyVersion: current.version },
+      request: {
+        limit,
+        currentKeyVersion: current.version,
+        currentLookupVersion: currentLookup.version,
+      },
       operation: async () => {
-        const rows = await c.env.DB.prepare(
-          `SELECT license_id, ciphertext, iv, encryption_key_version
-             FROM license_contacts
-            WHERE encryption_key_version != ?
-            ORDER BY updated_at ASC
-            LIMIT ?`,
-        )
-          .bind(current.version, limit)
+        const selection = contactRotationSelection(
+          current.version,
+          currentLookup.version,
+          limit,
+        );
+        const rows = await c.env.DB.prepare(selection.sql)
+          .bind(...selection.bindings)
           .all<Record<string, unknown>>();
         const updatedAt = isoNow();
         const statements: D1PreparedStatement[] = [];
         for (const row of rows.results) {
           const licenseId = String(row.license_id);
           const previousVersion = Number(row.encryption_key_version);
+          const previousLookupVersion = Number(row.lookup_secret_version);
           const contacts = await decryptContacts(
             {
               ciphertext: databaseBytes(row.ciphertext, "ciphertext"),
@@ -1295,15 +1338,16 @@ export function registerAdminRoutes(app: WorkerApp): void {
             licenseId,
             keyVersion: current.version,
             encryptionKeyBase64: current.key,
-            lookupPepper: c.env.CONTACT_LOOKUP_PEPPER,
+            lookupPepper: currentLookup.value,
           });
           statements.push(
             c.env.DB.prepare(
               `UPDATE license_contacts
                   SET ciphertext = ?, iv = ?, encryption_key_version = ?,
                       email_lookup_digest = ?, wechat_lookup_digest = ?,
-                      other_lookup_digest = ?, updated_at = ?
-                WHERE license_id = ? AND encryption_key_version = ?`,
+                      other_lookup_digest = ?, lookup_secret_version = ?, updated_at = ?
+                WHERE license_id = ? AND encryption_key_version = ?
+                  AND lookup_secret_version = ?`,
             ).bind(
               encrypted.ciphertext,
               encrypted.iv,
@@ -1311,9 +1355,11 @@ export function registerAdminRoutes(app: WorkerApp): void {
               encrypted.emailLookupDigest,
               encrypted.wechatLookupDigest,
               encrypted.otherLookupDigest,
+              currentLookup.version,
               updatedAt,
               licenseId,
               previousVersion,
+              previousLookupVersion,
             ),
           );
         }
@@ -1322,9 +1368,9 @@ export function registerAdminRoutes(app: WorkerApp): void {
         }
         const remaining = await c.env.DB.prepare(
           `SELECT COUNT(*) AS count FROM license_contacts
-            WHERE encryption_key_version != ?`,
+            WHERE (encryption_key_version != ? OR lookup_secret_version != ?)`,
         )
-          .bind(current.version)
+          .bind(current.version, currentLookup.version)
           .first<{ count: number }>();
         await writeAudit(c.env, {
           actorType: "admin",
@@ -1334,6 +1380,7 @@ export function registerAdminRoutes(app: WorkerApp): void {
           requestId: c.get("requestId"),
           metadata: {
             current_key_version: current.version,
+            current_lookup_secret_version: currentLookup.version,
             rotated_count: statements.length,
             remaining_count: Number(remaining?.count ?? 0),
           },
@@ -1342,6 +1389,7 @@ export function registerAdminRoutes(app: WorkerApp): void {
           body: {
             ok: true,
             current_key_version: current.version,
+            current_lookup_secret_version: currentLookup.version,
             rotated_count: statements.length,
             remaining_count: Number(remaining?.count ?? 0),
           },
@@ -1354,16 +1402,19 @@ export function registerAdminRoutes(app: WorkerApp): void {
   app.get("/v1/admin/contact-encryption/status", async (c) => {
     await authenticateAdminForRoute(c, "contacts:rotate", "read");
     const current = currentContactKey(c.env);
+    const currentLookup = versionedSecretSet(c.env, "contact-lookup-pepper").current();
     const rows = await c.env.DB.prepare(
-      `SELECT encryption_key_version, COUNT(*) AS count
+      `SELECT encryption_key_version, lookup_secret_version, COUNT(*) AS count
          FROM license_contacts
-        GROUP BY encryption_key_version
-        ORDER BY encryption_key_version`,
+        GROUP BY encryption_key_version, lookup_secret_version
+        ORDER BY encryption_key_version, lookup_secret_version`,
     ).all<Record<string, unknown>>();
     return c.json({
       current_key_version: current.version,
+      current_lookup_secret_version: currentLookup.version,
       records_by_version: rows.results.map((row) => ({
         key_version: Number(row.encryption_key_version),
+        lookup_secret_version: Number(row.lookup_secret_version),
         count: Number(row.count),
       })),
     });

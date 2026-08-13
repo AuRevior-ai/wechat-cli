@@ -3,12 +3,15 @@ import type { Hono } from "hono";
 import { authenticateDevice } from "./auth";
 import {
   constantTimeEqual,
-  hmacSha256Hex,
   randomId,
   randomToken,
   sha256Hex,
 } from "./crypto";
 import { ApiError, readJsonObject, requiredInteger, requiredString } from "./http";
+import {
+  verifyVersionedHmacDigest,
+  versionedHmacDigest,
+} from "./secret_versions";
 import { addSeconds, enforceRateLimit, isoNow, writeAudit } from "./service";
 import type { Env } from "./types";
 
@@ -107,46 +110,55 @@ function maximumDiagnosticBytes(env: Env): number {
   return value;
 }
 
-async function createUploadToken(
+export async function createUploadToken(
   env: Env,
   sessionId: string,
   expiresAtEpoch: number,
 ): Promise<string> {
   const nonce = randomToken(18);
   const message = `${sessionId}\u0000${expiresAtEpoch}\u0000${nonce}`;
-  const signature = await hmacSha256Hex(env.DOWNLOAD_TICKET_SECRET, message);
-  return `diag_${expiresAtEpoch}.${nonce}.${signature}`;
+  const signature = await versionedHmacDigest(
+    env,
+    "diagnostic-upload-secret",
+    message,
+  );
+  return `diag_v${signature.version}_${expiresAtEpoch}.${nonce}.${signature.digest}`;
 }
 
-async function verifyUploadToken(
+export async function verifyUploadToken(
   env: Env,
   sessionId: string,
   token: string,
 ): Promise<void> {
-  const match = /^diag_(\d{10})\.([A-Za-z0-9_-]{16,128})\.([0-9a-f]{64})$/u.exec(
+  const match = /^diag_v(\d{1,3})_(\d{10})\.([A-Za-z0-9_-]{16,128})\.([0-9a-f]{64})$/u.exec(
     token,
   );
   if (
     match === null ||
     match[1] === undefined ||
     match[2] === undefined ||
-    match[3] === undefined
+    match[3] === undefined ||
+    match[4] === undefined
   ) {
     throw new ApiError("DIAGNOSTIC_UPLOAD_NOT_AUTHORIZED", "诊断上传令牌无效。", {
       status: 401,
     });
   }
-  const expiresAtEpoch = Number.parseInt(match[1], 10);
+  const secretVersion = Number.parseInt(match[1], 10);
+  const expiresAtEpoch = Number.parseInt(match[2], 10);
   if (expiresAtEpoch <= Math.floor(Date.now() / 1000)) {
     throw new ApiError("DIAGNOSTIC_UPLOAD_TOKEN_EXPIRED", "诊断上传令牌已过期。", {
       status: 401,
     });
   }
-  const expected = await hmacSha256Hex(
-    env.DOWNLOAD_TICKET_SECRET,
-    `${sessionId}\u0000${expiresAtEpoch}\u0000${match[2]}`,
+  const verified = await verifyVersionedHmacDigest(
+    env,
+    "diagnostic-upload-secret",
+    secretVersion,
+    `${sessionId}\u0000${expiresAtEpoch}\u0000${match[3]}`,
+    match[4],
   );
-  if (!constantTimeEqual(expected, match[3])) {
+  if (!verified) {
     throw new ApiError("DIAGNOSTIC_UPLOAD_NOT_AUTHORIZED", "诊断上传令牌无效。", {
       status: 401,
     });

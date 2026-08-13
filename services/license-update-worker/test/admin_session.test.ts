@@ -55,6 +55,7 @@ interface SessionState {
   id: string;
   token_id: string;
   token_digest: string;
+  token_secret_version: number;
   principal_id: string;
   scopes_json: string;
   authenticated_at: string;
@@ -158,6 +159,7 @@ function memoryEnv(options?: {
               id,
               tokenId,
               tokenDigest,
+              tokenSecretVersion,
               principalId,
               scopesJson,
               authenticatedAt,
@@ -172,11 +174,13 @@ function memoryEnv(options?: {
               string,
               string,
               string,
+              string,
             ];
             sessions.set(id, {
               id,
               token_id: tokenId,
               token_digest: tokenDigest,
+              token_secret_version: Number(tokenSecretVersion),
               principal_id: principalId,
               scopes_json: scopesJson,
               authenticated_at: authenticatedAt,
@@ -207,10 +211,12 @@ function memoryEnv(options?: {
     DB: db,
     ENVIRONMENT: options?.environment ?? "local",
     ADMIN_TOKEN_PEPPER: adminTokenPepper,
+    ADMIN_SESSION_PEPPER_CURRENT_VERSION: "1",
+    ADMIN_SESSION_PEPPER_READABLE_VERSIONS: "1",
     ADMIN_SESSION_PEPPER_V1: adminSessionPepper,
     ALLOW_LEGACY_ADMIN_AUTH: options?.allowLegacy,
     ADMIN_BREAK_GLASS_POLICY: options?.breakGlass,
-  } as Env;
+  } as unknown as Env;
   return { env, principal, codes, sessions, legacy, sql };
 }
 

@@ -7,6 +7,7 @@ import {
   parseDeviceToken,
 } from "./crypto";
 import { ApiError } from "./http";
+import { verifyVersionedHmacDigest } from "./secret_versions";
 import { writeAudit } from "./service";
 import type {
   AuthenticatedAdmin,
@@ -45,10 +46,10 @@ export async function authenticateDevice(
     `SELECT
        d.id, d.license_id, d.client_install_id_digest, d.fingerprint_digest,
        d.display_name, d.status, d.token_id, d.token_secret_digest,
-       d.token_version, d.device_revision, d.first_activated_at,
+       d.token_secret_version, d.token_version, d.device_revision, d.first_activated_at,
        d.last_validated_at, d.last_app_version, d.last_launcher_version,
        d.disabled_at, d.unbound_at,
-       l.id AS license_row_id, l.key_digest, l.key_hint,
+       l.id AS license_row_id, l.key_digest, l.key_secret_version, l.key_hint,
        l.status AS license_status, l.max_devices, l.release_channel,
        l.revision, l.created_at AS license_created_at,
        l.updated_at AS license_updated_at, l.suspended_at, l.revoked_at,
@@ -63,12 +64,19 @@ export async function authenticateDevice(
   if (row === null) {
     throw new ApiError("INVALID_DEVICE_TOKEN", "设备令牌无效。", { status: 401 });
   }
-  const expected = await hmacSha256Hex(
-    c.env.DEVICE_TOKEN_PEPPER,
-    token.tokenSecret,
-  );
   const stored = String(row.token_secret_digest ?? "");
-  if (!constantTimeEqual(expected, stored)) {
+  const tokenSecretVersion = Number(row.token_secret_version);
+  if (
+    !Number.isSafeInteger(tokenSecretVersion) ||
+    tokenSecretVersion < 1 ||
+    !(await verifyVersionedHmacDigest(
+      c.env,
+      "device-token-pepper",
+      tokenSecretVersion,
+      token.tokenSecret,
+      stored,
+    ))
+  ) {
     throw new ApiError("INVALID_DEVICE_TOKEN", "设备令牌无效。", { status: 401 });
   }
 
@@ -82,6 +90,7 @@ export async function authenticateDevice(
     status: row.status as DeviceRow["status"],
     token_id: String(row.token_id),
     token_secret_digest: stored,
+    token_secret_version: tokenSecretVersion,
     token_version: Number(row.token_version),
     device_revision: Number(row.device_revision),
     first_activated_at: String(row.first_activated_at),
@@ -99,6 +108,7 @@ export async function authenticateDevice(
   const license: LicenseRow = {
     id: String(row.license_row_id),
     key_digest: String(row.key_digest),
+    key_secret_version: Number(row.key_secret_version),
     key_hint: String(row.key_hint),
     status: row.license_status as LicenseRow["status"],
     max_devices: Number(row.max_devices),
@@ -225,7 +235,7 @@ async function authenticateAdminSession(
 ): Promise<AuthenticatedAdmin> {
   const token = parseAdminSessionToken(raw);
   const row = await c.env.DB.prepare(
-    `SELECT s.id, s.token_digest, s.principal_id, s.scopes_json,
+    `SELECT s.id, s.token_digest, s.token_secret_version, s.principal_id, s.scopes_json,
             s.authenticated_at, s.expires_at, s.status,
             p.status AS principal_status
        FROM admin_sessions s
@@ -246,12 +256,18 @@ async function authenticateAdminSession(
   ) {
     throw new ApiError("ADMIN_SESSION_INVALID", "管理员会话无效或已过期。", { status: 401 });
   }
-  const pepper = c.env.ADMIN_SESSION_PEPPER_V1;
-  if (typeof pepper !== "string" || pepper.length < 16) {
-    throw new ApiError("ADMIN_SESSION_INVALID", "管理员会话无效。", { status: 401 });
-  }
-  const digest = await hmacSha256Hex(pepper, token.tokenSecret);
-  if (!constantTimeEqual(digest, String(row.token_digest ?? ""))) {
+  const tokenSecretVersion = Number(row.token_secret_version);
+  if (
+    !Number.isSafeInteger(tokenSecretVersion) ||
+    tokenSecretVersion < 1 ||
+    !(await verifyVersionedHmacDigest(
+      c.env,
+      "admin-session-pepper",
+      tokenSecretVersion,
+      token.tokenSecret,
+      String(row.token_digest ?? ""),
+    ))
+  ) {
     throw new ApiError("ADMIN_SESSION_INVALID", "管理员会话无效。", { status: 401 });
   }
   const allowed = parseScopeSet(row.scopes_json, "ADMIN_SESSION_INVALID");

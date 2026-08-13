@@ -3,9 +3,7 @@ import type { Hono } from "hono";
 import { authenticateDevice } from "./auth";
 import {
   bytesToBase64,
-  constantTimeEqual,
   createDownloadTicket,
-  hmacSha256Hex,
   parseDownloadTicket,
   rolloutBucket,
 } from "./crypto";
@@ -13,6 +11,10 @@ import { fetchReleasePackage } from "./distribution";
 export { fetchGithubReleaseAsset } from "./distribution";
 import { ApiError, readJsonObject, requiredString } from "./http";
 import { compareSemanticVersions, parseSemanticVersion } from "./semver";
+import {
+  verifyVersionedHmacDigest,
+  versionedHmacDigest,
+} from "./secret_versions";
 import { addSeconds, enforceRateLimit, isoNow, writeAudit } from "./service";
 import type { Env, ReleaseRow } from "./types";
 
@@ -326,20 +328,22 @@ export function registerUpdateRoutes(app: WorkerApp): void {
     }
 
     const ticket = createDownloadTicket();
-    const ticketDigest = await hmacSha256Hex(
-      c.env.DOWNLOAD_TICKET_SECRET,
+    const ticketDigest = await versionedHmacDigest(
+      c.env,
+      "download-ticket-secret",
       ticket.secret,
     );
     const expiresAt = isoNow(addSeconds(new Date(), 10 * 60));
     await c.env.DB.prepare(
       `INSERT INTO download_tickets (
-         id, ticket_digest, release_id, license_id, device_id,
+         id, ticket_digest, secret_version, release_id, license_id, device_id,
          expected_sha256, expected_size, expires_at, created_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
       .bind(
         ticket.ticketId,
-        ticketDigest,
+        ticketDigest.digest,
+        ticketDigest.version,
         release.id,
         authenticated.license.id,
         authenticated.device.id,
@@ -389,7 +393,7 @@ export function registerUpdateRoutes(app: WorkerApp): void {
     }
     const row = await c.env.DB.prepare(
       `SELECT
-         t.id, t.ticket_digest, t.release_id, t.license_id, t.device_id,
+         t.id, t.ticket_digest, t.secret_version, t.release_id, t.license_id, t.device_id,
          t.expected_sha256, t.expected_size, t.expires_at, t.revoked_at,
          r.github_repository, r.github_asset_id, r.github_asset_name,
          r.distribution_backend, r.distribution_object_key,
@@ -409,11 +413,18 @@ export function registerUpdateRoutes(app: WorkerApp): void {
         status: 401,
       });
     }
-    const expectedDigest = await hmacSha256Hex(
-      c.env.DOWNLOAD_TICKET_SECRET,
-      ticket.secret,
-    );
-    if (!constantTimeEqual(expectedDigest, String(row.ticket_digest))) {
+    const ticketSecretVersion = Number(row.secret_version);
+    if (
+      !Number.isSafeInteger(ticketSecretVersion) ||
+      ticketSecretVersion < 1 ||
+      !(await verifyVersionedHmacDigest(
+        c.env,
+        "download-ticket-secret",
+        ticketSecretVersion,
+        ticket.secret,
+        String(row.ticket_digest),
+      ))
+    ) {
       throw new ApiError("DOWNLOAD_NOT_AUTHORIZED", "下载票据无效。", {
         status: 401,
       });

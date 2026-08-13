@@ -3,13 +3,13 @@ import type { Hono } from "hono";
 import {
   bytesToBase64Url,
   constantTimeEqual,
-  hmacSha256Hex,
   randomId,
   randomToken,
   sha256Hex,
 } from "./crypto";
 import { ApiError, readJsonObject, requiredString } from "./http";
 import { enforceAdminLoginRateLimit } from "./security_policy";
+import { versionedHmacDigest } from "./secret_versions";
 import { writeAudit } from "./service";
 import type { Env, WorkerVariables } from "./types";
 
@@ -259,29 +259,27 @@ export async function exchangeAdminLoginCode(
     throw adminLoginError("ADMIN_LOGIN_CODE_INVALID", "管理员登录代码已使用。");
   }
   const scopes = parseScopes(row.scopes_json);
-  const pepper = env.ADMIN_SESSION_PEPPER_V1;
-  if (typeof pepper !== "string" || pepper.length < 16) {
-    throw new ApiError("ADMIN_SESSION_CONFIG_INVALID", "管理员会话密钥未配置。", {
-      status: 500,
-      retryable: false,
-    });
-  }
   const tokenId = randomId("adms_", 16);
   const tokenSecret = randomToken(32);
   const sessionToken = `wcas_${tokenId}.${tokenSecret}`;
-  const tokenDigest = await hmacSha256Hex(pepper, tokenSecret);
+  const tokenDigest = await versionedHmacDigest(
+    env,
+    "admin-session-pepper",
+    tokenSecret,
+  );
   const sessionId = randomId("ases_", 16);
   const expiresAt = new Date(now.getTime() + 30 * 60 * 1000).toISOString();
   await env.DB.prepare(
     `INSERT INTO admin_sessions (
-       id, token_id, token_digest, principal_id, scopes_json,
+       id, token_id, token_digest, token_secret_version, principal_id, scopes_json,
        authenticated_at, expires_at, status, created_at, last_used_at, revoked_at
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, NULL, NULL)`,
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, NULL, NULL)`,
   )
     .bind(
       sessionId,
       tokenId,
-      tokenDigest,
+      tokenDigest.digest,
+      tokenDigest.version,
       String(row.principal_id),
       JSON.stringify(scopes),
       authenticatedAt,

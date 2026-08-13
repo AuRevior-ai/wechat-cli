@@ -123,8 +123,10 @@ async function adminRouteEnv(options?: {
       RELEASES: releases,
       ENVIRONMENT: "local",
       ADMIN_TOKEN_PEPPER: adminPepper,
-      RATE_LIMIT_PEPPER: "rate-limit-pepper-admin-tests",
-    } as Env,
+      RATE_LIMIT_PEPPER_CURRENT_VERSION: "1",
+      RATE_LIMIT_PEPPER_READABLE_VERSIONS: "1",
+      RATE_LIMIT_PEPPER_V1: "rate-limit-pepper-admin-tests",
+    } as unknown as Env,
     token,
     sql,
     runs,
@@ -225,6 +227,59 @@ describe("R2 release administration", () => {
       error: { code: "RELEASE_STATE_INVALID" },
     });
     expect(sql.some((statement) => statement.includes("INSERT INTO releases"))).toBe(false);
+  });
+});
+
+describe("license key secret versions", () => {
+  it("uses the current secret version for new license derivation and preserves old-version replay during overlap", async () => {
+    const derive = (
+      adminModule as unknown as {
+        deriveGeneratedLicense?: (
+          env: Env,
+          adminId: string,
+          requestId: string,
+          index: number,
+          secretVersion?: number,
+        ) => Promise<{ keySecretVersion: number; keyDigest: string; licenseKey: string }>;
+      }
+    ).deriveGeneratedLicense;
+    expect(derive).toBeTypeOf("function");
+    const env = {
+      LICENSE_KEY_PEPPER_CURRENT_VERSION: "2",
+      LICENSE_KEY_PEPPER_READABLE_VERSIONS: "1,2",
+      LICENSE_KEY_PEPPER_V1: "license-key-old-secret-value",
+      LICENSE_KEY_PEPPER_V2: "license-key-new-secret-value",
+    } as unknown as Env;
+
+    const current = await derive!(env, "admin-1", "request-1", 0);
+    const oldReplay = await derive!(env, "admin-1", "request-1", 0, 1);
+    expect(current.keySecretVersion).toBe(2);
+    expect(oldReplay.keySecretVersion).toBe(1);
+    expect(current.licenseKey).not.toBe(oldReplay.licenseKey);
+    expect(current.keyDigest).not.toBe(oldReplay.keyDigest);
+  });
+});
+
+describe("contact lookup secret rotation", () => {
+  it("selects records when either encryption or lookup secret version is stale", () => {
+    const query = (
+      adminModule as unknown as {
+        contactRotationSelection?: (
+          encryptionVersion: number,
+          lookupVersion: number,
+          limit: number,
+        ) => { sql: string; bindings: unknown[] };
+      }
+    ).contactRotationSelection;
+    expect(query).toBeTypeOf("function");
+    const selection = query!(2, 3, 50);
+    expect(selection.sql).toContain(
+      "(encryption_key_version != ? OR lookup_secret_version != ?)",
+    );
+    expect(selection.sql).toContain(
+      "SELECT license_id, ciphertext, iv, encryption_key_version, lookup_secret_version",
+    );
+    expect(selection.bindings).toEqual([2, 3, 50]);
   });
 });
 
