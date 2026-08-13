@@ -116,11 +116,64 @@ class WorkerDeploymentPreflightTests(unittest.TestCase):
     def test_deployment_preflight_module_exists(self):
         self.assertIsNotNone(importlib.util.find_spec("scripts.deploy_worker"))
 
-    def test_deployment_preflight_exports_local_only_contract(self):
+    def test_deployment_preflight_exports_local_and_staging_deploy_contract(self):
         from scripts import deploy_worker
 
         self.assertTrue(callable(getattr(deploy_worker, "preflight_worker_deployment", None)))
-        self.assertFalse(hasattr(deploy_worker, "deploy_worker"))
+        self.assertTrue(callable(getattr(deploy_worker, "deploy_staging_worker", None)))
+
+    def test_staging_deploy_refuses_non_staging_before_runner(self):
+        from scripts import deploy_worker
+
+        deploy_staging_worker = getattr(deploy_worker, "deploy_staging_worker", None)
+        self.assertTrue(callable(deploy_staging_worker), "deploy_staging_worker contract missing")
+        calls = []
+        with self.assertRaisesRegex(ValueError, "staging"):
+            deploy_staging_worker(
+                WRANGLER,
+                environment="production",
+                runner=lambda *args, **kwargs: calls.append((args, kwargs)),
+            )
+        self.assertEqual([], calls)
+
+    def test_staging_deploy_runs_preflight_before_exact_wrangler_command(self):
+        from scripts import deploy_worker
+
+        deploy_staging_worker = getattr(deploy_worker, "deploy_staging_worker", None)
+        self.assertTrue(callable(deploy_staging_worker), "deploy_staging_worker contract missing")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config_path = self._write_config(root, self._config())
+            profile_path = self._write_profile(root, environment="staging")
+            secret_names = self._production_secret_names() | {
+                "ADMIN_TOKEN_PEPPER",
+                "GITHUB_RELEASE_READ_TOKEN",
+            }
+            calls = []
+
+            def runner(command, **kwargs):
+                calls.append((command, kwargs))
+                return subprocess.CompletedProcess(command, 0)
+
+            result = deploy_staging_worker(
+                config_path,
+                environment="staging",
+                policy_path=POLICY,
+                trust_profile_path=profile_path,
+                api_origin="https://staging-api.example.test",
+                declared_secret_names=secret_names,
+                runner=runner,
+            )
+
+        self.assertEqual("staging", result.environment)
+        self.assertEqual(1, len(calls))
+        command, kwargs = calls[0]
+        self.assertEqual(
+            ["npx", "wrangler", "deploy", "--env", "staging", "--config", str(config_path)],
+            command,
+        )
+        self.assertEqual(root, kwargs["cwd"])
+        self.assertIs(kwargs["check"], True)
 
     def test_preflight_accepts_explicit_deployment_policy_source(self):
         from scripts.deploy_worker import preflight_worker_deployment
@@ -419,12 +472,20 @@ class WorkerDeploymentPreflightTests(unittest.TestCase):
         else:
             self.fail("current production source must remain fail-closed")
 
-    def test_preflight_cli_help_exposes_no_deploy_action(self):
-        result = subprocess.run(
+    def test_cli_help_exposes_staging_only_deploy_action(self):
+        root_help = subprocess.run(
+            [sys.executable, str(ROOT / "scripts" / "deploy_worker.py"), "--help"],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+        deploy_help = subprocess.run(
             [
                 sys.executable,
                 str(ROOT / "scripts" / "deploy_worker.py"),
-                "preflight",
+                "deploy",
                 "--help",
             ],
             cwd=ROOT,
@@ -434,11 +495,12 @@ class WorkerDeploymentPreflightTests(unittest.TestCase):
             check=False,
         )
 
-        self.assertEqual(0, result.returncode, result.stderr)
-        self.assertIn("--environment", result.stdout)
-        self.assertIn("--trust-profile", result.stdout)
-        self.assertIn("--secret-name", result.stdout)
-        self.assertNotIn(" deploy ", result.stdout.lower())
+        self.assertEqual(0, root_help.returncode, root_help.stderr)
+        self.assertIn("deploy", root_help.stdout.lower())
+        self.assertEqual(0, deploy_help.returncode, deploy_help.stderr)
+        self.assertIn("--environment {staging}", deploy_help.stdout)
+        self.assertIn("--trust-profile", deploy_help.stdout)
+        self.assertIn("--secret-name", deploy_help.stdout)
 
     def test_preflight_cli_direct_execution_returns_safe_json_for_valid_input(self):
         with tempfile.TemporaryDirectory() as tmp:

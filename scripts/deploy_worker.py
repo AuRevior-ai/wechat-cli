@@ -5,9 +5,10 @@ from __future__ import annotations
 import argparse
 import json
 import runpy
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Collection, Mapping
+from typing import Callable, Collection, Mapping
 from urllib.parse import urlparse
 
 
@@ -337,16 +338,51 @@ def preflight_worker_deployment(
     )
 
 
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(
-        description="Validate Worker environment readiness without external mutations."
+def deploy_staging_worker(
+    config_path: str | Path,
+    *,
+    environment: str,
+    policy_path: str | Path = _DEFAULT_POLICY_PATH,
+    trust_profile_path: str | Path | None = None,
+    api_origin: str | None = None,
+    declared_secret_names: Collection[str] = (),
+    runner: Callable[..., object] = subprocess.run,
+    emit: Callable[[str], object] = print,
+) -> DeploymentPreflightResult:
+    if environment != "staging":
+        raise ValueError("deployment action is restricted to staging")
+    result = preflight_worker_deployment(
+        config_path,
+        environment=environment,
+        policy_path=policy_path,
+        trust_profile_path=trust_profile_path,
+        api_origin=api_origin,
+        declared_secret_names=declared_secret_names,
     )
-    subcommands = parser.add_subparsers(dest="action", required=True)
-    preflight = subcommands.add_parser(
-        "preflight",
-        help="Validate a target environment without invoking Wrangler.",
+    emit(json.dumps(result.to_safe_mapping(), sort_keys=True))
+    source = Path(config_path).resolve()
+    runner(
+        [
+            "npx",
+            "wrangler",
+            "deploy",
+            "--env",
+            "staging",
+            "--config",
+            str(source),
+        ],
+        cwd=source.parent,
+        check=True,
     )
-    preflight.add_argument(
+    return result
+
+
+def _add_target_arguments(
+    command: argparse.ArgumentParser,
+    *,
+    environment_choices: tuple[str, ...],
+) -> None:
+    command.add_argument(
         "--config",
         type=Path,
         default=(
@@ -357,29 +393,58 @@ def main(argv: list[str] | None = None) -> int:
         ),
         help="Wrangler source configuration to validate.",
     )
-    preflight.add_argument(
+    command.add_argument(
         "--environment",
         required=True,
-        choices=tuple(sorted(_ALLOWED_ENVIRONMENTS)),
+        choices=environment_choices,
         help="Explicit target environment.",
     )
-    preflight.add_argument(
+    command.add_argument(
         "--trust-profile",
         type=Path,
         help="Deployment trust profile used for staging/production readiness checks.",
     )
-    preflight.add_argument(
+    command.add_argument(
         "--api-origin",
         help="Exact API origin expected by the embedded deployment trust profile.",
     )
-    preflight.add_argument(
+    command.add_argument(
         "--secret-name",
         action="append",
         default=[],
         help="Declared Secret name. Values are never accepted or read.",
     )
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        description="Fail-closed Worker deployment preflight and staging-only deployment."
+    )
+    subcommands = parser.add_subparsers(dest="action", required=True)
+    preflight = subcommands.add_parser(
+        "preflight",
+        help="Validate a target environment without invoking Wrangler.",
+    )
+    _add_target_arguments(
+        preflight,
+        environment_choices=tuple(sorted(_ALLOWED_ENVIRONMENTS)),
+    )
+    deploy = subcommands.add_parser(
+        "deploy",
+        help="Deploy only the staging Worker after a successful preflight.",
+    )
+    _add_target_arguments(deploy, environment_choices=("staging",))
     args = parser.parse_args(argv)
     try:
+        if args.action == "deploy":
+            deploy_staging_worker(
+                args.config,
+                environment=args.environment,
+                trust_profile_path=args.trust_profile,
+                api_origin=args.api_origin,
+                declared_secret_names=args.secret_name,
+            )
+            return 0
         result = preflight_worker_deployment(
             args.config,
             environment=args.environment,
