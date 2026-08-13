@@ -66,12 +66,15 @@ def build_binary(
     *,
     targets: list[str] | None = None,
     trust_profile_path: str | Path | None = None,
+    installer_payload_path: str | Path | None = None,
 ) -> None:
     command = [sys.executable, str(ROOT / "npm" / "scripts" / "build.py"), PLATFORM]
     for target in targets or []:
         command.extend(["--target", target])
     if trust_profile_path is not None:
         command.extend(["--trust-profile", str(trust_profile_path)])
+    if installer_payload_path is not None:
+        command.extend(["--installer-payload", str(installer_payload_path)])
     subprocess.check_call(command, cwd=ROOT)
 
 
@@ -188,6 +191,8 @@ def copy_package_files(
                 "legacy_version": LEGACY_BOOTSTRAP_VERSION,
                 "platform": "windows",
                 "architecture": "x86_64",
+                "production_capable": False,
+                "distribution_tier": "compatibility",
                 "launcher": "launcher/wechat-cli-launcher.exe",
                 "application": f"versions/{version}/wechat-cli.exe",
             },
@@ -291,6 +296,69 @@ def create_bootstrap_package(
         )
     )
     return package_dir, bootstrap_zip
+
+
+def create_production_installer(
+    *,
+    launcher_config_path: str | Path,
+    trust_profile_path: str | Path,
+    signing_provider,
+    authenticode_verifier=None,
+) -> tuple[Path, Path, Path]:
+    from scripts.sign_windows_artifacts import sign_and_verify_windows_artifacts
+    from wechat_cli.launcher.trust_profile import DeploymentTrustProfile
+    from wechat_cli.windows.authenticode import AuthenticodePolicy
+
+    package_dir, legacy_zip, update_zip = create_signed_package(
+        launcher_config_path=launcher_config_path,
+        trust_profile_path=trust_profile_path,
+        signing_provider=signing_provider,
+        authenticode_verifier=authenticode_verifier,
+    )
+    trust_profile = DeploymentTrustProfile.load(trust_profile_path)
+    publisher = trust_profile.windows_publisher_policy.strip()
+    if not publisher:
+        raise ValueError("production installer requires a publisher policy")
+    policy = AuthenticodePolicy(required=True, expected_subject=publisher)
+
+    source_metadata = json.loads(
+        (package_dir / "bootstrap-package.json").read_text(encoding="utf-8")
+    )
+    version = str(source_metadata.get("version", "")).strip()
+    if not version:
+        raise ValueError("bootstrap package metadata is missing version")
+
+    with tempfile.TemporaryDirectory(prefix="wechat-cli-installer-payload-") as tmp:
+        payload = Path(tmp) / "bootstrap_payload"
+        shutil.copytree(package_dir, payload)
+        metadata_path = payload / "bootstrap-package.json"
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        metadata["production_capable"] = True
+        metadata["distribution_tier"] = "production-installer"
+        metadata_path.write_text(
+            json.dumps(
+                metadata,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ),
+            encoding="utf-8",
+        )
+        build_binary(targets=["installer"], installer_payload_path=payload)
+
+    installer_source = _binary_path("wechat-cli-installer.exe")
+    sign_and_verify_windows_artifacts(
+        [installer_source],
+        provider=signing_provider,
+        policy=policy,
+        verifier=authenticode_verifier,
+    )
+    DIST_DIR.mkdir(parents=True, exist_ok=True)
+    final_installer = DIST_DIR / f"wechat-cli-installer-{version}-win-x64.exe"
+    if final_installer.exists():
+        raise FileExistsError(f"installer output already exists: {final_installer}")
+    shutil.copy2(installer_source, final_installer)
+    return final_installer, legacy_zip, update_zip
 
 
 def create_signed_package(

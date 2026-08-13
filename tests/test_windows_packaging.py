@@ -57,6 +57,38 @@ class WindowsPackagingTests(unittest.TestCase):
         self.assertIn("entry.py", joined.replace("\\", "/"))
         self.assertNotIn("--windowed", cmd)
 
+    def test_installer_pyinstaller_command_requires_explicit_payload(self):
+        build = load_module(
+            "npm_build_installer_requires_payload",
+            ROOT / "npm" / "scripts" / "build.py",
+        )
+
+        with self.assertRaisesRegex(ValueError, "payload"):
+            build.make_pyinstaller_command("win32-x64", "installer")
+
+    def test_installer_pyinstaller_command_embeds_bootstrap_payload(self):
+        build = load_module(
+            "npm_build_installer_payload",
+            ROOT / "npm" / "scripts" / "build.py",
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            payload = Path(tmp) / "bootstrap-payload"
+            payload.mkdir()
+            (payload / "install.ps1").write_text("# installer", encoding="utf-8")
+            cmd = build.make_pyinstaller_command(
+                "win32-x64",
+                "installer",
+                installer_payload_path=payload,
+            )
+
+        joined = "\n".join(cmd).replace("\\", "/")
+        self.assertIn("wechat-cli-installer", cmd)
+        self.assertIn("packaging/windows/installer_entry.py", joined)
+        self.assertIn(str(payload).replace("\\", "/"), joined)
+        self.assertIn("bootstrap_payload", joined)
+        self.assertNotIn("--collect-all", cmd)
+        self.assertNotIn("webview", cmd)
+
     def test_launcher_pyinstaller_command_requires_explicit_trust_profile(self):
         build = load_module(
             "npm_build_launcher_requires_profile",
@@ -161,6 +193,16 @@ class WindowsPackagingTests(unittest.TestCase):
         )
         check_call.assert_not_called()
 
+    def test_build_platform_accepts_explicit_installer_payload(self):
+        build = load_module(
+            "npm_build_platform_installer_contract",
+            ROOT / "npm" / "scripts" / "build.py",
+        )
+        self.assertIn(
+            "installer_payload_path",
+            inspect.signature(build.build_platform).parameters,
+        )
+
     def test_build_platform_accepts_explicit_launcher_trust_profile(self):
         build = load_module(
             "npm_build_platform_profile_contract",
@@ -195,6 +237,42 @@ class WindowsPackagingTests(unittest.TestCase):
         self.assertIn("wechat-cli", joined)
         self.assertNotIn("wechat-cli-launcher", joined)
 
+    def test_windows_installer_only_build_forwards_payload_and_checks_output(self):
+        build = load_module(
+            "npm_build_installer_only",
+            ROOT / "npm" / "scripts" / "build.py",
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            output_root = root / "platforms"
+            payload = root / "payload"
+            payload.mkdir()
+            (payload / "install.ps1").write_text("# installer", encoding="utf-8")
+            binary = output_root / "win32-x64" / "bin" / "wechat-cli-installer.exe"
+
+            def create_binary(*_args, **_kwargs):
+                binary.write_bytes(b"installer")
+
+            with patch.object(build, "PLATFORMS_DIR", output_root), patch.object(
+                build, "ensure_target_dependencies"
+            ) as dependency_check, patch.object(
+                build.subprocess, "check_call", side_effect=create_binary
+            ) as check_call:
+                try:
+                    built = build.build_platform(
+                        "win32-x64",
+                        targets=["installer"],
+                        installer_payload_path=payload,
+                    )
+                except Exception as exc:
+                    self.fail(f"installer target was rejected: {exc}")
+                self.assertTrue(built)
+
+        dependency_check.assert_called_once_with("installer")
+        joined = " ".join(check_call.call_args.args[0]).replace("\\", "/")
+        self.assertIn("wechat-cli-installer", joined)
+        self.assertIn(str(payload).replace("\\", "/"), joined)
+
     def test_windows_build_rejects_unknown_target_selection(self):
         build = load_module(
             "npm_build_unknown_target",
@@ -218,6 +296,38 @@ class WindowsPackagingTests(unittest.TestCase):
             build.main()
 
         build_platform.assert_called_once_with("win32-x64", targets=["app"])
+
+    def test_build_cli_forwards_explicit_installer_payload(self):
+        build = load_module(
+            "npm_build_cli_installer_payload",
+            ROOT / "npm" / "scripts" / "build.py",
+        )
+        payload = "C:/external/bootstrap-payload"
+
+        with patch.object(
+            build.sys,
+            "argv",
+            [
+                "build.py",
+                "win32-x64",
+                "--target",
+                "installer",
+                "--installer-payload",
+                payload,
+            ],
+        ), patch.object(build, "ensure_pyinstaller"), patch.object(
+            build, "build_platform", return_value=True
+        ) as build_platform:
+            try:
+                build.main()
+            except SystemExit as exc:
+                self.fail(f"installer payload CLI was rejected: {exc}")
+
+        build_platform.assert_called_once_with(
+            "win32-x64",
+            targets=["installer"],
+            installer_payload_path=payload,
+        )
 
     def test_build_cli_forwards_explicit_launcher_trust_profile(self):
         build = load_module(
@@ -366,6 +476,16 @@ class WindowsPackagingTests(unittest.TestCase):
             self.assertEqual(b"existing", target.read_bytes())
             binary_path.assert_not_called()
 
+    def test_package_build_binary_accepts_installer_payload_path(self):
+        package = load_module(
+            "package_windows_build_installer_contract",
+            ROOT / "scripts" / "package_windows_app.py",
+        )
+        self.assertIn(
+            "installer_payload_path",
+            inspect.signature(package.build_binary).parameters,
+        )
+
     def test_package_build_binary_accepts_trust_profile_path(self):
         package = load_module(
             "package_windows_build_profile_contract",
@@ -408,6 +528,117 @@ class WindowsPackagingTests(unittest.TestCase):
                 package.create_update_only_package(skip_build=False)
 
         build_binary.assert_called_once_with(targets=["app"])
+
+    def test_production_installer_path_requires_explicit_signing_provider_contract(self):
+        package = load_module(
+            "package_windows_production_installer_contract",
+            ROOT / "scripts" / "package_windows_app.py",
+        )
+        creator = getattr(package, "create_production_installer", None)
+        self.assertTrue(callable(creator))
+        parameters = inspect.signature(creator).parameters
+        self.assertIn("signing_provider", parameters)
+        self.assertIn("trust_profile_path", parameters)
+
+    def test_production_installer_uses_production_payload_and_signs_final_exe(self):
+        package = load_module(
+            "package_windows_production_installer_pipeline",
+            ROOT / "scripts" / "package_windows_app.py",
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            dist = root / "dist"
+            dist.mkdir()
+            package_dir = root / "compatibility-package"
+            package_dir.mkdir()
+            (package_dir / "bootstrap-package.json").write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "product": "wechat-cli-web",
+                        "version": "0.5.1",
+                        "production_capable": False,
+                        "distribution_tier": "compatibility",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            legacy_zip = root / "legacy.zip"
+            update_zip = root / "update.zip"
+            profile = root / "deployment-trust-profile.json"
+            profile.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "environment": "staging",
+                        "api_base_url": "https://staging-api.example.test",
+                        "expected_channel": "beta",
+                        "fingerprint_salt": "installer-test-salt",
+                        "release_public_keys": {"release": "test"},
+                        "lease_public_keys": {"lease": "test"},
+                        "windows_publisher_policy": "CN=Board6 Test Publisher",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            installer_source = root / "wechat-cli-installer.exe"
+            events = []
+            captured = {}
+
+            class Provider:
+                def sign(self, path):
+                    events.append(("sign", path.name))
+
+            def verifier(path, policy):
+                events.append(("verify", path.name))
+                self.assertEqual("CN=Board6 Test Publisher", policy.expected_subject)
+
+            def build_installer(**kwargs):
+                payload = Path(kwargs["installer_payload_path"])
+                captured["metadata"] = json.loads(
+                    (payload / "bootstrap-package.json").read_text(encoding="utf-8")
+                )
+                events.append(("build", "installer"))
+                installer_source.write_bytes(b"signed-installer-source")
+
+            with patch.object(package, "DIST_DIR", dist), patch.object(
+                package,
+                "create_signed_package",
+                return_value=(package_dir, legacy_zip, update_zip),
+            ), patch.object(
+                package, "build_binary", side_effect=build_installer
+            ), patch.object(
+                package,
+                "_binary_path",
+                return_value=installer_source,
+            ):
+                try:
+                    result = package.create_production_installer(
+                        launcher_config_path=root / "launcher-config.json",
+                        trust_profile_path=profile,
+                        signing_provider=Provider(),
+                        authenticode_verifier=verifier,
+                    )
+                except Exception as exc:
+                    self.fail(f"production installer orchestration failed: {exc}")
+
+            final_installer, returned_legacy, returned_update = result
+            self.assertTrue(final_installer.is_file())
+            self.assertEqual(b"signed-installer-source", final_installer.read_bytes())
+            self.assertEqual(legacy_zip, returned_legacy)
+            self.assertEqual(update_zip, returned_update)
+            self.assertTrue(captured["metadata"]["production_capable"])
+            self.assertEqual(
+                "production-installer", captured["metadata"]["distribution_tier"]
+            )
+            self.assertEqual(
+                [
+                    ("build", "installer"),
+                    ("sign", "wechat-cli-installer.exe"),
+                    ("verify", "wechat-cli-installer.exe"),
+                ],
+                events,
+            )
 
     def test_signed_package_path_requires_explicit_signing_provider_contract(self):
         package = load_module(
@@ -616,6 +847,13 @@ class WindowsPackagingTests(unittest.TestCase):
                 )
             )
             self.assertEqual("board6-bootstrap-test", manifest["build_id"])
+            bootstrap_metadata = json.loads(
+                (package_dir / "bootstrap-package.json").read_text(encoding="utf-8")
+            )
+            self.assertIn("production_capable", bootstrap_metadata)
+            self.assertIn("distribution_tier", bootstrap_metadata)
+            self.assertFalse(bootstrap_metadata.get("production_capable"))
+            self.assertEqual("compatibility", bootstrap_metadata.get("distribution_tier"))
 
     def test_bootstrap_only_rejects_repository_outputs(self):
         package = load_module(
