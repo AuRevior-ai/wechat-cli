@@ -1,6 +1,6 @@
 # Board 6 Security & Delivery Preparation Implementation Plan
 
-> **APPROVED IMPLEMENTATION PLAN — B6-G0 and B6-G1 complete; B6-G2 pending approval; every later gate remains independently authorized.**
+> **APPROVED IMPLEMENTATION PLAN — B6-G0, B6-G1 and B6-G2 complete; B6-G3 pending approval; every later gate remains independently authorized.**
 >
 > Approved seed content SHA-256: `9faa73f733fa714a49accc91b532471e097ea28f8224d6317908ad57a0261b89`. The exact approved seed remains retained, untracked and untouched, in the Board 5 evidence worktree. This tracked canonical copy originates from that exact seed and contains only the explicitly authorized B6-G0 governance/status corrections plus the approved lifecycle and Access/JWT/break-glass revisions.
 >
@@ -14,7 +14,7 @@
 
 **Design source:** `docs/superpowers/specs/2026-08-12-board-6-security-delivery-preparation-design.md`
 
-**Current execution status (2026-08-12):** Board 5 accepted-complete evidence remains frozen at `67d3dec0fd1c4a02c87be1ab79c4f78ea63f49d6`; frozen main remains `a579a25cb7f16e6fdf88d618252b4a5cbffef53d`. Board 6 runs on `board6/security-delivery-preparation`. B6-G0 source integration and generic packaging-boundary cleanup are complete through `c1d045895a044dbb4c9998a787c77775654074fa`. B6-G1 Update Trust Local Gate is complete through `bdc98afc0d945c4c86f1e3b21686d2fe798ccdd1` with three local implementation commits: `a23b6ff` (server-authoritative channel), `988a504` (exact failed-release identity + release-version immutability), and `bdc98af` (dual GitHub provenance/R2 distribution + corrected readiness-before-provenance lifecycle). Fresh gate verification passed Python 510 run / 2 expected skips / 0 failures, Worker typecheck, Vitest 5 files / 40 tests, `git diff e25f2ae..bdc98af --check`, and targeted non-test sensitive-shape scanning. No cloud/staging/production mutation, real R2 creation, credential change, signing, release publication/register/enable, push, or merge occurred. **B6-G2 is pending approval and has not started.** The B6-G0/B6-G1 task checklists below remain the approved execution map; authoritative completion evidence is the Board 6 commit lineage, gate verification, and canonical project/roadmap state.
+**Current execution status (2026-08-13):** Board 5 accepted-complete evidence remains frozen at `67d3dec0fd1c4a02c87be1ab79c4f78ea63f49d6`; frozen main remains `a579a25cb7f16e6fdf88d618252b4a5cbffef53d`. Board 6 runs on `board6/security-delivery-preparation`. B6-G0 source integration is complete through `c1d045895a044dbb4c9998a787c77775654074fa`; B6-G1 Update Trust Local Gate is complete through `bdc98afc0d945c4c86f1e3b21686d2fe798ccdd1`; B6-G2 Admin & Data Security Local Gate is complete through `e0c91df`. B6-G2 local implementation commits are `835c501` (short-lived Access-backed admin sessions), `8838c7b` (explicit ingress/Origin + centralized admin rate/recent-auth policy), `058f639` (diagnostic consent/retention/privacy split), and `e0c91df` (versioned purpose-separated secrets, overlap/retirement and signing-key trust overlap tests). Fresh B6-G2 verification passed Python 524 run / 2 expected skips / 0 failures, Worker typecheck, Vitest 13 files / 89 tests, `git diff c58ce6f..e0c91df --check`, and targeted non-test sensitive-shape scanning. No Access app/policy, staging migration/deploy, real Secret add/switch/retire, credential rotation, release/signing action, cloud/production mutation, push, or merge occurred. The new version selectors are tracked in `wrangler.jsonc`, but no `_V1` Secret values are recorded or provisioned; staging must migrate existing values into separately authorized versioned Secret names before deployment or the new runtime will fail closed. **B6-G3 is pending approval and has not started.** The completed-gate task checklists below remain the approved execution map; authoritative completion evidence is the Board 6 commit lineage, gate verification, and canonical project/roadmap state.
 
 ---
 
@@ -1728,10 +1728,10 @@ Board 7 remains unstarted. Present Board 6 closure evidence and request a separa
 
 # 21. Current next implementation authorization request
 
-The design/plan are approved and **B6-G0 Source Integration Gate plus B6-G1 Update Trust Local Gate are complete**. B6-G1 implementation ends at local Board 6 HEAD `bdc98afc0d945c4c86f1e3b21686d2fe798ccdd1`; the following governance closure commit only records that verified state and does not authorize the next gate.
+The design/plan are approved and **B6-G0, B6-G1 and B6-G2 are complete locally**. B6-G2 implementation ends at local Board 6 HEAD `e0c91df`; the following governance closure commit only records that verified state and does not authorize the next gate.
 
 The **first and only next implementation authorization request** is now:
 
-> **B6-G2 Admin & Data Security Local Gate** — local TDD/code/schema work for Task 5 short-lived administrator sessions + full Access JWT verification/default-off break-glass policy, Task 6 explicit Origin/CORS and complete purpose-separated admin rate limits, Task 7 diagnostics upload/retention/privacy split, and Task 8 versioned purpose-separated secret-rotation framework. No cloud/staging/production mutation, no Access app/policy creation, no staging migration/deploy, no real Secret add/switch/retire, no credential rotation, no release action, no signing action, and no push/merge to main.
+> **B6-G3 Windows Integrity Local Gate** — local TDD/code/tooling work for Task 9 pywebview pin + pre-load URL adapter, Task 10 embedded Launcher deployment trust profile, Task 11 Authenticode verification + signing-provider abstraction, Task 12 signed bootstrap/installer target, and Task 13 fail-closed deployment/environment preflight. Only disposable test certificates/mocks are allowed. No real certificate purchase/application/use, no staging/cloud/production mutation, no versioned Secret migration, no release action, and no push/merge to main.
 
-No B6-G3 or later gate is implied by any future B6-G2 approval.
+No B6-G4 or later gate is implied by any future B6-G3 approval.

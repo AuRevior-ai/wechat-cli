@@ -1,12 +1,12 @@
 # Board 6 Security & Delivery Preparation Design
 
-> **APPROVED DESIGN — B6-G0 and B6-G1 local gates complete; B6-G2 pending approval; every later gate remains independently authorized.**
+> **APPROVED DESIGN — B6-G0, B6-G1 and B6-G2 local gates complete; B6-G3 pending approval; every later gate remains independently authorized.**
 >
 > Date: 2026-08-12
 >
 > Approved seed content SHA-256: `032b23fd485c39700ffcb5d319832b78c6812edc38afc99d4696a4aeaa9775d0`. The exact approved seed remains retained, untracked and untouched, in the Board 5 evidence worktree. This tracked canonical copy originates from that exact seed and contains only the explicitly authorized B6-G0 governance/status corrections plus the approved lifecycle and Access/JWT/break-glass security revisions.
 >
-> Current authorization boundary: B6-G0 and B6-G1 are complete locally. B6-G2 is **not** authorized. No cloud/staging/production mutation, credential rotation, code-signing purchase/application, release publication, push, merge, reset, rebase, or amend is authorized by this document.
+> Current authorization boundary: B6-G0, B6-G1 and B6-G2 are complete locally. B6-G3 is **not** authorized. No cloud/staging/production mutation, credential rotation, real code-signing purchase/application/use, release publication, push, merge, reset, rebase, or amend is authorized by this document.
 
 ## 1. Goal
 
@@ -42,9 +42,9 @@ Additional required Board 6 concerns are covered in B2–B6, C2–C4, and D3–D
 
 Board 5 is accepted complete at local evidence commit `67d3dec0fd1c4a02c87be1ab79c4f78ea63f49d6`. Frozen main remains `a579a25cb7f16e6fdf88d618252b4a5cbffef53d`.
 
-Board 6 is **in progress** on `board6/security-delivery-preparation`. B6-G0 source integration and packaging-boundary cleanup are complete through `c1d045895a044dbb4c9998a787c77775654074fa`. B6-G1 Update Trust Local Gate is complete through `bdc98afc0d945c4c86f1e3b21686d2fe798ccdd1`: `a23b6ff` makes the authenticated license channel server-authoritative, `988a504` adds exact failed-release identity plus version immutability, and `bdc98af` adds the local dual GitHub-provenance/R2-distribution model with R2-readiness-before-provenance ordering and separately gated enablement. Fresh local verification passed Python 510 run / 2 expected skips / 0 failures, Worker typecheck, and Vitest 40/40. No staging/cloud/production behavior was changed. **B6-G2 remains pending approval.**
+Board 6 is **in progress** on `board6/security-delivery-preparation`. B6-G0 source integration and packaging-boundary cleanup are complete through `c1d045895a044dbb4c9998a787c77775654074fa`. B6-G1 Update Trust Local Gate is complete through `bdc98afc0d945c4c86f1e3b21686d2fe798ccdd1`. B6-G2 Admin & Data Security Local Gate is complete through `e0c91df`: `835c501` adds short-lived cryptographically verified Access-backed admin sessions and default-off production legacy auth, `8838c7b` centralizes Origin/CORS, rate classes and recent-auth, `058f639` separates diagnostic upload TTL from seven-day cloud retention with opaque metadata and explicit local deletion, and `e0c91df` adds versioned purpose-separated secret overlap/retirement plus release/lease signing-key trust overlap coverage. Fresh local verification passed Python 524 run / 2 expected skips / 0 failures, Worker typecheck, and Vitest 89/89. No Access app/policy, real versioned Secret value, staging/cloud/production behavior, release/signing action, push or merge was changed. The new selector contract is tracked but existing staging Secret values still require separately authorized `_V1` migration before deployment. **B6-G3 remains pending approval.**
 
-The risk-card “Current behavior” text below records the behavior observed at design time before the corresponding implementation gate. D1/D2 are locally remediated by B6-G0; A1/A2/A3/A4/B1 local update-trust code paths are implemented by B6-G1 but still require their later staging gates for real environment acceptance; B2–B6 and C-domain implementation remain pending later gates.
+The risk-card “Current behavior” text below records the behavior observed at design time before the corresponding implementation gate. D1/D2 are locally remediated by B6-G0; A1/A2/A3/A4/B1 local update-trust code paths are implemented by B6-G1 but still require later staging acceptance; B2–B6 local admin/data/security controls are implemented by B6-G2 but still require Access/staging/Secret-migration acceptance under later independent gates; C-domain implementation remains pending B6-G3 and later gates.
 
 Relevant design-time implementation facts:
 
@@ -1016,11 +1016,11 @@ Board 6 may be called `accepted complete` only after separately authorized imple
 
 # 8. Current authorization boundary
 
-This design and the companion implementation plan are approved, but approval of the documents never authorizes a gate by itself. **B6-G0 and B6-G1 have each been separately authorized and completed locally. B6-G2 is pending approval.**
+This design and the companion implementation plan are approved, but approval of the documents never authorizes a gate by itself. **B6-G0, B6-G1 and B6-G2 have each been separately authorized and completed locally. B6-G3 is pending approval.**
 
-Current B6-G1 closure/governance update does not authorize:
+Current B6-G2 closure/governance update does not authorize:
 
-- any B6-G2 or later implementation code change;
+- any B6-G3 or later implementation code change;
 - push or merge to main;
 - reset, rebase or amend of the Board 6 lineage;
 - Worker deployment or staging behavior change;
@@ -1033,4 +1033,4 @@ Current B6-G1 closure/governance update does not authorize:
 - production provisioning/mutation;
 - Board 7 entry.
 
-The next possible implementation gate is **B6-G2 Admin & Data Security Local Gate**, and it requires a new explicit user authorization after this B6-G1 closure.
+The next possible implementation gate is **B6-G3 Windows Integrity Local Gate**, and it requires a new explicit user authorization after this B6-G2 closure.
