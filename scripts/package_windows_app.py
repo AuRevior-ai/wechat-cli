@@ -62,10 +62,16 @@ def build_manifest(version: str | None = None) -> list[str]:
     ]
 
 
-def build_binary(*, targets: list[str] | None = None) -> None:
+def build_binary(
+    *,
+    targets: list[str] | None = None,
+    trust_profile_path: str | Path | None = None,
+) -> None:
     command = [sys.executable, str(ROOT / "npm" / "scripts" / "build.py"), PLATFORM]
     for target in targets or []:
         command.extend(["--target", target])
+    if trust_profile_path is not None:
+        command.extend(["--trust-profile", str(trust_profile_path)])
     subprocess.check_call(command, cwd=ROOT)
 
 
@@ -92,17 +98,18 @@ def _validate_launcher_config(path: str | Path) -> Path:
         value = json.loads(source.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise ValueError("launcher config must be valid UTF-8 JSON") from exc
-    required = {
-        "schema_version",
-        "api_base_url",
-        "port",
-        "channel",
-        "fingerprint_salt",
-        "release_public_keys",
-        "lease_public_keys",
-    }
-    if not isinstance(value, dict) or not required.issubset(value):
-        raise ValueError("launcher config is missing required fields")
+    if not isinstance(value, dict) or value.get("schema_version") != 2:
+        raise ValueError("launcher config must use operational schema version 2")
+    allowed = {"schema_version", "port"}
+    unexpected = set(value).difference(allowed)
+    if unexpected:
+        raise ValueError(
+            "operational launcher config contains forbidden fields: "
+            + ", ".join(sorted(unexpected))
+        )
+    port = value.get("port")
+    if isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65535:
+        raise ValueError("operational launcher config port must be between 1 and 65535")
     return source
 
 
@@ -289,10 +296,11 @@ def create_bootstrap_package(
 def create_package(
     *,
     launcher_config_path: str | Path,
+    trust_profile_path: str | Path | None = None,
     skip_build: bool = False,
 ) -> tuple[Path, Path, Path]:
     if not skip_build:
-        build_binary()
+        build_binary(trust_profile_path=trust_profile_path)
 
     version = read_version()
     package_dir = DIST_DIR / f"{PACKAGE_STEM}-{version}"
@@ -331,7 +339,12 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument(
         "--launcher-config",
         type=Path,
-        help="Validated launcher-config.json containing API URL and public keys.",
+        help="Operational launcher-config.json (schema v2; non-trust fields only).",
+    )
+    parser.add_argument(
+        "--launcher-trust-profile",
+        type=Path,
+        help="Explicit deployment trust profile embedded into a freshly built Launcher.",
     )
     parser.add_argument(
         "--update-only",
@@ -384,9 +397,12 @@ def main(argv: list[str] | None = None) -> None:
 
     if args.launcher_config is None:
         parser.error("--launcher-config is required unless --update-only is used")
+    if not args.skip_build and args.launcher_trust_profile is None:
+        parser.error("--launcher-trust-profile is required when building the Launcher")
 
     package_dir, bootstrap_zip, update_zip = create_package(
         launcher_config_path=args.launcher_config,
+        trust_profile_path=args.launcher_trust_profile,
         skip_build=args.skip_build,
     )
     print(f"[+] Bootstrap directory: {package_dir}")

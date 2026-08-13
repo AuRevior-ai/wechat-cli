@@ -1,4 +1,5 @@
 import importlib.util
+import inspect
 import json
 import tempfile
 import unittest
@@ -40,16 +41,63 @@ class WindowsPackagingTests(unittest.TestCase):
         self.assertIn("entry.py", joined.replace("\\", "/"))
         self.assertNotIn("--windowed", cmd)
 
+    def test_launcher_pyinstaller_command_requires_explicit_trust_profile(self):
+        build = load_module(
+            "npm_build_launcher_requires_profile",
+            ROOT / "npm" / "scripts" / "build.py",
+        )
+
+        with self.assertRaisesRegex(ValueError, "trust profile"):
+            build.make_pyinstaller_command("win32-x64", "launcher")
+
+    def test_launcher_pyinstaller_command_rejects_invalid_trust_profile(self):
+        build = load_module(
+            "npm_build_launcher_invalid_profile",
+            ROOT / "npm" / "scripts" / "build.py",
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = Path(tmp) / "deployment-trust-profile.json"
+            profile.write_text("{}", encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "trust profile"):
+                build.make_pyinstaller_command(
+                    "win32-x64",
+                    "launcher",
+                    trust_profile_path=profile,
+                )
+
     def test_launcher_pyinstaller_command_bundles_local_ui_and_webview(self):
         build = load_module("npm_build_launcher", ROOT / "npm" / "scripts" / "build.py")
 
-        cmd = build.make_pyinstaller_command("win32-x64", "launcher")
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = Path(tmp) / "deployment-trust-profile.json"
+            profile.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "environment": "staging",
+                        "api_base_url": "https://staging-api.example.test",
+                        "expected_channel": "beta",
+                        "fingerprint_salt": "build-test-salt",
+                        "release_public_keys": {"release-test": "release-key"},
+                        "lease_public_keys": {"lease-test": "lease-key"},
+                        "windows_publisher_policy": "CN=Board6 Test Publisher",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            cmd = build.make_pyinstaller_command(
+                "win32-x64",
+                "launcher",
+                trust_profile_path=profile,
+            )
         joined = "\n".join(cmd).replace("\\", "/")
 
         self.assertIn("--windowed", cmd)
         self.assertIn("--collect-all", cmd)
         self.assertIn("webview", cmd)
         self.assertIn("wechat_cli/launcher/ui", joined)
+        self.assertIn("deployment-trust-profile.json", joined)
+        self.assertIn("wechat_cli/launcher", joined)
         self.assertIn("launcher_entry.py", joined)
         self.assertIn("wechat-cli-launcher", cmd)
 
@@ -96,6 +144,14 @@ class WindowsPackagingTests(unittest.TestCase):
             ["app", "launcher"],
         )
         check_call.assert_not_called()
+
+    def test_build_platform_accepts_explicit_launcher_trust_profile(self):
+        build = load_module(
+            "npm_build_platform_profile_contract",
+            ROOT / "npm" / "scripts" / "build.py",
+        )
+
+        self.assertIn("trust_profile_path", inspect.signature(build.build_platform).parameters)
 
     def test_windows_app_only_build_preflights_and_builds_only_app(self):
         build = load_module(
@@ -146,6 +202,38 @@ class WindowsPackagingTests(unittest.TestCase):
             build.main()
 
         build_platform.assert_called_once_with("win32-x64", targets=["app"])
+
+    def test_build_cli_forwards_explicit_launcher_trust_profile(self):
+        build = load_module(
+            "npm_build_cli_trust_profile",
+            ROOT / "npm" / "scripts" / "build.py",
+        )
+        profile = "C:/external/deployment-trust-profile.json"
+
+        with patch.object(
+            build.sys,
+            "argv",
+            [
+                "build.py",
+                "win32-x64",
+                "--target",
+                "launcher",
+                "--trust-profile",
+                profile,
+            ],
+        ), patch.object(build, "ensure_pyinstaller"), patch.object(
+            build, "build_platform", return_value=True
+        ) as build_platform:
+            try:
+                build.main()
+            except SystemExit as exc:
+                self.fail(f"launcher trust-profile CLI was rejected: {exc}")
+
+        build_platform.assert_called_once_with(
+            "win32-x64",
+            targets=["launcher"],
+            trust_profile_path=profile,
+        )
 
     def test_build_cli_rejects_unknown_target_before_build_setup(self):
         build = load_module(
@@ -262,6 +350,28 @@ class WindowsPackagingTests(unittest.TestCase):
             self.assertEqual(b"existing", target.read_bytes())
             binary_path.assert_not_called()
 
+    def test_package_build_binary_accepts_trust_profile_path(self):
+        package = load_module(
+            "package_windows_build_profile_contract",
+            ROOT / "scripts" / "package_windows_app.py",
+        )
+
+        self.assertIn("trust_profile_path", inspect.signature(package.build_binary).parameters)
+
+    def test_package_build_binary_forwards_profile_to_launcher_build(self):
+        package = load_module(
+            "package_windows_build_profile_forwarding",
+            ROOT / "scripts" / "package_windows_app.py",
+        )
+        profile = Path("C:/external/deployment-trust-profile.json")
+
+        with patch.object(package.subprocess, "check_call") as check_call:
+            package.build_binary(targets=["launcher"], trust_profile_path=profile)
+
+        command = check_call.call_args.args[0]
+        self.assertIn("--trust-profile", command)
+        self.assertEqual(str(profile), command[command.index("--trust-profile") + 1])
+
     def test_update_only_builds_only_application_target(self):
         package = load_module(
             "package_windows_update_build",
@@ -282,6 +392,46 @@ class WindowsPackagingTests(unittest.TestCase):
                 package.create_update_only_package(skip_build=False)
 
         build_binary.assert_called_once_with(targets=["app"])
+
+    def test_full_package_accepts_explicit_launcher_trust_profile(self):
+        package = load_module(
+            "package_windows_full_profile_contract",
+            ROOT / "scripts" / "package_windows_app.py",
+        )
+
+        self.assertIn("trust_profile_path", inspect.signature(package.create_package).parameters)
+
+    def test_full_package_forwards_trust_profile_when_building_launcher(self):
+        package = load_module(
+            "package_windows_full_profile_forwarding",
+            ROOT / "scripts" / "package_windows_app.py",
+        )
+        profile = Path("C:/external/deployment-trust-profile.json")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            dist = Path(tmp)
+            with patch.object(package, "DIST_DIR", dist), patch.object(
+                package, "build_binary"
+            ) as build_binary, patch.object(
+                package, "read_version", return_value="0.5.1"
+            ), patch.object(
+                package, "copy_package_files"
+            ), patch.object(
+                package.shutil,
+                "make_archive",
+                return_value=str(dist / "wechat-cli-bootstrap-0.5.1.zip"),
+            ), patch.object(
+                package,
+                "create_update_package",
+                return_value=dist / "wechat-cli-app-0.5.1-win-x64.zip",
+            ):
+                package.create_package(
+                    launcher_config_path=Path("C:/external/launcher-config.json"),
+                    trust_profile_path=profile,
+                    skip_build=False,
+                )
+
+        build_binary.assert_called_once_with(trust_profile_path=profile)
 
     def test_update_only_cli_does_not_require_launcher_config(self):
         package = load_module(
@@ -311,18 +461,27 @@ class WindowsPackagingTests(unittest.TestCase):
         config.write_text(
             json.dumps(
                 {
-                    "schema_version": 1,
-                    "api_base_url": "https://staging.example.test",
+                    "schema_version": 2,
                     "port": 18787,
-                    "channel": "stable",
-                    "fingerprint_salt": "board6-staging-v1",
-                    "release_public_keys": {"release-key-staging-01": "release"},
-                    "lease_public_keys": {"lease-key-staging-01": "lease"},
                 }
             ),
             encoding="utf-8",
         )
         return source_root, binary_root, config
+
+    def test_packager_rejects_trust_fields_in_external_launcher_config(self):
+        package = load_module(
+            "package_windows_operational_config_boundary",
+            ROOT / "scripts" / "package_windows_app.py",
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _source_root, _binary_root, config = self._write_bootstrap_only_inputs(root)
+            value = json.loads(config.read_text(encoding="utf-8"))
+            value["api_base_url"] = "https://override.example.test"
+            config.write_text(json.dumps(value), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "operational"):
+                package._validate_launcher_config(config)
 
     def test_bootstrap_only_writes_only_bootstrap_to_external_output(self):
         package = load_module(
@@ -375,6 +534,58 @@ class WindowsPackagingTests(unittest.TestCase):
                             version="0.5.1",
                             build_id="board6-bootstrap-test",
                         )
+
+    def test_full_package_cli_forwards_launcher_trust_profile(self):
+        package = load_module(
+            "package_windows_full_profile_cli",
+            ROOT / "scripts" / "package_windows_app.py",
+        )
+        config = Path("C:/external/launcher-config.json")
+        profile = Path("C:/external/deployment-trust-profile.json")
+        expected = (
+            Path("dist/bootstrap-dir"),
+            Path("dist/bootstrap.zip"),
+            Path("dist/update.zip"),
+        )
+        with patch.object(package, "create_package", return_value=expected) as create_package:
+            try:
+                package.main(
+                    [
+                        "--launcher-config",
+                        str(config),
+                        "--launcher-trust-profile",
+                        str(profile),
+                    ]
+                )
+            except SystemExit as exc:
+                self.fail(f"full package trust-profile CLI was rejected: {exc}")
+
+        create_package.assert_called_once_with(
+            launcher_config_path=config,
+            trust_profile_path=profile,
+            skip_build=False,
+        )
+
+    def test_full_package_cli_requires_trust_profile_when_building(self):
+        package = load_module(
+            "package_windows_full_profile_required",
+            ROOT / "scripts" / "package_windows_app.py",
+        )
+        expected = (
+            Path("dist/bootstrap-dir"),
+            Path("dist/bootstrap.zip"),
+            Path("dist/update.zip"),
+        )
+        with patch.object(package, "create_package", return_value=expected) as create_package:
+            with self.assertRaises(SystemExit):
+                package.main(
+                    [
+                        "--launcher-config",
+                        "C:/external/launcher-config.json",
+                    ]
+                )
+
+        create_package.assert_not_called()
 
     def test_bootstrap_only_cli_passes_explicit_external_inputs_without_building(self):
         package = load_module(

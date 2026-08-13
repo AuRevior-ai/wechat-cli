@@ -4,6 +4,7 @@
 import argparse
 import importlib.util
 import os
+import runpy
 import shutil
 import subprocess
 import sys
@@ -30,6 +31,19 @@ def ensure_pyinstaller():
         pass
     print("[+] Installing PyInstaller...")
     subprocess.check_call([sys.executable, "-m", "pip", "install", "pyinstaller"])
+
+
+def _validate_launcher_trust_profile(path: str | Path) -> Path:
+    source = Path(path)
+    if source.is_symlink() or not source.is_file():
+        raise ValueError("launcher deployment trust profile must be a regular file")
+    try:
+        namespace = runpy.run_path(str(ROOT / "wechat_cli" / "launcher" / "trust_profile.py"))
+        profile_type = namespace["DeploymentTrustProfile"]
+        profile_type.load(source)
+    except Exception as exc:
+        raise ValueError("launcher deployment trust profile is invalid") from exc
+    return source
 
 
 def _resource_sep(platform: str):
@@ -64,7 +78,11 @@ def ensure_target_dependencies(target: str, module_finder=None) -> None:
         )
 
 
-def make_pyinstaller_command(platform: str, target: str = "app"):
+def make_pyinstaller_command(
+    platform: str,
+    target: str = "app",
+    trust_profile_path: str | Path | None = None,
+):
     if platform not in PLATFORM_MAP:
         raise ValueError(f"Unknown platform: {platform}")
     if target not in {"app", "launcher"}:
@@ -72,6 +90,11 @@ def make_pyinstaller_command(platform: str, target: str = "app"):
     os_name, _arch = platform.split("-")
     if target == "launcher" and os_name != "win32":
         raise ValueError("The graphical launcher is currently Windows-only")
+    if target == "launcher" and trust_profile_path is None:
+        raise ValueError("launcher build requires an explicit deployment trust profile")
+    profile_path = None
+    if target == "launcher":
+        profile_path = _validate_launcher_trust_profile(trust_profile_path)
 
     output_dir = PLATFORMS_DIR / platform / "bin"
     sep = _resource_sep(platform)
@@ -110,6 +133,7 @@ def make_pyinstaller_command(platform: str, target: str = "app"):
     launcher_ui = ROOT / "wechat_cli" / "launcher" / "ui"
     if target == "launcher" and launcher_ui.exists():
         cmd.extend(["--add-data", f"{launcher_ui}{sep}wechat_cli/launcher/ui"])
+        cmd.extend(["--add-data", f"{profile_path}{sep}wechat_cli/launcher"])
         cmd.extend(["--collect-all", "webview"])
 
     hidden = ["zstandard"]
@@ -131,7 +155,11 @@ def make_pyinstaller_command(platform: str, target: str = "app"):
     return [str(part) for part in cmd]
 
 
-def build_platform(platform: str, targets: list[str] | None = None):
+def build_platform(
+    platform: str,
+    targets: list[str] | None = None,
+    trust_profile_path: str | Path | None = None,
+):
     if platform not in PLATFORM_MAP:
         raise ValueError(f"Unknown platform: {platform}")
     os_name, _arch = platform.split("-")
@@ -168,7 +196,11 @@ def build_platform(platform: str, targets: list[str] | None = None):
             return False
 
     for target in selected_targets:
-        cmd = make_pyinstaller_command(platform, target)
+        cmd = make_pyinstaller_command(
+            platform,
+            target,
+            trust_profile_path=trust_profile_path,
+        )
         print(f"[+] Running ({target}): {' '.join(cmd)}")
         try:
             subprocess.check_call(cmd, cwd=str(ROOT))
@@ -194,6 +226,10 @@ def main():
         choices=("app", "launcher"),
         dest="targets",
         help="Build only the selected target. May be repeated.",
+    )
+    parser.add_argument(
+        "--trust-profile",
+        help="Explicit deployment trust profile JSON embedded into Launcher builds.",
     )
     args = parser.parse_args()
     platforms = list(args.platforms)
@@ -231,7 +267,10 @@ def main():
             print(f"[-] Unknown platform: {p}")
             results[p] = False
             continue
-        results[p] = build_platform(p, targets=args.targets)
+        build_kwargs = {"targets": args.targets}
+        if args.trust_profile is not None:
+            build_kwargs["trust_profile_path"] = args.trust_profile
+        results[p] = build_platform(p, **build_kwargs)
 
     print(f"\n{'='*60}")
     print("Build Summary:")

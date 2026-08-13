@@ -27,6 +27,7 @@ from .config import LauncherConfig
 from .locks import LauncherInstanceLock, default_launcher_mutex_name
 from .process import LocalApplicationRuntime
 from .service import LauncherResult, LauncherService, LauncherStatus
+from .trust_profile import load_embedded_trust_profile
 from .ui_controller import LauncherUiController
 from .webview import LauncherWindow
 
@@ -269,9 +270,11 @@ def run_launcher_mode(
         return 4
     layout = InstallLayout.from_environment()
     path = Path(config_path) if config_path else _default_config_path(layout)
+    trust_profile = load_embedded_trust_profile()
     config = LauncherConfig.load(
         path,
         allow_insecure_loopback=_allow_loopback(path),
+        trust_profile=trust_profile,
     )
     mutex_name = default_launcher_mutex_name(read_current_user_sid())
     if mode == "download-update":
