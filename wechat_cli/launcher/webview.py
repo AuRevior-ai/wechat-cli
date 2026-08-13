@@ -8,9 +8,7 @@ from typing import Any, Callable, Mapping
 from urllib.parse import unquote, urlparse
 from urllib.request import url2pathname
 
-
-class WebViewUnavailable(RuntimeError):
-    pass
+from .webview_compat import PreloadUrlReader, WebViewUnavailable
 
 
 _ALLOWED_UI_FIELDS = {
@@ -134,9 +132,11 @@ class LauncherWindow:
         *,
         webview_module: Any | None = ...,
         importer: Callable[[str], Any] = importlib.import_module,
+        preload_url_reader: PreloadUrlReader | None = None,
     ) -> None:
         self._webview_module = webview_module
         self._importer = importer
+        self._preload_url_reader = preload_url_reader or PreloadUrlReader()
         self.window = None
 
     def _load_webview(self):
@@ -152,18 +152,6 @@ class LauncherWindow:
         if module is None or not hasattr(module, "create_window") or not hasattr(module, "start"):
             raise WebViewUnavailable("pywebview/EdgeChromium 后端不可用")
         return module
-
-    @staticmethod
-    def _current_url_before_load(window: Any) -> str:
-        gui = getattr(window, "gui", None)
-        uid = getattr(window, "uid", None)
-        getter = getattr(gui, "get_current_url", None)
-        if not callable(getter) or uid is None:
-            raise WebViewUnavailable("pywebview backend URL is unavailable before load")
-        url = getter(uid)
-        if not isinstance(url, str) or not url:
-            raise WebViewUnavailable("pywebview backend returned an invalid URL before load")
-        return url
 
     @staticmethod
     def _navigation_is_local(url: str) -> bool:
@@ -198,7 +186,7 @@ class LauncherWindow:
         def guard_navigation(window=None):
             target = window or self.window
             try:
-                url = self._current_url_before_load(target)
+                url = self._preload_url_reader.read(target)
             except Exception:
                 target.destroy()
                 return

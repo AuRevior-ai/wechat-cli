@@ -1,3 +1,5 @@
+import importlib.util
+import inspect
 import tempfile
 import unittest
 from pathlib import Path
@@ -140,7 +142,94 @@ class FakeWebview:
         self.start_calls.append(kwargs)
 
 
+class WebViewCompatibilityTests(unittest.TestCase):
+    def test_preload_url_adapter_module_exists(self):
+        self.assertIsNotNone(importlib.util.find_spec("wechat_cli.launcher.webview_compat"))
+
+    def test_preload_url_adapter_exports_contract(self):
+        from wechat_cli.launcher import webview_compat
+
+        error_type = getattr(webview_compat, "WebViewUnavailable", None)
+        reader_type = getattr(webview_compat, "PreloadUrlReader", None)
+        self.assertIsNotNone(error_type)
+        self.assertIsNotNone(reader_type)
+        self.assertTrue(issubclass(error_type, RuntimeError))
+        self.assertTrue(callable(reader_type))
+
+    def test_preload_reader_uses_backend_uid_without_public_accessor(self):
+        from wechat_cli.launcher.webview_compat import PreloadUrlReader
+
+        window = FakeWindow("file:///launcher/index.html")
+        reader = PreloadUrlReader()
+        read = getattr(reader, "read", None)
+        self.assertTrue(callable(read))
+
+        self.assertEqual(window.url, read(window))
+        self.assertEqual(0, window.public_get_current_url_calls)
+
+    def test_preload_reader_fails_closed_when_backend_contract_is_missing(self):
+        from wechat_cli.launcher.webview_compat import PreloadUrlReader, WebViewUnavailable
+
+        reader = PreloadUrlReader()
+        try:
+            reader.read(object())
+        except Exception as exc:
+            self.assertIsInstance(exc, WebViewUnavailable)
+        else:
+            self.fail("missing backend contract must fail closed")
+
+    def test_preload_reader_rejects_empty_or_non_string_backend_url(self):
+        from wechat_cli.launcher.webview_compat import PreloadUrlReader, WebViewUnavailable
+
+        class InvalidGui:
+            def __init__(self, value):
+                self.value = value
+
+            def get_current_url(self, _uid):
+                return self.value
+
+        class InvalidWindow:
+            uid = "invalid-window"
+
+            def __init__(self, value):
+                self.gui = InvalidGui(value)
+
+        reader = PreloadUrlReader()
+        for value in ("", None, 123):
+            with self.subTest(value=value):
+                try:
+                    reader.read(InvalidWindow(value))
+                except Exception as exc:
+                    self.assertIsInstance(exc, WebViewUnavailable)
+                else:
+                    self.fail("invalid backend URL must fail closed")
+
+
 class LauncherWindowTests(unittest.TestCase):
+    def test_launcher_window_accepts_preload_url_reader_adapter(self):
+        self.assertIn("preload_url_reader", inspect.signature(LauncherWindow).parameters)
+
+    def test_navigation_guard_delegates_preload_url_reading_to_adapter(self):
+        fake = FakeWebview()
+
+        class FakeReader:
+            def __init__(self):
+                self.calls = []
+
+            def read(self, target):
+                self.calls.append(target)
+                return target.url
+
+        reader = FakeReader()
+        window = LauncherWindow(webview_module=fake, preload_url_reader=reader)
+        window.show(LauncherBridge(state_provider=lambda: {}))
+        handler = fake.window.events.before_load.handlers[0]
+
+        handler(fake.window)
+
+        self.assertEqual([fake.window], reader.calls)
+        self.assertEqual(0, fake.window.destroy_calls)
+
     def test_show_loads_only_local_html_and_forces_edgechromium(self):
         fake = FakeWebview()
         bridge = LauncherBridge(state_provider=lambda: {"status": "ready"})

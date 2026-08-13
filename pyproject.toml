@@ -12,7 +12,7 @@ dependencies = [
     "click>=8.1,<9",
     "pycryptodome>=3.19,<4",
     "zstandard>=0.22,<1",
-    "pywebview>=6.2,<7",
+    "pywebview==6.2.1",
 ]
 
 [project.scripts]

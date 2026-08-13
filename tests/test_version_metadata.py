@@ -30,6 +30,13 @@ class VersionMetadataTests(unittest.TestCase):
         self.assertEqual(project_version, APP_VERSION)
         self.assertEqual("0.1.0", LAUNCHER_VERSION)
 
+    def test_pywebview_is_pinned_to_board5_accepted_version(self):
+        with (ROOT / "pyproject.toml").open("rb") as stream:
+            dependencies = tomllib.load(stream)["project"]["dependencies"]
+
+        self.assertIn("pywebview==6.2.1", dependencies)
+        self.assertFalse(any(item.startswith("pywebview>=") for item in dependencies))
+
     def test_default_build_id_identifies_staging_051(self):
         self.assertEqual("staging-051-20260808.1", BUILD_ID)
 
