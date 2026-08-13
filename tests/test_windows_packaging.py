@@ -1,6 +1,8 @@
 import importlib.util
 import inspect
 import json
+import subprocess
+import sys
 import tempfile
 import unittest
 import zipfile
@@ -19,6 +21,20 @@ def load_module(name, path):
 
 
 class WindowsPackagingTests(unittest.TestCase):
+    def test_package_script_help_works_under_direct_execution(self):
+        result = subprocess.run(
+            [sys.executable, str(ROOT / "scripts" / "package_windows_app.py"), "--help"],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertIn("--launcher-config", result.stdout)
+        self.assertIn("--update-only", result.stdout)
+
     def test_release_metadata_and_windows_guide_credit_author(self):
         pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
         guide = (
@@ -392,6 +408,92 @@ class WindowsPackagingTests(unittest.TestCase):
                 package.create_update_only_package(skip_build=False)
 
         build_binary.assert_called_once_with(targets=["app"])
+
+    def test_signed_package_path_requires_explicit_signing_provider_contract(self):
+        package = load_module(
+            "package_windows_signed_contract",
+            ROOT / "scripts" / "package_windows_app.py",
+        )
+        signed = getattr(package, "create_signed_package", None)
+        self.assertTrue(callable(signed))
+        parameters = inspect.signature(signed).parameters
+        self.assertIn("signing_provider", parameters)
+        self.assertIn("trust_profile_path", parameters)
+
+    def test_signed_package_orders_build_sign_verify_before_packaging(self):
+        package = load_module(
+            "package_windows_signed_order",
+            ROOT / "scripts" / "package_windows_app.py",
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            profile = root / "deployment-trust-profile.json"
+            profile.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "environment": "staging",
+                        "api_base_url": "https://staging-api.example.test",
+                        "expected_channel": "beta",
+                        "fingerprint_salt": "test-salt",
+                        "release_public_keys": {"release": "test"},
+                        "lease_public_keys": {"lease": "test"},
+                        "windows_publisher_policy": "CN=Board6 Test Publisher",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            app = root / "wechat-cli.exe"
+            launcher = root / "wechat-cli-launcher.exe"
+            app.write_bytes(b"app")
+            launcher.write_bytes(b"launcher")
+            events = []
+
+            class Provider:
+                def sign(self, path):
+                    events.append(("sign", path.name))
+
+            def verifier(path, policy):
+                events.append(("verify", path.name))
+                self.assertEqual("CN=Board6 Test Publisher", policy.expected_subject)
+
+            def binary_path(name, **_kwargs):
+                return app if name == "wechat-cli.exe" else launcher
+
+            expected = (root / "package", root / "bootstrap.zip", root / "update.zip")
+            with patch.object(
+                package,
+                "build_binary",
+                side_effect=lambda **_kwargs: events.append(("build", None)),
+            ), patch.object(
+                package, "_binary_path", side_effect=binary_path
+            ), patch.object(
+                package,
+                "create_package",
+                side_effect=lambda **_kwargs: events.append(("package", None)) or expected,
+            ):
+                try:
+                    result = package.create_signed_package(
+                        launcher_config_path=root / "launcher-config.json",
+                        trust_profile_path=profile,
+                        signing_provider=Provider(),
+                        authenticode_verifier=verifier,
+                    )
+                except Exception as exc:
+                    self.fail(f"signed package orchestration failed: {exc}")
+
+        self.assertEqual(expected, result)
+        self.assertEqual(
+            [
+                ("build", None),
+                ("sign", "wechat-cli.exe"),
+                ("verify", "wechat-cli.exe"),
+                ("sign", "wechat-cli-launcher.exe"),
+                ("verify", "wechat-cli-launcher.exe"),
+                ("package", None),
+            ],
+            events,
+        )
 
     def test_full_package_accepts_explicit_launcher_trust_profile(self):
         package = load_module(

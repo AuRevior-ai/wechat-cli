@@ -1,4 +1,5 @@
 import os
+import inspect
 import tempfile
 import unittest
 from pathlib import Path
@@ -11,6 +12,7 @@ from wechat_cli.launcher.process import (
     build_application_launch,
 )
 from wechat_cli.update.layout import InstallLayout
+from wechat_cli.windows.authenticode import AuthenticodePolicy
 
 
 class FakeProcess:
@@ -161,6 +163,49 @@ class LauncherProcessTests(unittest.TestCase):
         with patch("wechat_cli.launcher.process.os.name", "nt"):
             with self.assertRaisesRegex(OSError, "tree stop failed"):
                 manager.stop(process, timeout_seconds=1)
+
+    def test_local_runtime_accepts_authenticode_policy_and_verifier(self):
+        parameters = inspect.signature(LocalApplicationRuntime).parameters
+        self.assertIn("authenticode_policy", parameters)
+        self.assertIn("authenticode_verifier", parameters)
+
+    def test_local_runtime_verifies_authenticode_before_process_start(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            layout, _ = self.make_layout(Path(tmp))
+            session = layout.runtime_dir / "launch-session-test.json"
+            session.write_text("{}", encoding="utf-8")
+            starts = []
+            verified = []
+
+            class Manager:
+                def start(self, launch):
+                    starts.append(launch)
+                    return FakeProcess(launch.command)
+
+                def stop(self, process, timeout_seconds=5):
+                    process.terminate()
+
+            def reject_signature(path, policy):
+                verified.append((path, policy))
+                raise ValueError("signature rejected")
+
+            runtime = LocalApplicationRuntime(
+                layout,
+                port=8787,
+                process_manager=Manager(),
+                authenticode_policy=AuthenticodePolicy(
+                    required=True,
+                    expected_subject="CN=Expected Publisher",
+                ),
+                authenticode_verifier=reject_signature,
+            )
+
+            with self.assertRaisesRegex(ValueError, "signature rejected"):
+                runtime.start("0.5.0", session)
+
+            self.assertEqual(1, len(verified))
+            self.assertEqual(layout.version_path("0.5.0") / "wechat-cli.exe", verified[0][0])
+            self.assertEqual([], starts)
 
     def test_local_runtime_builds_launch_and_waits_for_expected_health(self):
         with tempfile.TemporaryDirectory() as tmp:

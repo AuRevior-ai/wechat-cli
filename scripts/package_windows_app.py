@@ -293,6 +293,41 @@ def create_bootstrap_package(
     return package_dir, bootstrap_zip
 
 
+def create_signed_package(
+    *,
+    launcher_config_path: str | Path,
+    trust_profile_path: str | Path,
+    signing_provider,
+    authenticode_verifier=None,
+) -> tuple[Path, Path, Path]:
+    from scripts.sign_windows_artifacts import sign_and_verify_windows_artifacts
+    from wechat_cli.launcher.trust_profile import DeploymentTrustProfile
+    from wechat_cli.windows.authenticode import AuthenticodePolicy
+
+    trust_profile = DeploymentTrustProfile.load(trust_profile_path)
+    publisher = trust_profile.windows_publisher_policy.strip()
+    if not publisher:
+        raise ValueError("signed Windows package requires a publisher policy")
+    policy = AuthenticodePolicy(required=True, expected_subject=publisher)
+
+    build_binary(trust_profile_path=trust_profile_path)
+    binaries = (
+        _binary_path("wechat-cli.exe"),
+        _binary_path("wechat-cli-launcher.exe"),
+    )
+    sign_and_verify_windows_artifacts(
+        binaries,
+        provider=signing_provider,
+        policy=policy,
+        verifier=authenticode_verifier,
+    )
+    return create_package(
+        launcher_config_path=launcher_config_path,
+        trust_profile_path=trust_profile_path,
+        skip_build=True,
+    )
+
+
 def create_package(
     *,
     launcher_config_path: str | Path,

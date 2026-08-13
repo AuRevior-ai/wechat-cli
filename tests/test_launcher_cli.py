@@ -13,6 +13,35 @@ class LauncherCliTests(unittest.TestCase):
     def test_launcher_runtime_exposes_embedded_trust_profile_loader(self):
         self.assertTrue(hasattr(launcher_cli_module, "load_embedded_trust_profile"))
 
+    @patch("wechat_cli.launcher.cli.LauncherService")
+    @patch("wechat_cli.launcher.cli.LocalApplicationRuntime")
+    @patch("wechat_cli.launcher.cli.LicenseApiClient")
+    @patch("wechat_cli.launcher.cli.LicenseStateStorage")
+    @patch("wechat_cli.launcher.cli.WindowsDpapiProtector")
+    @patch("wechat_cli.launcher.cli._transport")
+    def test_build_service_applies_embedded_windows_publisher_policy(
+        self,
+        _transport,
+        _protector,
+        _storage,
+        _license_client,
+        runtime_type,
+        _service_type,
+    ):
+        layout = MagicMock()
+        layout.state_dir = Path("C:/fake/state")
+        config = MagicMock()
+        config.port = 8787
+        config.lease_keys = object()
+        config.windows_publisher_policy = "CN=Expected Publisher"
+
+        launcher_cli_module._build_service(layout, config)
+
+        policy = runtime_type.call_args.kwargs.get("authenticode_policy")
+        self.assertIsNotNone(policy)
+        self.assertTrue(policy.required)
+        self.assertEqual("CN=Expected Publisher", policy.expected_subject)
+
     @patch("wechat_cli.launcher.cli._repair", return_value=0)
     @patch("wechat_cli.launcher.cli.read_current_user_sid", return_value="S-1-5-21-test")
     @patch("wechat_cli.launcher.cli.LauncherInstanceLock")

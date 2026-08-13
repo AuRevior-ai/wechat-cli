@@ -22,6 +22,7 @@ from ..update.layout import InstallLayout
 from ..update.prepare import prepare_checked_update
 from ..update.transaction import TransactionState, UpdateTransactionEngine
 from ..version import ARCHITECTURE, LAUNCHER_VERSION, PLATFORM, PRODUCT
+from ..windows.authenticode import AuthenticodePolicy
 from ..windows.dpapi import WindowsDpapiProtector
 from .config import LauncherConfig
 from .locks import LauncherInstanceLock, default_launcher_mutex_name
@@ -69,7 +70,15 @@ def _build_service(
         protector,
     )
     license_client = LicenseApiClient(_transport(config))
-    runtime = LocalApplicationRuntime(layout, port=config.port)
+    publisher = config.windows_publisher_policy.strip()
+    runtime = LocalApplicationRuntime(
+        layout,
+        port=config.port,
+        authenticode_policy=AuthenticodePolicy(
+            required=bool(publisher),
+            expected_subject=publisher or None,
+        ),
+    )
     service = LauncherService(
         layout=layout,
         state_storage=storage,

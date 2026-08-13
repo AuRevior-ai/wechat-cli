@@ -13,6 +13,7 @@ from typing import Callable, Mapping, MutableMapping, Sequence
 from ..update.health import fetch_health_json, wait_for_health
 from ..update.layout import InstallLayout
 from ..version import PRODUCT
+from ..windows.authenticode import AuthenticodePolicy, verify_windows_authenticode
 
 
 @dataclass(frozen=True)
@@ -93,6 +94,8 @@ class LocalApplicationRuntime:
         stop_timeout_seconds: float = 5.0,
         stop_interval_seconds: float = 0.05,
         sleep: Callable[[float], None] = time.sleep,
+        authenticode_policy: AuthenticodePolicy | None = None,
+        authenticode_verifier: Callable[..., object] = verify_windows_authenticode,
     ) -> None:
         if not 1 <= port <= 65535:
             raise ValueError("port must be between 1 and 65535")
@@ -110,6 +113,8 @@ class LocalApplicationRuntime:
         self._stop_timeout_seconds = stop_timeout_seconds
         self._stop_interval_seconds = stop_interval_seconds
         self._sleep = sleep
+        self._authenticode_policy = authenticode_policy
+        self._authenticode_verifier = authenticode_verifier
         self._process = None
 
     @property
@@ -123,6 +128,11 @@ class LocalApplicationRuntime:
             session_path=session_path,
             port=self.port,
         )
+        if self._authenticode_policy is not None:
+            self._authenticode_verifier(
+                Path(launch.command[0]),
+                self._authenticode_policy,
+            )
         self._process = self.process_manager.start(launch)
         return self._process
 
