@@ -8,27 +8,25 @@ afterEach(() => {
 });
 
 describe("staging Access JWKS connectivity probe", () => {
-  it("returns safe key-count metadata in staging without returning key material", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () =>
-        new Response(
-          JSON.stringify({
-            keys: [
-              {
-                kid: "kid-test-1",
-                kty: "RSA",
-                alg: "RS256",
-                use: "sig",
-                n: "secret-public-modulus-shape",
-                e: "AQAB",
-              },
-            ],
-          }),
-          { status: 200, headers: { "Content-Type": "application/json" } },
-        ),
+  it("uses manual redirects and returns safe key-count metadata in staging", async () => {
+    const fetchStub = vi.fn(async () =>
+      new Response(
+        JSON.stringify({
+          keys: [
+            {
+              kid: "kid-test-1",
+              kty: "RSA",
+              alg: "RS256",
+              use: "sig",
+              n: "secret-public-modulus-shape",
+              e: "AQAB",
+            },
+          ],
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
       ),
     );
+    vi.stubGlobal("fetch", fetchStub);
     const env = {
       ENVIRONMENT: "staging",
       ACCESS_JWKS_URL: "https://team.example.cloudflareaccess.com/cdn-cgi/access/certs",
@@ -41,6 +39,10 @@ describe("staging Access JWKS connectivity probe", () => {
     );
 
     expect(response.status).toBe(200);
+    expect(fetchStub).toHaveBeenCalledWith(
+      "https://team.example.cloudflareaccess.com/cdn-cgi/access/certs",
+      expect.objectContaining({ redirect: "manual" }),
+    );
     const body = await response.json<Record<string, unknown>>();
     expect(body).toEqual({
       ok: true,

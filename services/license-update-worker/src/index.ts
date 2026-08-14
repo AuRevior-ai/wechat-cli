@@ -61,7 +61,7 @@ export function createApp(options: AdminLoginRouteOptions = {}): Hono<{
     try {
       const response = await fetch(jwksUrl, {
         headers: { Accept: "application/json" },
-        redirect: "error",
+        redirect: "manual",
       });
       if (response.status !== 200) {
         await response.body?.cancel();
