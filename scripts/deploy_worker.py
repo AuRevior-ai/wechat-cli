@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import runpy
+import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -458,9 +459,12 @@ def deploy_staging_worker(
     )
     emit(json.dumps(result.to_safe_mapping(), sort_keys=True))
     source = Path(config_path).resolve()
+    npx = shutil.which("npx")
+    if npx is None:
+        raise RuntimeError("npx executable is unavailable")
     runner(
         [
-            "npx",
+            npx,
             "wrangler",
             "deploy",
             "--env",

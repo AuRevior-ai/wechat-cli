@@ -1,6 +1,7 @@
 import importlib.util
 import inspect
 import json
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -183,7 +184,15 @@ class WorkerDeploymentPreflightTests(unittest.TestCase):
         self.assertEqual(1, len(calls))
         command, kwargs = calls[0]
         self.assertEqual(
-            ["npx", "wrangler", "deploy", "--env", "staging", "--config", str(config_path)],
+            [
+                shutil.which("npx"),
+                "wrangler",
+                "deploy",
+                "--env",
+                "staging",
+                "--config",
+                str(config_path),
+            ],
             command,
         )
         self.assertEqual(root, kwargs["cwd"])
