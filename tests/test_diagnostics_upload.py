@@ -2,16 +2,20 @@ import hashlib
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from wechat_cli.diagnostics_upload import (
     DiagnosticUploadClient,
     DiagnosticUploadError,
     DiagnosticUploadResult,
     InstalledDiagnosticSubmitter,
+    UrllibDiagnosticBinaryTransport,
+    UrllibDiagnosticJsonTransport,
 )
 from wechat_cli.license.lease import TrustedTimeState
 from wechat_cli.license.storage import LocalLicenseState
 from wechat_cli.update.layout import CurrentVersion, InstallLayout
+from wechat_cli.version import APP_VERSION
 
 
 class FakeJsonTransport:
@@ -134,6 +138,82 @@ class InstalledDiagnosticSubmitterTests(unittest.TestCase):
                 submitter.submit(bundle)
 
         self.assertEqual("DIAGNOSTIC_LICENSE_STATE_MISSING", caught.exception.code)
+
+
+class _TransportResponse:
+    def __init__(self, *, status=200, payload=b"{}"):
+        self.status = status
+        self._payload = payload
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        return False
+
+    def read(self, _size=-1):
+        return self._payload
+
+
+class DiagnosticUrllibTransportTests(unittest.TestCase):
+    def test_json_transport_uses_product_user_agent_without_auth_in_url(self):
+        captured = {}
+
+        def opener(request, timeout):
+            captured["request"] = request
+            captured["timeout"] = timeout
+            return _TransportResponse(payload=b'{"ok":true}')
+
+        transport = UrllibDiagnosticJsonTransport("https://api.example.test")
+        with patch("wechat_cli.diagnostics_upload.urlopen", side_effect=opener):
+            status, payload = transport(
+                "POST",
+                "/v1/diagnostics/sessions",
+                {"Authorization": "Bearer TEST_AUTH_VALUE"},
+                {"size_bytes": 10},
+            )
+
+        self.assertEqual(200, status)
+        self.assertEqual({"ok": True}, payload)
+        request = captured["request"]
+        self.assertEqual(
+            f"WeChatCliDiagnostics/{APP_VERSION}",
+            request.get_header("User-agent"),
+        )
+        self.assertEqual("Bearer TEST_AUTH_VALUE", request.get_header("Authorization"))
+        self.assertNotIn("TEST_AUTH_VALUE", request.full_url)
+
+    def test_binary_transport_uses_product_user_agent_without_auth_in_url(self):
+        captured = {}
+
+        def opener(request, timeout):
+            captured["request"] = request
+            captured["timeout"] = timeout
+            return _TransportResponse(payload=b'{"ok":true}')
+
+        with tempfile.TemporaryDirectory() as tmp:
+            bundle = Path(tmp) / "diagnostic.zip"
+            bundle.write_bytes(b"zip-bytes")
+            transport = UrllibDiagnosticBinaryTransport("https://api.example.test")
+            with patch("wechat_cli.diagnostics_upload.urlopen", side_effect=opener):
+                status, payload = transport(
+                    "/v1/diagnostics/diag_01/content",
+                    {"Authorization": "Diagnostic TEST_UPLOAD_AUTH"},
+                    bundle,
+                )
+
+        self.assertEqual(200, status)
+        self.assertEqual({"ok": True}, payload)
+        request = captured["request"]
+        self.assertEqual(
+            f"WeChatCliDiagnostics/{APP_VERSION}",
+            request.get_header("User-agent"),
+        )
+        self.assertEqual(
+            "Diagnostic TEST_UPLOAD_AUTH",
+            request.get_header("Authorization"),
+        )
+        self.assertNotIn("TEST_UPLOAD_AUTH", request.full_url)
 
 
 class DiagnosticUploadClientTests(unittest.TestCase):

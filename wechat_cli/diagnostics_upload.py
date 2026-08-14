@@ -13,7 +13,7 @@ from urllib.request import Request, urlopen
 
 from .license.storage import LicenseStateStorage
 from .update.layout import InstallLayout
-from .version import LAUNCHER_VERSION
+from .version import APP_VERSION, LAUNCHER_VERSION
 
 
 class DiagnosticJsonTransport(Protocol):
@@ -89,6 +89,7 @@ class UrllibDiagnosticJsonTransport:
         _validate_relative_api_path(path)
         request_headers = dict(headers)
         request_headers.setdefault("Accept", "application/json")
+        request_headers.setdefault("User-Agent", f"WeChatCliDiagnostics/{APP_VERSION}")
         body = None
         if payload is not None:
             body = json.dumps(
@@ -175,6 +176,7 @@ class UrllibDiagnosticBinaryTransport:
                 "Accept": "application/json",
                 "Content-Type": "application/zip",
                 "Content-Length": str(len(body)),
+                "User-Agent": f"WeChatCliDiagnostics/{APP_VERSION}",
             },
             method="PUT",
         )
