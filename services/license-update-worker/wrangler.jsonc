@@ -3,7 +3,7 @@
   "name": "wechat-cli-license-update-local",
   "main": "src/index.ts",
   "compatibility_date": "2026-08-04",
-  "compatibility_flags": ["nodejs_compat"],
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
   "workers_dev": true,
   "triggers": {
     "crons": ["17 * * * *"]

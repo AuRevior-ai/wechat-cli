@@ -43,6 +43,7 @@ class WorkerDeploymentPolicyTests(unittest.TestCase):
 
     def test_staging_source_binds_exact_access_verifier_and_admin_custom_domain(self):
         config = json.loads(WRANGLER.read_text(encoding="utf-8"))
+        self.assertIn("global_fetch_strictly_public", config.get("compatibility_flags", []))
         staging = config["env"]["staging"]
         vars_value = staging["vars"]
         self.assertEqual(
