@@ -1561,7 +1561,7 @@ Do not treat this deferred task as completed. Do not perform any real provider o
 
 Each Secret add/switch/retire is an explicit staging credential mutation. The approval matrix must list the exact key class/version affected.
 
-- [ ] **Step 1: Choose one non-destructive representative rotation per mechanism**
+- [x] **Step 1: Choose one non-destructive representative rotation per mechanism**
 
 At minimum prove:
 
@@ -1572,6 +1572,8 @@ contact encryption version migration
 lease signing trust overlap
 release signing trust overlap
 ```
+
+B6-G7 read-only preflight completed on 2026-08-14 and froze the exact representatives/mutation sequence in `docs/superpowers/governance/2026-08-14-board-6-key-rotation-preflight.md`. Selected representatives are `ADMIN_SESSION_PEPPER_V2`, `DOWNLOAD_TICKET_SECRET_V2`, `CONTACT_ENCRYPTION_KEY_V2`, `lease-key-staging-02`, and `release-key-staging-02`. No V2 Secret/key has been created yet and no V1 retirement is authorized by the preflight.
 
 - [ ] **Step 2: Add new version, do not retire old yet**
 
@@ -1717,8 +1719,10 @@ The design/plan are approved and **B6-G0 through B6-G5 are complete**. B6-G4 sta
 
 The B6-G6 entry audit is recorded in `docs/superpowers/governance/2026-08-14-board-6-code-signing-entry-readiness.md`. Phase A provider-neutral local readiness repair/research is complete at `9f4ad0f` + `e9cb67b`; provider research is retained in `docs/superpowers/governance/2026-08-14-board-6-code-signing-provider-decision.md`; dormant optional SSL.com adapter code is at `50e7074`. Under the approved Private / Controlled Distribution amendment, real provider/publisher procurement, payment/KYC, key provisioning, provider activation, non-empty publisher-policy mutation and actual Authenticode signing are now **deferred optional hardening**, not current Board 6 blockers.
 
-The **first and only next mandatory authorization request** is now:
+B6-G7 has been entered under the user's staging-only approval, and its read-only preflight is complete. The exact mutation matrix is recorded in `docs/superpowers/governance/2026-08-14-board-6-key-rotation-preflight.md`; because the design requires each add/switch/retire to be explicitly named, no Secret/key/D1/session/deploy mutation has occurred yet.
 
-> **B6-G7 Staging Key Rotation Drill Gate** — authorize only the exact staging key/secret overlap rotations named for the drill. Production, commercial Authenticode provider actions, Board 5 assets/JD25, push/merge, and unrelated cloud resources remain excluded.
+The **next required authorization** is now:
+
+> **B6-G7 Exact Staging Mutation Matrix Approval** — approve G7-M0 through G7-M5 exactly as documented: temporary `admin_board6_g5_primary` restoration with exact final-state restoration; add only `ADMIN_SESSION_PEPPER_V2`, `DOWNLOAD_TICKET_SECRET_V2`, `CONTACT_ENCRYPTION_KEY_V2`; execute only their named overlap/switch/rollback/re-switch selector transitions; generate repo-external `lease-key-staging-02` and `release-key-staging-02`; temporarily switch/rollback the live lease signer as documented; perform release-key overlap locally without publication; create/cleanup only G7 disposable test data. No V1 Secret/public-trust retirement, production, Board 5/JD25 mutation, push/merge, or B6-G8 is authorized.
 
 B6-G8 remains not entered; Board 7 remains unstarted. Any later Public / Formal Distribution signing activation must receive a new explicit authorization covering provider/vendor, publisher identity, plan/fee/payment, KYC, signer activation, managed/HSM key provisioning, publisher-policy identity, actual signing, and signed acceptance.
