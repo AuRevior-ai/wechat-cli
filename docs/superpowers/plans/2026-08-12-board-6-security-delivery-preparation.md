@@ -1730,6 +1730,8 @@ Board 7 remains unstarted. Present Board 6 closure evidence and request a separa
 
 The design/plan are approved and **B6-G0 through B6-G5 are complete**. B6-G4 staging infrastructure closure is recorded in `docs/superpowers/governance/2026-08-14-board-6-staging-infrastructure-gate.md`; the live staging Worker Version ID is `14a19ea3-5a96-408b-a4e3-0a8d8e4ebe2c`. B6-G5 closure is recorded in `docs/superpowers/governance/2026-08-14-board-6-staging-behavior-acceptance.md`. This completion does not authorize real code-signing procurement/use, production mutation, push, or merge.
 
+A read-only pre-gate readiness audit is recorded in `docs/superpowers/governance/2026-08-14-board-6-code-signing-entry-readiness.md`. It does not enter B6-G6: provider/publisher selection, any payment/application/identity verification/key provisioning, signing-tool/provider adapter implementation, staging publisher-policy mutation, and actual signing remain unperformed.
+
 The **first and only next authorization request** is now:
 
 > **B6-G6 Code Signing Procurement & Real Staging Signing Gate** — requires a separately approved signing vendor/identity, any payment/application, identity verification, non-exportable or managed key provisioning, Authenticode signing of staging app/Launcher/installer, independent Windows signature verification, and one signed staging update acceptance. Production, Board 5 assets/JD25, push/merge, and unrelated cloud resources remain excluded.

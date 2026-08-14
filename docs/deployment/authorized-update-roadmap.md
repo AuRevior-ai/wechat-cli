@@ -24,7 +24,7 @@
 | 3 | 配置 Cloudflare staging 环境 | 已完成 | Worker、D1、R2、Secret、迁移和公网部署已完成 |
 | 4 | 首次测试许可证与测试发布 | **已完成** | Task 1–7 全部完成；验收报告已生成，0.5.0/0.5.1 staging 资产与 Worker 状态已最终复核 |
 | 5 | Windows 真实端到端验收 | **已完成** | functional E2E、process-tree repair、fresh rollback、version-level suppression、fault disable、Cloud Cleanup Gate、fresh final verification 与 final acceptance report 均已完成 |
-| 6 | 安全与正式交付准备 | **进行中** | B6-G0 complete@`c1d0458`；B6-G1 complete@`bdc98af`；B6-G2 complete@`e0c91df`；B6-G3 complete@`1a07447` + audit `d73cf3f`；B6-G4 staging infrastructure complete；B6-G5 staging behavior accepted complete，report=`2026-08-14-board-6-staging-behavior-acceptance.md`，current Worker Version=`6f2aad56...`；B6-G6 等待独立 code-signing procurement/signing approval |
+| 6 | 安全与正式交付准备 | **进行中** | B6-G0 complete@`c1d0458`；B6-G1 complete@`bdc98af`；B6-G2 complete@`e0c91df`；B6-G3 complete@`1a07447` + audit `d73cf3f`；B6-G4 staging infrastructure complete；B6-G5 staging behavior accepted complete，report=`2026-08-14-board-6-staging-behavior-acceptance.md`，current Worker Version=`6f2aad56...`；B6-G6 未进入，read-only entry audit=`2026-08-14-board-6-code-signing-entry-readiness.md`，等待独立 code-signing procurement/signing approval |
 | 7 | 自动化发布与正式上线 | 未开始 | 等待板块 6 完成并另行批准生产动作 |
 
 ## 3. 板块 1：本地最终收尾
@@ -294,6 +294,7 @@ Task 3 已于 2026-08-08 完成真实 staging 验收。用户在本机终端运�
 - B6-G3：**complete**，Task 9–13 本地实现完成至 `1a07447`，pre-staging audit=`d73cf3f`；fresh verification = Python 607 / 2 skips / 0 failures + Worker typecheck + Vitest 89/89；未执行真实签名或 staging/cloud/production mutation
 - B6-G4：**complete**；staging infrastructure report=`docs/superpowers/governance/2026-08-14-board-6-staging-infrastructure-gate.md`；Worker Version=`14a19ea3-5a96-408b-a4e3-0a8d8e4ebe2c`；R2/D1/Secret/Access/custom-domain/deploy reconcile PASS
 - B6-G5：**accepted complete**；report=`docs/superpowers/governance/2026-08-14-board-6-staging-behavior-acceptance.md`；current staging Worker Version=`6f2aad56-12cb-4d8e-8af5-9dceefbe1a49`，fresh health=200/staging；G5 release terminal state=disabled/paused，stable/beta disposable licenses 均 revoked，diagnostics=`deleted`，G5 admin sessions/principal 均 revoked 且 active sessions=0；GitHub prerelease/tag 与 exact R2 package 作为 immutable acceptance evidence 保留；两条历史 disposable device row 仍显示 active，但 parent licenses 已 revoked，row-level cleanup residual 已明确记录且不是活跃授权路径
+- B6-G6：**pending separate approval / not entered**；read-only readiness evidence=`docs/superpowers/governance/2026-08-14-board-6-code-signing-entry-readiness.md`。当前 provider-neutral signing/package/runtime enforcement tests 93/93 PASS，但 real provider/publisher 未选择、concrete signer/signing executable 不存在、默认 PowerShell Authenticode inspector 受混合 PSModulePath 污染而在真实签名样本上 fail closed、Task17 所需 issuer/validity/timestamp public evidence 尚未进入 Python result model；上述事项需在独立 B6-G6 授权后按 provider contract 实施。
 - approved design：`docs/superpowers/specs/2026-08-12-board-6-security-delivery-preparation-design.md`
 - approved implementation plan：`docs/superpowers/plans/2026-08-12-board-6-security-delivery-preparation.md`
 - source-integration provenance：`docs/superpowers/governance/2026-08-12-board-6-source-integration-provenance.md`
