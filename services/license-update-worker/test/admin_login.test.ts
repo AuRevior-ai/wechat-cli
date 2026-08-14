@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 type AdminLoginModule = {
+  fetchAccessJwks?: (url: string) => Promise<{ keys: JsonWebKey[] }>;
   AccessJwtVerifier?: new (options: {
     issuer: string;
     jwksUrl: string;
@@ -104,6 +105,29 @@ async function verifierFixture() {
 }
 
 describe("Cloudflare Access JWT verification", () => {
+  it("fetches the exact Access JWKS endpoint with manual redirect handling", async () => {
+    const module = await loadAdminLoginModule();
+    expect(module.fetchAccessJwks).toBeTypeOf("function");
+    const fetchStub = vi.fn(async () =>
+      new Response(JSON.stringify({ keys: [{ kid: "kid-1" }] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchStub);
+    try {
+      await expect(
+        module.fetchAccessJwks!("https://team.example.cloudflareaccess.com/cdn-cgi/access/certs"),
+      ).resolves.toEqual({ keys: [{ kid: "kid-1" }] });
+      expect(fetchStub).toHaveBeenCalledWith(
+        "https://team.example.cloudflareaccess.com/cdn-cgi/access/certs",
+        expect.objectContaining({ redirect: "manual" }),
+      );
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("cryptographically verifies RS256 and normalizes the verified identity", async () => {
     const { verifier, fixture } = await verifierFixture();
     const assertion = await signedJwt({ privateKey: fixture.privateKey });

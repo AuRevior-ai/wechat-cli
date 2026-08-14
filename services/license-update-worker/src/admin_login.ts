@@ -295,10 +295,10 @@ export async function exchangeAdminLoginCode(
   };
 }
 
-async function fetchAccessJwks(url: string): Promise<{ keys: JsonWebKey[] }> {
+export async function fetchAccessJwks(url: string): Promise<{ keys: JsonWebKey[] }> {
   const response = await fetch(url, {
     headers: { Accept: "application/json" },
-    redirect: "error",
+    redirect: "manual",
   });
   if (response.status !== 200) {
     throw new Error(`Access JWKS returned HTTP ${response.status}`);
