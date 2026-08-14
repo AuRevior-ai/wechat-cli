@@ -1,12 +1,12 @@
 # Board 6 Security & Delivery Preparation Design
 
-> **APPROVED DESIGN — B6-G0 through B6-G3 local gates complete; B6-G4 pending approval; every later gate remains independently authorized.**
+> **APPROVED DESIGN — B6-G0 through B6-G4 complete; B6-G5 pending approval; every later gate remains independently authorized.**
 >
 > Date: 2026-08-12
 >
 > Approved seed content SHA-256: `032b23fd485c39700ffcb5d319832b78c6812edc38afc99d4696a4aeaa9775d0`. The exact approved seed remains retained, untracked and untouched, in the Board 5 evidence worktree. This tracked canonical copy originates from that exact seed and contains only the explicitly authorized B6-G0 governance/status corrections plus the approved lifecycle and Access/JWT/break-glass security revisions.
 >
-> Current authorization boundary: B6-G0 through B6-G3 are complete locally. B6-G4 is **not** authorized. No staging/cloud/production mutation, credential rotation, real code-signing purchase/application/use, release publication, push, merge, reset, rebase, or amend is authorized by this document.
+> Current authorization boundary: B6-G0 through B6-G4 are complete. B6-G5 is **not** authorized. No further staging behavior-acceptance mutation, production mutation, real code-signing purchase/application/use, release publication/enablement, push, merge, reset, rebase, or amend is authorized by this document.
 
 ## 1. Goal
 
@@ -42,7 +42,7 @@ Additional required Board 6 concerns are covered in B2–B6, C2–C4, and D3–D
 
 Board 5 is accepted complete at local evidence commit `67d3dec0fd1c4a02c87be1ab79c4f78ea63f49d6`. Frozen main remains `a579a25cb7f16e6fdf88d618252b4a5cbffef53d`.
 
-Board 6 is **in progress** on `board6/security-delivery-preparation`. B6-G0 source integration and packaging-boundary cleanup are complete through `c1d045895a044dbb4c9998a787c77775654074fa`; B6-G1 Update Trust Local Gate is complete through `bdc98afc0d945c4c86f1e3b21686d2fe798ccdd1`; B6-G2 Admin & Data Security Local Gate is complete through `e0c91df`; B6-G3 Windows Integrity Local Gate is complete through implementation HEAD `1a074472360907be10d336729c3c28e0584b00f3` with pre-staging audit `d73cf3f`. B6-G3 local commits are `4b7fbfe` pywebview compatibility pin/adapter, `a1dc6bd` embedded deployment trust profile, `9b54710` Authenticode/signing-provider/runtime verification, `8d7493e` signed production-capable installer target, and `1a07447` fail-closed deployment preflight. Fresh local verification passed Python 607 run / 2 expected skips / 0 failures, Worker typecheck, and Vitest 89/89. No Access app/policy, real versioned Secret value, staging/cloud/production behavior, real signing action, release action, push or merge was changed. Existing staging Secret values still require separately authorized `_V1` migration before deployment; production D1/routes remain deliberately non-ready. **B6-G4 remains pending approval.**
+Board 6 is **in progress** on `board6/security-delivery-preparation`. B6-G0 source integration and packaging-boundary cleanup are complete through `c1d045895a044dbb4c9998a787c77775654074fa`; B6-G1 Update Trust Local Gate is complete through `bdc98afc0d945c4c86f1e3b21686d2fe798ccdd1`; B6-G2 Admin & Data Security Local Gate is complete through `e0c91df`; B6-G3 Windows Integrity Local Gate is complete through implementation HEAD `1a074472360907be10d336729c3c28e0584b00f3` with pre-staging audit `d73cf3f`; B6-G4 Staging Infrastructure Gate is complete with evidence `docs/superpowers/governance/2026-08-14-board-6-staging-infrastructure-gate.md`. B6-G4 created the staging release R2 bucket, applied D1 migrations `0004`–`0007`, provisioned all seven `_V1` staging Secret names, created/bound the Access-protected admin hostname and exact JWT verifier configuration, and deployed Worker Version ID `14a19ea3-5a96-408b-a4e3-0a8d8e4ebe2c`. Fresh pre-deploy verification passed Python 612 run / 2 expected skips / 0 failures, Worker typecheck, Vitest 89/89, deployment tests 27/27 and Wrangler dry-run. Post-deploy reconcile proved both health origins return 200/staging, Access login start returns 302 on the admin custom domain and 403 on workers.dev, no D1 migrations remain, and Board 5 release rows are unchanged. Production D1/routes remain deliberately non-ready. `admin_principals` and `admin_sessions` remain empty pending an explicitly authorized B6-G5 acceptance setup. **B6-G5 remains pending approval.**
 
 The risk-card “Current behavior” text below records the behavior observed at design time before the corresponding implementation gate. D1/D2 are locally remediated by B6-G0; A1/A2/A3/A4/B1 local update-trust code paths are implemented by B6-G1 but still require later staging acceptance; B2–B6 local admin/data/security controls are implemented by B6-G2 but still require Access/staging/Secret-migration acceptance under later independent gates; C1–C4 and the local D3 deployment-preflight boundary are implemented by B6-G3 but still require real staging infrastructure, behavior and signing acceptance under B6-G4–G6.
 
@@ -1016,21 +1016,19 @@ Board 6 may be called `accepted complete` only after separately authorized imple
 
 # 8. Current authorization boundary
 
-This design and the companion implementation plan are approved, but approval of the documents never authorizes a gate by itself. **B6-G0 through B6-G3 have each been separately authorized and completed locally. B6-G4 is pending approval.**
+This design and the companion implementation plan are approved, but approval of the documents never authorizes a gate by itself. **B6-G0 through B6-G4 have each been separately authorized and completed. B6-G5 is pending approval.**
 
-Current B6-G3 closure/governance update does not authorize:
+Current B6-G4 closure/governance update does not authorize:
 
-- any B6-G4 or later staging/cloud/production mutation;
+- any B6-G5 or later staging behavior-acceptance mutation;
+- provisioning an `admin_principals` row until it is explicitly named in the next gate;
 - push or merge to main;
 - reset, rebase or amend of the Board 6 lineage;
-- Worker deployment or staging behavior change;
-- creation/modification of D1/R2/Access/DNS resources;
-- rotation/addition/removal of a real Secret;
+- publication/registration/enablement of a new acceptance release;
+- removal or rotation of retained staging compatibility Secrets;
 - removal of `GITHUB_RELEASE_READ_TOKEN`;
 - code-signing purchase/application or use of a real signing identity;
-- publication of a new GitHub release/tag;
-- registration or enablement of a new Worker release;
 - production provisioning/mutation;
 - Board 7 entry.
 
-The next possible gate is **B6-G4 Staging Infrastructure Gate**, and it requires a new explicit user authorization after this B6-G3 closure. B6-G4 must remain staging-only and must explicitly enumerate every cloud/resource/Secret mutation before execution.
+The next possible gate is **B6-G5 Staging Behavior Acceptance Gate**, and it requires a new explicit user authorization after this B6-G4 closure. B6-G5 must enumerate every acceptance mutation, including the staging admin-principal setup and any disposable licenses/devices/diagnostic objects or release lifecycle operations actually required.
