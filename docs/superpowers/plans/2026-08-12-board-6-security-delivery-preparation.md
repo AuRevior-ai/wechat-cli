@@ -1,6 +1,6 @@
 # Board 6 Security & Delivery Preparation Implementation Plan
 
-> **APPROVED IMPLEMENTATION PLAN — B6-G0 through B6-G4 complete; B6-G5 pending approval; every later gate remains independently authorized.**
+> **APPROVED IMPLEMENTATION PLAN — B6-G0 through B6-G5 complete; B6-G6 pending separate code-signing procurement/signing approval; every later gate remains independently authorized.**
 >
 > Approved seed content SHA-256: `9faa73f733fa714a49accc91b532471e097ea28f8224d6317908ad57a0261b89`. The exact approved seed remains retained, untracked and untouched, in the Board 5 evidence worktree. This tracked canonical copy originates from that exact seed and contains only the explicitly authorized B6-G0 governance/status corrections plus the approved lifecycle and Access/JWT/break-glass revisions.
 >
@@ -14,7 +14,7 @@
 
 **Design source:** `docs/superpowers/specs/2026-08-12-board-6-security-delivery-preparation-design.md`
 
-**Current execution status (2026-08-14):** Board 5 accepted-complete evidence remains frozen at `67d3dec0fd1c4a02c87be1ab79c4f78ea63f49d6`; frozen main remains `a579a25cb7f16e6fdf88d618252b4a5cbffef53d`. Board 6 runs on `board6/security-delivery-preparation`. B6-G0 source integration is complete through `c1d045895a044dbb4c9998a787c77775654074fa`; B6-G1 Update Trust Local Gate is complete through `bdc98afc0d945c4c86f1e3b21686d2fe798ccdd1`; B6-G2 Admin & Data Security Local Gate is complete through `e0c91df`; B6-G3 Windows Integrity Local Gate is complete through implementation HEAD `1a074472360907be10d336729c3c28e0584b00f3`, with pre-staging security audit `d73cf3f`. B6-G3 local commits are `4b7fbfe` (exact pywebview pin + pre-load adapter), `a1dc6bd` (embedded Launcher deployment trust profile), `9b54710` (Authenticode/runtime/signing-provider boundary), `8d7493e` (production-capable signed installer target), and `1a07447` (fail-closed Worker deployment preflight). Fresh B6-G3 verification passed Python 607 run / 2 expected skips / 0 failures, Worker typecheck, Vitest 13 files / 89 tests, implementation diff/static trust-boundary checks, and targeted non-test sensitive-shape scanning. No Access app/policy, staging migration/deploy, real Secret mutation, credential rotation, real code-signing identity use, release action, cloud/production mutation, push, or merge occurred. B6-G4 Staging Infrastructure Gate is complete. The dedicated `wechat-cli-releases-staging` R2 bucket is live; D1 migrations `0004`–`0007` are applied with none pending; all seven Board 6 `_V1` staging Secret names are provisioned while legacy compatibility names remain; the Access application protects `wechat-cli-admin-staging.aurevior-devspace.com/v1/admin/login/start`; exact staging issuer/JWKS/AUD/email-identity/admin-origin vars are deployed; and Worker Version ID `14a19ea3-5a96-408b-a4e3-0a8d8e4ebe2c` is live on workers.dev plus the admin custom domain. B6-G4 local commits are `14db869`, `332c41a`, and `86da5a5`; closure evidence is `docs/superpowers/governance/2026-08-14-board-6-staging-infrastructure-gate.md`. Fresh pre-deploy verification passed Python 612 run / 2 expected skips / 0 failures, Worker typecheck, Vitest 89/89, deployment tests 27/27 and Wrangler dry-run. Post-deploy reconcile confirms both health origins 200/staging, Access login start 302 on the custom domain and 403 on workers.dev, all historical release rows unchanged, and `admin_principals` / `admin_sessions` still 0. Production D1 remains a replacement placeholder and production routes remain intentionally empty, so production remains fail closed. **B6-G5 is pending approval and has not started.** The completed-gate task checklists below remain the approved execution map; authoritative completion evidence is the Board 6 commit lineage, gate verification, pre-staging audit, and canonical project/roadmap state.
+**Current execution status (2026-08-14):** Board 5 accepted-complete evidence remains frozen at `67d3dec0fd1c4a02c87be1ab79c4f78ea63f49d6`; frozen main remains `a579a25cb7f16e6fdf88d618252b4a5cbffef53d`. Board 6 runs on `board6/security-delivery-preparation`. B6-G0 source integration is complete through `c1d045895a044dbb4c9998a787c77775654074fa`; B6-G1 Update Trust Local Gate is complete through `bdc98afc0d945c4c86f1e3b21686d2fe798ccdd1`; B6-G2 Admin & Data Security Local Gate is complete through `e0c91df`; B6-G3 Windows Integrity Local Gate is complete through implementation HEAD `1a074472360907be10d336729c3c28e0584b00f3`, with pre-staging security audit `d73cf3f`. B6-G3 local commits are `4b7fbfe` (exact pywebview pin + pre-load adapter), `a1dc6bd` (embedded Launcher deployment trust profile), `9b54710` (Authenticode/runtime/signing-provider boundary), `8d7493e` (production-capable signed installer target), and `1a07447` (fail-closed Worker deployment preflight). Fresh B6-G3 verification passed Python 607 run / 2 expected skips / 0 failures, Worker typecheck, Vitest 13 files / 89 tests, implementation diff/static trust-boundary checks, and targeted non-test sensitive-shape scanning. No Access app/policy, staging migration/deploy, real Secret mutation, credential rotation, real code-signing identity use, release action, cloud/production mutation, push, or merge occurred. B6-G4 Staging Infrastructure Gate is complete. The dedicated `wechat-cli-releases-staging` R2 bucket is live; D1 migrations `0004`–`0007` are applied with none pending; all seven Board 6 `_V1` staging Secret names are provisioned while legacy compatibility names remain; the Access application protects `wechat-cli-admin-staging.aurevior-devspace.com/v1/admin/login/start`; exact staging issuer/JWKS/AUD/email-identity/admin-origin vars are deployed; and Worker Version ID `14a19ea3-5a96-408b-a4e3-0a8d8e4ebe2c` is live on workers.dev plus the admin custom domain. B6-G4 local commits are `14db869`, `332c41a`, and `86da5a5`; closure evidence is `docs/superpowers/governance/2026-08-14-board-6-staging-infrastructure-gate.md`. Fresh pre-deploy verification passed Python 612 run / 2 expected skips / 0 failures, Worker typecheck, Vitest 89/89, deployment tests 27/27 and Wrangler dry-run. Post-deploy reconcile confirms both health origins 200/staging, Access login start 302 on the custom domain and 403 on workers.dev, all historical release rows unchanged, and `admin_principals` / `admin_sessions` still 0 at B6-G4 closure; B6-G5 later provisioned one scoped principal and short-lived sessions for acceptance, then revoked the G5 principal/sessions at cleanup with zero active sessions remaining. Production D1 remains a replacement placeholder and production routes remain intentionally empty, so production remains fail closed. **B6-G5 Staging Behavior Acceptance is accepted complete with evidence `docs/superpowers/governance/2026-08-14-board-6-staging-behavior-acceptance.md`; current staging Worker Version after G5 repairs is `6f2aad56-12cb-4d8e-8af5-9dceefbe1a49`; B6-G6 remains pending separate code-signing procurement/signing approval.** The completed-gate task checklists below remain the approved execution map; authoritative completion evidence is the Board 6 commit lineage, gate verification, pre-staging audit, and canonical project/roadmap state.
 
 ---
 
@@ -1482,15 +1482,15 @@ Request **B6-G5 Staging Behavior Acceptance Gate**.
 
 This gate must explicitly enumerate every remote write. If a new staging acceptance release is required, publication/register/enable operations must be separately listed; do not infer release authorization from general behavior-testing approval.
 
-- [ ] **Step 1: Channel trust acceptance**
+- [x] **Step 1: Channel trust acceptance**
 
 Use newly created disposable Board 6 test licenses/devices, not JD25 or retired Board 5 licenses. Verify aligned stable/beta behavior and mismatch rejection with zero ticket creation.
 
-- [ ] **Step 2: Exact failed-release acceptance**
+- [x] **Step 2: Exact failed-release acceptance**
 
 Use a controlled staging candidate pair proving exact `(version, manifest_sha256)` suppression. Do not reuse historical Board 5 fault release unless the gate explicitly says so.
 
-- [ ] **Step 3: R2 distribution and immutable provenance acceptance**
+- [x] **Step 3: R2 distribution and immutable provenance acceptance**
 
 A separately authorized staging acceptance release, if needed, must follow this exact order:
 
@@ -1507,25 +1507,25 @@ then enable only under an explicitly approved release-enable sub-gate
 
 A readiness failure must leave GitHub provenance unpublished and the candidate ineligible. A post-publication/pre-enable rollback keeps immutable provenance intact and leaves the Worker candidate disabled/paused.
 
-- [ ] **Step 4: Admin session and Access cryptographic identity acceptance**
+- [x] **Step 4: Admin session and Access cryptographic identity acceptance**
 
 Prove real staging Access login, exact staging issuer/audience/hostname binding, one-time code binding, 30-minute session metadata, scope behavior, high-risk recent-auth requirement, revoke, and no normal long-lived admin token use. Reconfirm the cryptographic negative-test suite for signature/key/algorithm/issuer/audience/time/claim/JWKS behaviors. Verify staging legacy mode is only present if separately enabled by explicit staging policy and that the production policy artifact remains default-off with no permanent legacy fallback endpoint.
 
-- [ ] **Step 5: Origin/rate acceptance**
+- [x] **Step 5: Origin/rate acceptance**
 
 Verify unexpected Origin fail-close, no wildcard CORS, and 429 behavior for controlled limits without causing denial against shared/production traffic.
 
-- [ ] **Step 6: Diagnostics retention acceptance**
+- [x] **Step 6: Diagnostics retention acceptance**
 
 Use a disposable diagnostic object. Verify opaque R2 path, upload TTL independent from retention TTL, admin download/delete, and scheduled/forced test cleanup through an acceptance-safe mechanism. Do not wait seven real days; use deterministic injectable clock in staging acceptance tooling if the implementation provides it, without changing system time.
 
-- [ ] **Step 7: Reconcile and revoke disposable test credentials**
+- [x] **Step 7: Reconcile and revoke disposable test credentials**
 
 Cleanup only the Board 6 test licenses/devices/releases/objects named in the approved gate. Preserve evidence summaries.
 
 ### Mandatory STOP
 
-Do not proceed to real code signing. Request **B6-G6**.
+B6-G5 is accepted complete. Do not proceed to real code signing until **B6-G6** separately approves the provider/identity choice, any payment/application, identity verification, key provisioning, and actual signing operation.
 
 ---
 
@@ -1728,10 +1728,10 @@ Board 7 remains unstarted. Present Board 6 closure evidence and request a separa
 
 # 21. Current next implementation authorization request
 
-The design/plan are approved and **B6-G0 through B6-G4 are complete**. B6-G4 staging infrastructure closure is recorded in `docs/superpowers/governance/2026-08-14-board-6-staging-infrastructure-gate.md`; the live staging Worker Version ID is `14a19ea3-5a96-408b-a4e3-0a8d8e4ebe2c`. This completion does not authorize behavior acceptance or any later gate.
+The design/plan are approved and **B6-G0 through B6-G5 are complete**. B6-G4 staging infrastructure closure is recorded in `docs/superpowers/governance/2026-08-14-board-6-staging-infrastructure-gate.md`; the live staging Worker Version ID is `14a19ea3-5a96-408b-a4e3-0a8d8e4ebe2c`. B6-G5 closure is recorded in `docs/superpowers/governance/2026-08-14-board-6-staging-behavior-acceptance.md`. This completion does not authorize real code-signing procurement/use, production mutation, push, or merge.
 
 The **first and only next authorization request** is now:
 
-> **B6-G5 Staging Behavior Acceptance Gate** — staging-only behavior acceptance for channel authority/mismatch, exact failed-release suppression, R2 distribution/provenance, Access-backed short-lived admin sessions, Origin/rate controls, and diagnostics retention. The exact mutation matrix must explicitly include provisioning one enabled staging `admin_principals` row for the already Access-allowed administrator identity before real login acceptance, any disposable Board 6 licenses/devices/diagnostic objects, and every acceptance release GitHub Draft/R2/upload/publish/register/enable/cleanup operation actually required. Existing Board 5 releases, JD25, production, real code-signing procurement/use, push/merge, and unrelated cloud resources remain excluded unless separately named.
+> **B6-G6 Code Signing Procurement & Real Staging Signing Gate** — requires a separately approved signing vendor/identity, any payment/application, identity verification, non-exportable or managed key provisioning, Authenticode signing of staging app/Launcher/installer, independent Windows signature verification, and one signed staging update acceptance. Production, Board 5 assets/JD25, push/merge, and unrelated cloud resources remain excluded.
 
-No B6-G6 or later gate is implied by any future B6-G5 approval.
+B6-G6 is **not** implied by the prior blanket continuation approval because Task 17 requires separate explicit authorization of the signing vendor/identity, payment/application, identity verification, key provisioning, and actual signing. No B6-G7 or later gate is implied by any future B6-G6 approval.
