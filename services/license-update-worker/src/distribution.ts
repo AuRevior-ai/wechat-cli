@@ -241,12 +241,17 @@ export async function assertR2ReleaseReady(
   }
 }
 
-function r2Response(object: R2ObjectBody, totalSize: number): Response {
+function r2Response(
+  object: R2ObjectBody,
+  totalSize: number,
+  rangeRequested: boolean,
+): Response {
   const headers = new Headers();
   object.writeHttpMetadata(headers);
   headers.set("ETag", object.httpEtag);
   let status = 200;
   if (
+    rangeRequested &&
     object.range !== undefined &&
     "offset" in object.range &&
     typeof object.range.offset === "number" &&
@@ -306,7 +311,7 @@ async function fetchR2ReleasePackage(
       retryable: false,
     });
   }
-  return r2Response(object, expectedSize);
+  return r2Response(object, expectedSize, request.range !== undefined);
 }
 
 export async function fetchReleasePackage(

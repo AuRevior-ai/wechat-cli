@@ -177,6 +177,40 @@ describe("release distribution backend", () => {
     expect(get).toHaveBeenCalledTimes(1);
   });
 
+  it("returns HTTP 200 for a full R2 request even when R2 reports a full-object range", async () => {
+    const module = await loadDistributionModule();
+    expect(module.fetchReleasePackage).toBeTypeOf("function");
+    const bytes = Uint8Array.from([1, 2, 3]);
+    const sha = "c".repeat(64);
+    const objectKey = `releases/stable/rel/${sha}.zip`;
+    const get = vi.fn(async (_key: string, options?: R2GetOptions) => {
+      expect(options).toBeUndefined();
+      return fakeR2Object({
+        key: objectKey,
+        bytes,
+        sha256: sha,
+        size: 3,
+        range: { offset: 0, length: 3 },
+      });
+    });
+    const env = {
+      ENVIRONMENT: "staging",
+      RELEASES: { get } as unknown as R2Bucket,
+    } as Env;
+
+    const response = await module.fetchReleasePackage!(env, {
+      backend: "r2",
+      objectKey,
+      expectedSha256: sha,
+      expectedSize: 3,
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Content-Range")).toBeNull();
+    expect(response.headers.get("Content-Length")).toBe("3");
+    expect([...new Uint8Array(await response.arrayBuffer())]).toEqual([1, 2, 3]);
+  });
+
   it("fails closed when R2 size or hash metadata does not match", async () => {
     const module = await loadDistributionModule();
     expect(module.assertR2ReleaseReady).toBeTypeOf("function");
