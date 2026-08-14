@@ -52,8 +52,19 @@
   "env": {
     "staging": {
       "name": "wechat-cli-license-update-staging",
+      "routes": [
+        {
+          "pattern": "wechat-cli-admin-staging.aurevior-devspace.com",
+          "custom_domain": true
+        }
+      ],
       "vars": {
         "ENVIRONMENT": "staging",
+        "ACCESS_JWT_ISSUER": "https://floral-glitter-1ede.cloudflareaccess.com",
+        "ACCESS_JWKS_URL": "https://floral-glitter-1ede.cloudflareaccess.com/cdn-cgi/access/certs",
+        "ACCESS_AUDIENCES": "12ce8ebd33213a9c532ba90144d8bf0dc5df851c289071be5484d9cc751eb6fb",
+        "ACCESS_IDENTITY_CLAIM": "email",
+        "ACCESS_ADMIN_ORIGIN": "https://wechat-cli-admin-staging.aurevior-devspace.com",
         "LEASE_SIGNING_KEY_ID": "lease-key-staging-01",
         "CONTACT_ENCRYPTION_KEY_VERSION": "1",
         "MAX_DIAGNOSTIC_BYTES": "20971520",

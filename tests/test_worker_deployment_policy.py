@@ -5,6 +5,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 POLICY = ROOT / "services" / "license-update-worker" / "deployment-policy.json"
+WRANGLER = ROOT / "services" / "license-update-worker" / "wrangler.jsonc"
 
 
 class WorkerDeploymentPolicyTests(unittest.TestCase):
@@ -39,6 +40,37 @@ class WorkerDeploymentPolicyTests(unittest.TestCase):
         self.assertNotIn("github_pat_", serialized)
         self.assertNotIn("private key-----", serialized)
         self.assertNotIn("secret_value", serialized)
+
+    def test_staging_source_binds_exact_access_verifier_and_admin_custom_domain(self):
+        config = json.loads(WRANGLER.read_text(encoding="utf-8"))
+        staging = config["env"]["staging"]
+        vars_value = staging["vars"]
+        self.assertEqual(
+            "https://floral-glitter-1ede.cloudflareaccess.com",
+            vars_value.get("ACCESS_JWT_ISSUER"),
+        )
+        self.assertEqual(
+            "https://floral-glitter-1ede.cloudflareaccess.com/cdn-cgi/access/certs",
+            vars_value.get("ACCESS_JWKS_URL"),
+        )
+        self.assertEqual(
+            "12ce8ebd33213a9c532ba90144d8bf0dc5df851c289071be5484d9cc751eb6fb",
+            vars_value.get("ACCESS_AUDIENCES"),
+        )
+        self.assertEqual("email", vars_value.get("ACCESS_IDENTITY_CLAIM"))
+        self.assertEqual(
+            "https://wechat-cli-admin-staging.aurevior-devspace.com",
+            vars_value.get("ACCESS_ADMIN_ORIGIN"),
+        )
+        self.assertEqual(
+            [
+                {
+                    "pattern": "wechat-cli-admin-staging.aurevior-devspace.com",
+                    "custom_domain": True,
+                }
+            ],
+            staging.get("routes"),
+        )
 
 
 if __name__ == "__main__":

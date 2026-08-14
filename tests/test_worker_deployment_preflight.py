@@ -47,7 +47,21 @@ class WorkerDeploymentPreflightTests(unittest.TestCase):
                 "staging": {
                     "name": "wechat-cli-license-update-staging",
                     "workers_dev": True,
-                    "vars": {"ENVIRONMENT": "staging", **selectors},
+                    "routes": [
+                        {
+                            "pattern": "staging-admin.example.test",
+                            "custom_domain": True,
+                        }
+                    ],
+                    "vars": {
+                        "ENVIRONMENT": "staging",
+                        "ACCESS_JWT_ISSUER": "https://team.cloudflareaccess.com",
+                        "ACCESS_JWKS_URL": "https://team.cloudflareaccess.com/cdn-cgi/access/certs",
+                        "ACCESS_AUDIENCES": "staging-audience",
+                        "ACCESS_IDENTITY_CLAIM": "email",
+                        "ACCESS_ADMIN_ORIGIN": "https://staging-admin.example.test",
+                        **selectors,
+                    },
                     "d1_databases": [
                         {"binding": "DB", "database_name": "db-staging", "database_id": "db-staging-id"}
                     ],
@@ -257,6 +271,60 @@ class WorkerDeploymentPreflightTests(unittest.TestCase):
 
         self.assertNotIn("RATE_LIMIT_PEPPER_V1", result.required_secret_names)
 
+    def test_preflight_rejects_missing_or_inconsistent_staging_access_boundary(self):
+        from scripts.deploy_worker import preflight_worker_deployment
+
+        cases = [
+            ("missing issuer", lambda staging: staging["vars"].pop("ACCESS_JWT_ISSUER"), "access"),
+            (
+                "jwks origin mismatch",
+                lambda staging: staging["vars"].update(
+                    ACCESS_JWKS_URL="https://other.cloudflareaccess.com/cdn-cgi/access/certs"
+                ),
+                "jwks",
+            ),
+            (
+                "wrong identity claim",
+                lambda staging: staging["vars"].update(ACCESS_IDENTITY_CLAIM="sub"),
+                "identity",
+            ),
+            (
+                "workers.dev admin origin",
+                lambda staging: staging["vars"].update(
+                    ACCESS_ADMIN_ORIGIN="https://worker.workers.dev"
+                ),
+                "origin",
+            ),
+            (
+                "custom domain mismatch",
+                lambda staging: staging.update(
+                    routes=[{"pattern": "other.example.test", "custom_domain": True}]
+                ),
+                "route",
+            ),
+        ]
+        for label, mutate, expected in cases:
+            with self.subTest(label=label), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                config = self._config()
+                mutate(config["env"]["staging"])
+                config_path = self._write_config(root, config)
+                profile_path = self._write_profile(root, environment="staging")
+                try:
+                    preflight_worker_deployment(
+                        config_path,
+                        environment="staging",
+                        trust_profile_path=profile_path,
+                        api_origin="https://staging-api.example.test",
+                        declared_secret_names=self._production_secret_names()
+                        | {"ADMIN_TOKEN_PEPPER", "GITHUB_RELEASE_READ_TOKEN"},
+                    )
+                except Exception as exc:
+                    self.assertIsInstance(exc, ValueError)
+                    self.assertIn(expected, str(exc).lower())
+                else:
+                    self.fail("unsafe staging Access boundary must fail closed")
+
     def test_preflight_requires_explicit_known_environment(self):
         from scripts.deploy_worker import preflight_worker_deployment
 
@@ -460,6 +528,35 @@ class WorkerDeploymentPreflightTests(unittest.TestCase):
         self.assertNotIn("database_id", serialized)
         self.assertNotIn("secret_value", serialized)
         self.assertNotIn("api_origin", serialized)
+
+    def test_staging_preflight_does_not_require_production_provisioning(self):
+        from scripts.deploy_worker import preflight_worker_deployment
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config = self._config()
+            config["env"]["production"]["d1_databases"][0]["database_id"] = (
+                "REPLACE_WITH_PRODUCTION_D1_ID"
+            )
+            config["env"]["production"]["routes"] = []
+            config_path = self._write_config(root, config)
+            profile_path = self._write_profile(root, environment="staging")
+            secret_names = self._production_secret_names() | {
+                "ADMIN_TOKEN_PEPPER",
+                "GITHUB_RELEASE_READ_TOKEN",
+            }
+            try:
+                result = preflight_worker_deployment(
+                    config_path,
+                    environment="staging",
+                    trust_profile_path=profile_path,
+                    api_origin="https://staging-api.example.test",
+                    declared_secret_names=secret_names,
+                )
+            except Exception as exc:
+                self.fail(f"staging preflight incorrectly required production provisioning: {exc}")
+
+        self.assertEqual("staging", result.environment)
 
     def test_current_production_source_is_intentionally_not_ready(self):
         from scripts.deploy_worker import preflight_worker_deployment

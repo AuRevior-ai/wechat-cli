@@ -133,7 +133,12 @@ def _contains_placeholder(value: str) -> bool:
     return "placeholder" in lowered or "replace" in lowered
 
 
-def _bindings(environment: str, config: Mapping[str, object]) -> tuple[str, str, dict[str, str]]:
+def _bindings(
+    environment: str,
+    config: Mapping[str, object],
+    *,
+    reject_placeholders: bool = True,
+) -> tuple[str, str, dict[str, str]]:
     vars_value = _mapping(config.get("vars"), f"{environment} vars")
     if vars_value.get("ENVIRONMENT") != environment:
         raise ValueError(f"{environment} ENVIRONMENT variable does not match target")
@@ -169,7 +174,7 @@ def _bindings(environment: str, config: Mapping[str, object]) -> tuple[str, str,
     if set(buckets) != set(_REQUIRED_R2_BINDINGS) or any(not value for value in buckets.values()):
         raise ValueError(f"{environment} requires DIAGNOSTICS and RELEASES R2 bindings")
 
-    if environment in {"staging", "production"}:
+    if environment in {"staging", "production"} and reject_placeholders:
         if _contains_placeholder(database_id):
             raise ValueError(f"{environment} D1 binding contains a placeholder")
         if any(_contains_placeholder(value) for value in buckets.values()):
@@ -177,12 +182,29 @@ def _bindings(environment: str, config: Mapping[str, object]) -> tuple[str, str,
     return database_name, database_id, buckets
 
 
-def _validate_environment_isolation(root: Mapping[str, object]) -> None:
+def _validate_environment_isolation(
+    root: Mapping[str, object],
+    target_environment: str,
+) -> None:
     staging = _environment_config(root, "staging")
     production = _environment_config(root, "production")
-    _staging_name, staging_id, staging_buckets = _bindings("staging", staging)
-    _production_name, production_id, production_buckets = _bindings("production", production)
-    if staging_id == production_id:
+    staging_name, staging_id, staging_buckets = _bindings(
+        "staging",
+        staging,
+        reject_placeholders=target_environment in {"staging", "production"},
+    )
+    production_name, production_id, production_buckets = _bindings(
+        "production",
+        production,
+        reject_placeholders=target_environment == "production",
+    )
+    if staging_name == production_name:
+        raise ValueError("staging/production D1 database-name collision")
+    if (
+        not _contains_placeholder(staging_id)
+        and not _contains_placeholder(production_id)
+        and staging_id == production_id
+    ):
         raise ValueError("staging/production D1 resource collision")
     for binding in _REQUIRED_R2_BINDINGS:
         if staging_buckets[binding] == production_buckets[binding]:
@@ -195,6 +217,79 @@ def _validate_production_ingress(config: Mapping[str, object]) -> None:
     routes = config.get("routes")
     if not isinstance(routes, list) or not routes:
         raise ValueError("production custom route is required")
+
+
+def _validate_staging_access_boundary(config: Mapping[str, object]) -> None:
+    vars_value = _mapping(config.get("vars"), "staging vars")
+    required = (
+        "ACCESS_JWT_ISSUER",
+        "ACCESS_JWKS_URL",
+        "ACCESS_AUDIENCES",
+        "ACCESS_IDENTITY_CLAIM",
+        "ACCESS_ADMIN_ORIGIN",
+    )
+    values: dict[str, str] = {}
+    for name in required:
+        value = vars_value.get(name)
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError(f"staging Access configuration is missing {name}")
+        values[name] = value.strip()
+
+    issuer = urlparse(values["ACCESS_JWT_ISSUER"])
+    if (
+        issuer.scheme != "https"
+        or not issuer.hostname
+        or issuer.username
+        or issuer.password
+        or issuer.path not in {"", "/"}
+        or issuer.query
+        or issuer.fragment
+        or not issuer.hostname.lower().endswith(".cloudflareaccess.com")
+    ):
+        raise ValueError("staging Access issuer is invalid")
+
+    jwks = urlparse(values["ACCESS_JWKS_URL"])
+    if (
+        jwks.scheme != "https"
+        or jwks.netloc.lower() != issuer.netloc.lower()
+        or jwks.path != "/cdn-cgi/access/certs"
+        or jwks.query
+        or jwks.fragment
+    ):
+        raise ValueError("staging Access JWKS configuration is invalid")
+
+    audiences = [item.strip() for item in values["ACCESS_AUDIENCES"].split(",") if item.strip()]
+    if not audiences or len(audiences) > 8 or len(set(audiences)) != len(audiences):
+        raise ValueError("staging Access audience configuration is invalid")
+    if values["ACCESS_IDENTITY_CLAIM"] != "email":
+        raise ValueError("staging Access identity claim must be email")
+
+    admin_origin = urlparse(values["ACCESS_ADMIN_ORIGIN"])
+    if (
+        admin_origin.scheme != "https"
+        or not admin_origin.hostname
+        or admin_origin.username
+        or admin_origin.password
+        or admin_origin.path not in {"", "/"}
+        or admin_origin.query
+        or admin_origin.fragment
+        or admin_origin.hostname.lower().endswith(".workers.dev")
+    ):
+        raise ValueError("staging Access admin origin is invalid")
+
+    routes = config.get("routes")
+    if not isinstance(routes, list):
+        raise ValueError("staging Access custom-domain route is required")
+    expected_host = admin_origin.hostname.lower()
+    matching = [
+        route
+        for route in routes
+        if isinstance(route, Mapping)
+        and route.get("custom_domain") is True
+        and str(route.get("pattern", "")).strip().lower() == expected_host
+    ]
+    if len(matching) != 1:
+        raise ValueError("staging Access custom-domain route does not match admin origin")
 
 
 def _selector_versions(vars_value: Mapping[str, object], prefix: str) -> tuple[int, ...]:
@@ -311,9 +406,11 @@ def preflight_worker_deployment(
     root = _load_config(config_path)
     policy = _load_policy(policy_path)
     _validate_worker_names(root, policy)
-    _validate_environment_isolation(root)
+    _validate_environment_isolation(root, environment)
     config = _environment_config(root, environment)
     database_name, _database_id, buckets = _bindings(environment, config)
+    if environment == "staging":
+        _validate_staging_access_boundary(config)
     if environment == "production":
         _validate_production_ingress(config)
     _validate_trust_profile(environment, trust_profile_path, api_origin)
