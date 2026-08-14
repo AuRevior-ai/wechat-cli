@@ -7,7 +7,7 @@ import os
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Literal
 
 
 @dataclass(frozen=True)
@@ -15,6 +15,16 @@ class AuthenticodeSignature:
     status: str
     subject: str | None
     thumbprint: str | None
+    issuer: str | None = None
+    certificate_valid_from: str | None = None
+    certificate_valid_to: str | None = None
+    # `present` means Get-AuthenticodeSignature exposed a TimeStamperCertificate.
+    # It does not independently assert cryptographic timestamp validation.
+    timestamp_status: Literal["absent", "present"] = "absent"
+    timestamp_subject: str | None = None
+    timestamp_issuer: str | None = None
+    timestamp_valid_from: str | None = None
+    timestamp_valid_to: str | None = None
 
 
 @dataclass(frozen=True)
@@ -67,7 +77,15 @@ def inspect_windows_authenticode(
             "[pscustomobject]@{"
             "Status=$s.Status.ToString();"
             "Subject=if($s.SignerCertificate){$s.SignerCertificate.Subject}else{$null};"
-            "Thumbprint=if($s.SignerCertificate){$s.SignerCertificate.Thumbprint}else{$null}"
+            "Issuer=if($s.SignerCertificate){$s.SignerCertificate.Issuer}else{$null};"
+            "NotBefore=if($s.SignerCertificate){$s.SignerCertificate.NotBefore.ToUniversalTime().ToString('o')}else{$null};"
+            "NotAfter=if($s.SignerCertificate){$s.SignerCertificate.NotAfter.ToUniversalTime().ToString('o')}else{$null};"
+            "Thumbprint=if($s.SignerCertificate){$s.SignerCertificate.Thumbprint}else{$null};"
+            "TimestampPresent=[bool]$s.TimeStamperCertificate;"
+            "TimestampSubject=if($s.TimeStamperCertificate){$s.TimeStamperCertificate.Subject}else{$null};"
+            "TimestampIssuer=if($s.TimeStamperCertificate){$s.TimeStamperCertificate.Issuer}else{$null};"
+            "TimestampNotBefore=if($s.TimeStamperCertificate){$s.TimeStamperCertificate.NotBefore.ToUniversalTime().ToString('o')}else{$null};"
+            "TimestampNotAfter=if($s.TimeStamperCertificate){$s.TimeStamperCertificate.NotAfter.ToUniversalTime().ToString('o')}else{$null}"
             "}|ConvertTo-Json -Compress"
         ),
     ]
@@ -85,13 +103,66 @@ def inspect_windows_authenticode(
         raise ValueError("Authenticode inspection failed closed") from exc
     if not isinstance(value, dict) or not isinstance(value.get("Status"), str):
         raise ValueError("Authenticode inspection returned invalid data")
-    subject = value.get("Subject")
-    thumbprint = value.get("Thumbprint")
-    if subject is not None and not isinstance(subject, str):
-        raise ValueError("Authenticode inspection returned invalid publisher data")
-    if thumbprint is not None and not isinstance(thumbprint, str):
-        raise ValueError("Authenticode inspection returned invalid thumbprint data")
-    return AuthenticodeSignature(value["Status"], subject, thumbprint)
+    def optional_string(name: str) -> str | None:
+        item = value.get(name)
+        if item is not None and not isinstance(item, str):
+            raise ValueError(f"Authenticode inspection returned invalid {name} data")
+        return item
+
+    status = value["Status"]
+    subject = optional_string("Subject")
+    issuer = optional_string("Issuer")
+    certificate_valid_from = optional_string("NotBefore")
+    certificate_valid_to = optional_string("NotAfter")
+    thumbprint = optional_string("Thumbprint")
+    timestamp_present = value.get("TimestampPresent", False)
+    if not isinstance(timestamp_present, bool):
+        raise ValueError("Authenticode inspection returned invalid timestamp evidence")
+    timestamp_subject = optional_string("TimestampSubject")
+    timestamp_issuer = optional_string("TimestampIssuer")
+    timestamp_valid_from = optional_string("TimestampNotBefore")
+    timestamp_valid_to = optional_string("TimestampNotAfter")
+
+    if status == "Valid" and any(
+        item is None
+        for item in (
+            subject,
+            issuer,
+            certificate_valid_from,
+            certificate_valid_to,
+            thumbprint,
+        )
+    ):
+        raise ValueError("Authenticode inspection returned incomplete signer evidence")
+
+    timestamp_items = (
+        timestamp_subject,
+        timestamp_issuer,
+        timestamp_valid_from,
+        timestamp_valid_to,
+    )
+    if timestamp_present:
+        if any(item is None for item in timestamp_items):
+            raise ValueError("Authenticode inspection returned incomplete timestamp evidence")
+        timestamp_status: Literal["absent", "present"] = "present"
+    else:
+        if any(item is not None for item in timestamp_items):
+            raise ValueError("Authenticode inspection returned inconsistent timestamp evidence")
+        timestamp_status = "absent"
+
+    return AuthenticodeSignature(
+        status=status,
+        subject=subject,
+        thumbprint=thumbprint,
+        issuer=issuer,
+        certificate_valid_from=certificate_valid_from,
+        certificate_valid_to=certificate_valid_to,
+        timestamp_status=timestamp_status,
+        timestamp_subject=timestamp_subject,
+        timestamp_issuer=timestamp_issuer,
+        timestamp_valid_from=timestamp_valid_from,
+        timestamp_valid_to=timestamp_valid_to,
+    )
 
 
 def verify_windows_authenticode(

@@ -30,7 +30,14 @@ class WindowsAuthenticodeTests(unittest.TestCase):
             class Completed:
                 stdout = (
                     '{"Status":"Valid","Subject":"CN=Board6 Test",'
-                    '"Thumbprint":"AA11"}'
+                    '"Issuer":"CN=Board6 Issuer",'
+                    '"NotBefore":"2026-01-02T03:04:05.0000000Z",'
+                    '"NotAfter":"2027-01-02T03:04:05.0000000Z",'
+                    '"Thumbprint":"AA11","TimestampPresent":true,'
+                    '"TimestampSubject":"CN=Board6 Timestamp",'
+                    '"TimestampIssuer":"CN=Board6 Timestamp Issuer",'
+                    '"TimestampNotBefore":"2026-01-01T00:00:00.0000000Z",'
+                    '"TimestampNotAfter":"2028-01-01T00:00:00.0000000Z"}'
                 )
 
             def runner(command, **kwargs):
@@ -44,7 +51,31 @@ class WindowsAuthenticodeTests(unittest.TestCase):
 
         self.assertEqual("Valid", signature.status)
         self.assertEqual("CN=Board6 Test", signature.subject)
+        self.assertEqual("CN=Board6 Issuer", getattr(signature, "issuer", None))
+        self.assertEqual(
+            "2026-01-02T03:04:05.0000000Z",
+            getattr(signature, "certificate_valid_from", None),
+        )
+        self.assertEqual(
+            "2027-01-02T03:04:05.0000000Z",
+            getattr(signature, "certificate_valid_to", None),
+        )
         self.assertEqual("AA11", signature.thumbprint)
+        self.assertEqual("present", getattr(signature, "timestamp_status", None))
+        self.assertEqual(
+            "CN=Board6 Timestamp", getattr(signature, "timestamp_subject", None)
+        )
+        self.assertEqual(
+            "CN=Board6 Timestamp Issuer", getattr(signature, "timestamp_issuer", None)
+        )
+        self.assertEqual(
+            "2026-01-01T00:00:00.0000000Z",
+            getattr(signature, "timestamp_valid_from", None),
+        )
+        self.assertEqual(
+            "2028-01-01T00:00:00.0000000Z",
+            getattr(signature, "timestamp_valid_to", None),
+        )
         command, kwargs = calls[0]
         system_root = Path(os.environ.get("SystemRoot") or os.environ.get("WINDIR") or r"C:\Windows")
         expected_executable = system_root / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe"
@@ -55,6 +86,78 @@ class WindowsAuthenticodeTests(unittest.TestCase):
         self.assertTrue(kwargs["check"])
         self.assertTrue(kwargs["capture_output"])
         self.assertTrue(kwargs["text"])
+        script = command[command.index("-Command") + 1]
+        self.assertIn("SignerCertificate.Issuer", script)
+        self.assertIn("TimeStamperCertificate", script)
+
+    def test_powershell_inspector_normalizes_absent_timestamp_as_presence_evidence_only(self):
+        from wechat_cli.windows.authenticode import inspect_windows_authenticode
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "candidate.exe"
+            path.write_bytes(b"candidate")
+
+            class Completed:
+                stdout = (
+                    '{"Status":"Valid","Subject":"CN=Board6 Test",'
+                    '"Issuer":"CN=Board6 Issuer",'
+                    '"NotBefore":"2026-01-02T03:04:05.0000000Z",'
+                    '"NotAfter":"2027-01-02T03:04:05.0000000Z",'
+                    '"Thumbprint":"AA11","TimestampPresent":false,'
+                    '"TimestampSubject":null,"TimestampIssuer":null,'
+                    '"TimestampNotBefore":null,"TimestampNotAfter":null}'
+                )
+
+            signature = inspect_windows_authenticode(
+                path, runner=lambda _command, **_kwargs: Completed()
+            )
+
+        self.assertEqual("absent", getattr(signature, "timestamp_status", None))
+        self.assertIsNone(getattr(signature, "timestamp_subject", None))
+        self.assertIsNone(getattr(signature, "timestamp_issuer", None))
+        self.assertIsNone(getattr(signature, "timestamp_valid_from", None))
+        self.assertIsNone(getattr(signature, "timestamp_valid_to", None))
+
+    def test_powershell_inspector_rejects_inconsistent_timestamp_evidence(self):
+        from wechat_cli.windows.authenticode import inspect_windows_authenticode
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "candidate.exe"
+            path.write_bytes(b"candidate")
+
+            class Completed:
+                stdout = (
+                    '{"Status":"Valid","Subject":"CN=Board6 Test",'
+                    '"Issuer":"CN=Board6 Issuer",'
+                    '"NotBefore":"2026-01-02T03:04:05.0000000Z",'
+                    '"NotAfter":"2027-01-02T03:04:05.0000000Z",'
+                    '"Thumbprint":"AA11","TimestampPresent":true,'
+                    '"TimestampSubject":null,"TimestampIssuer":null,'
+                    '"TimestampNotBefore":null,"TimestampNotAfter":null}'
+                )
+
+            with self.assertRaisesRegex(ValueError, "timestamp"):
+                inspect_windows_authenticode(
+                    path, runner=lambda _command, **_kwargs: Completed()
+                )
+
+    def test_powershell_inspector_rejects_valid_signature_missing_signer_evidence(self):
+        from wechat_cli.windows.authenticode import inspect_windows_authenticode
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "candidate.exe"
+            path.write_bytes(b"candidate")
+
+            class Completed:
+                stdout = (
+                    '{"Status":"Valid","Subject":"CN=Board6 Test",'
+                    '"Thumbprint":"AA11","TimestampPresent":false}'
+                )
+
+            with self.assertRaisesRegex(ValueError, "signer evidence"):
+                inspect_windows_authenticode(
+                    path, runner=lambda _command, **_kwargs: Completed()
+                )
 
     def test_powershell_inspector_uses_deterministic_windows_module_environment(self):
         from wechat_cli.windows.authenticode import inspect_windows_authenticode
@@ -65,10 +168,7 @@ class WindowsAuthenticodeTests(unittest.TestCase):
             calls = []
 
             class Completed:
-                stdout = (
-                    '{"Status":"Valid","Subject":"CN=Board6 Test",'
-                    '"Thumbprint":"AA11"}'
-                )
+                stdout = '{"Status":"NotSigned","Subject":null,"Thumbprint":null}'
 
             def runner(command, **kwargs):
                 calls.append((command, kwargs))
@@ -104,10 +204,7 @@ class WindowsAuthenticodeTests(unittest.TestCase):
             calls = []
 
             class Completed:
-                stdout = (
-                    '{"Status":"Valid","Subject":"CN=Board6 Test",'
-                    '"Thumbprint":"AA11"}'
-                )
+                stdout = '{"Status":"NotSigned","Subject":null,"Thumbprint":null}'
 
             def runner(command, **kwargs):
                 calls.append((command, kwargs))
