@@ -20,6 +20,7 @@ _TRUST_CRITICAL_EXTERNAL_FIELDS = frozenset(
         "release_public_keys",
         "lease_public_keys",
         "windows_publisher_policy",
+        "distribution_profile",
         "environment",
     }
 )
@@ -56,6 +57,7 @@ class LauncherConfig:
     release_keys: TrustedEd25519Keys = field(repr=False)
     lease_keys: TrustedEd25519Keys = field(repr=False)
     environment: str
+    distribution_profile: str
     windows_publisher_policy: str
 
     @property
@@ -91,6 +93,7 @@ class LauncherConfig:
                 release_keys=TrustedEd25519Keys.from_base64(trust_profile.release_public_keys),
                 lease_keys=TrustedEd25519Keys.from_base64(trust_profile.lease_public_keys),
                 environment=trust_profile.environment,
+                distribution_profile=trust_profile.distribution_profile,
                 windows_publisher_policy=trust_profile.windows_publisher_policy,
             )
         schema = data.get("schema_version")
@@ -130,6 +133,7 @@ class LauncherConfig:
             release_keys=release_keys,
             lease_keys=lease_keys,
             environment="legacy",
+            distribution_profile="legacy",
             windows_publisher_policy="",
         )
 

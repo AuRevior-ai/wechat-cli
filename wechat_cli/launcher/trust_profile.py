@@ -17,6 +17,7 @@ _EMBEDDED_TRUST_PROFILE = Path("wechat_cli") / "launcher" / "deployment-trust-pr
 @dataclass(frozen=True)
 class DeploymentTrustProfile:
     schema_version: int
+    distribution_profile: str
     environment: str
     api_base_url: str
     expected_channel: str
@@ -29,8 +30,15 @@ class DeploymentTrustProfile:
     def from_mapping(cls, data: Mapping[str, Any]) -> "DeploymentTrustProfile":
         if not isinstance(data, Mapping):
             raise ValueError("deployment trust profile root must be an object")
-        if data.get("schema_version") != 1:
+        schema_version = data.get("schema_version")
+        if schema_version not in {1, 2}:
             raise ValueError("unsupported deployment trust profile schema")
+        if schema_version == 1:
+            distribution_profile = "legacy"
+        else:
+            distribution_profile = str(data.get("distribution_profile", "")).strip()
+            if distribution_profile not in {"private_controlled", "public_formal"}:
+                raise ValueError("deployment trust profile distribution profile is invalid")
 
         environment = str(data.get("environment", "")).strip()
         if environment not in {"local", "staging", "production"}:
@@ -76,11 +84,15 @@ class DeploymentTrustProfile:
                 raise ValueError("production deployment trust profile rejects staging API host")
             if expected_channel != "stable":
                 raise ValueError("production deployment trust profile requires stable channel")
-            if not publisher_policy:
+            if schema_version == 1 and not publisher_policy:
                 raise ValueError("production deployment trust profile requires publisher policy")
 
+        if schema_version == 2 and distribution_profile == "public_formal" and not publisher_policy:
+            raise ValueError("public formal deployment trust profile requires publisher policy")
+
         return cls(
-            schema_version=1,
+            schema_version=schema_version,
+            distribution_profile=distribution_profile,
             environment=environment,
             api_base_url=api_base_url,
             expected_channel=expected_channel,

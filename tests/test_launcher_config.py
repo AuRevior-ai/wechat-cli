@@ -111,6 +111,82 @@ class DeploymentTrustProfileTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     DeploymentTrustProfile.from_mapping(data)
 
+    def test_schema1_profile_preserves_legacy_distribution_mode(self):
+        from wechat_cli.launcher.trust_profile import DeploymentTrustProfile
+
+        profile = DeploymentTrustProfile.from_mapping(self.profile_mapping())
+
+        self.assertEqual("legacy", profile.distribution_profile)
+
+    def test_schema2_private_controlled_production_allows_empty_publisher(self):
+        from wechat_cli.launcher.trust_profile import DeploymentTrustProfile
+
+        profile = DeploymentTrustProfile.from_mapping(
+            self.profile_mapping(
+                schema_version=2,
+                distribution_profile="private_controlled",
+                environment="production",
+                api_base_url="https://api.example.test",
+                expected_channel="stable",
+                windows_publisher_policy="",
+            )
+        )
+
+        self.assertEqual(2, profile.schema_version)
+        self.assertEqual("private_controlled", profile.distribution_profile)
+        self.assertEqual("", profile.windows_publisher_policy)
+
+    def test_schema2_public_formal_requires_publisher(self):
+        from wechat_cli.launcher.trust_profile import DeploymentTrustProfile
+
+        with self.assertRaisesRegex(ValueError, "public.*publisher|publisher.*public"):
+            DeploymentTrustProfile.from_mapping(
+                self.profile_mapping(
+                    schema_version=2,
+                    distribution_profile="public_formal",
+                    environment="production",
+                    api_base_url="https://api.example.test",
+                    expected_channel="stable",
+                    windows_publisher_policy="",
+                )
+            )
+
+    def test_schema2_requires_explicit_distribution_profile(self):
+        from wechat_cli.launcher.trust_profile import DeploymentTrustProfile
+
+        with self.assertRaisesRegex(ValueError, "distribution profile"):
+            DeploymentTrustProfile.from_mapping(
+                self.profile_mapping(
+                    schema_version=2,
+                    environment="production",
+                    api_base_url="https://api.example.test",
+                    expected_channel="stable",
+                    windows_publisher_policy="",
+                )
+            )
+
+    def test_schema2_private_production_preserves_environment_guards(self):
+        from wechat_cli.launcher.trust_profile import DeploymentTrustProfile
+
+        cases = [
+            {"expected_channel": "beta"},
+            {"api_base_url": "http://127.0.0.1:8788"},
+            {"api_base_url": "https://staging-api.example.test"},
+        ]
+        for override in cases:
+            with self.subTest(override=override):
+                data = self.profile_mapping(
+                    schema_version=2,
+                    distribution_profile="private_controlled",
+                    environment="production",
+                    api_base_url="https://api.example.test",
+                    expected_channel="stable",
+                    windows_publisher_policy="",
+                )
+                data.update(override)
+                with self.assertRaises(ValueError):
+                    DeploymentTrustProfile.from_mapping(data)
+
 
 class LauncherConfigTests(unittest.TestCase):
     def deployment_profile(self):
@@ -139,6 +215,16 @@ class LauncherConfigTests(unittest.TestCase):
                 trust_profile=self.deployment_profile(),
             )
 
+        with self.assertRaisesRegex(ValueError, "distribution_profile"):
+            LauncherConfig.from_mapping(
+                {
+                    "schema_version": 2,
+                    "port": 8787,
+                    "distribution_profile": "public_formal",
+                },
+                trust_profile=self.deployment_profile(),
+            )
+
     def test_operational_config_derives_all_trust_fields_from_profile(self):
         profile = self.deployment_profile()
         try:
@@ -153,6 +239,7 @@ class LauncherConfigTests(unittest.TestCase):
         self.assertEqual("beta", config.channel)
         self.assertEqual("embedded-fingerprint-salt", config.fingerprint_salt)
         self.assertEqual("staging", config.environment)
+        self.assertEqual("legacy", config.distribution_profile)
         self.assertEqual("CN=Board6 Test Publisher", config.windows_publisher_policy)
         config.release_keys.verify
         config.lease_keys.verify
