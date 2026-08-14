@@ -1,4 +1,6 @@
 import importlib.util
+import os
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -44,12 +46,108 @@ class WindowsAuthenticodeTests(unittest.TestCase):
         self.assertEqual("CN=Board6 Test", signature.subject)
         self.assertEqual("AA11", signature.thumbprint)
         command, kwargs = calls[0]
-        self.assertEqual("powershell.exe", command[0])
-        self.assertEqual(str(path), command[-1])
+        system_root = Path(os.environ.get("SystemRoot") or os.environ.get("WINDIR") or r"C:\Windows")
+        expected_executable = system_root / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe"
+        self.assertEqual(str(expected_executable), command[0])
+        self.assertEqual(str(path), kwargs["env"]["WECHAT_CLI_AUTHENTICODE_TARGET"])
+        self.assertNotIn(str(path), command)
         self.assertEqual(10, kwargs["timeout"])
         self.assertTrue(kwargs["check"])
         self.assertTrue(kwargs["capture_output"])
         self.assertTrue(kwargs["text"])
+
+    def test_powershell_inspector_uses_deterministic_windows_module_environment(self):
+        from wechat_cli.windows.authenticode import inspect_windows_authenticode
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "candidate.exe"
+            path.write_bytes(b"candidate")
+            calls = []
+
+            class Completed:
+                stdout = (
+                    '{"Status":"Valid","Subject":"CN=Board6 Test",'
+                    '"Thumbprint":"AA11"}'
+                )
+
+            def runner(command, **kwargs):
+                calls.append((command, kwargs))
+                return Completed()
+
+            with patch.dict(
+                os.environ,
+                {"PSModulePath": "C:\\Program Files\\PowerShell\\7\\Modules;POLLUTED"},
+                clear=False,
+            ):
+                inspect_windows_authenticode(path, runner=runner)
+
+        command, kwargs = calls[0]
+        system_root = Path(os.environ.get("SystemRoot") or os.environ.get("WINDIR") or r"C:\Windows")
+        expected_executable = system_root / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe"
+        expected_module_root = system_root / "System32" / "WindowsPowerShell" / "v1.0" / "Modules"
+        self.assertEqual(str(expected_executable), command[0])
+        self.assertIn("-NoProfile", command)
+        self.assertIn(
+            "Import-Module Microsoft.PowerShell.Security -ErrorAction Stop",
+            command[command.index("-Command") + 1],
+        )
+        self.assertEqual(str(expected_module_root), kwargs["env"]["PSModulePath"])
+        self.assertNotIn("PowerShell\\7", kwargs["env"]["PSModulePath"])
+        self.assertNotIn("POLLUTED", kwargs["env"]["PSModulePath"])
+
+    def test_powershell_inspector_passes_target_only_through_child_environment(self):
+        from wechat_cli.windows.authenticode import inspect_windows_authenticode
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "candidate with spaces.exe"
+            path.write_bytes(b"candidate")
+            calls = []
+
+            class Completed:
+                stdout = (
+                    '{"Status":"Valid","Subject":"CN=Board6 Test",'
+                    '"Thumbprint":"AA11"}'
+                )
+
+            def runner(command, **kwargs):
+                calls.append((command, kwargs))
+                return Completed()
+
+            inspect_windows_authenticode(path, runner=runner)
+
+        command, kwargs = calls[0]
+        script = command[command.index("-Command") + 1]
+        self.assertIn("WECHAT_CLI_AUTHENTICODE_TARGET", kwargs["env"])
+        self.assertEqual(str(path), kwargs["env"]["WECHAT_CLI_AUTHENTICODE_TARGET"])
+        self.assertIn("$env:WECHAT_CLI_AUTHENTICODE_TARGET", script)
+        self.assertNotIn("$args[0]", script)
+        self.assertNotIn(str(path), command)
+
+    def test_powershell_inspector_fails_closed_when_security_module_load_fails(self):
+        from wechat_cli.windows.authenticode import inspect_windows_authenticode
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "candidate.exe"
+            path.write_bytes(b"candidate")
+
+            def runner(_command, **_kwargs):
+                raise subprocess.CalledProcessError(1, "powershell.exe")
+
+            with self.assertRaisesRegex(ValueError, "failed closed"):
+                inspect_windows_authenticode(path, runner=runner)
+
+    def test_powershell_inspector_rejects_malformed_output(self):
+        from wechat_cli.windows.authenticode import inspect_windows_authenticode
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "candidate.exe"
+            path.write_bytes(b"candidate")
+
+            class Completed:
+                stdout = "not-json"
+
+            with self.assertRaisesRegex(ValueError, "failed closed"):
+                inspect_windows_authenticode(path, runner=lambda _command, **_kwargs: Completed())
 
     def test_verifier_uses_bounded_windows_inspector_by_default(self):
         from wechat_cli.windows.authenticode import (

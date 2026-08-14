@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -33,6 +34,14 @@ class AuthenticodePolicy:
         object.__setattr__(self, "expected_thumbprints", normalized)
 
 
+def _windows_powershell_paths() -> tuple[Path, Path]:
+    system_root = os.environ.get("SystemRoot") or os.environ.get("WINDIR")
+    if not system_root:
+        raise ValueError("Windows system root is unavailable")
+    root = Path(system_root) / "System32" / "WindowsPowerShell" / "v1.0"
+    return root / "powershell.exe", root / "Modules"
+
+
 def inspect_windows_authenticode(
     path: str | Path,
     *,
@@ -42,20 +51,25 @@ def inspect_windows_authenticode(
     if source.is_symlink() or not source.is_file():
         raise ValueError("Authenticode target must be an existing regular file")
     execute = runner or subprocess.run
+    powershell, module_root = _windows_powershell_paths()
+    child_env = os.environ.copy()
+    child_env["PSModulePath"] = str(module_root)
+    child_env["WECHAT_CLI_AUTHENTICODE_TARGET"] = str(source)
     command = [
-        "powershell.exe",
+        str(powershell),
         "-NoProfile",
         "-NonInteractive",
         "-Command",
         (
-            "$s=Get-AuthenticodeSignature -LiteralPath $args[0];"
+            "$ErrorActionPreference='Stop';"
+            "Import-Module Microsoft.PowerShell.Security -ErrorAction Stop;"
+            "$s=Get-AuthenticodeSignature -LiteralPath $env:WECHAT_CLI_AUTHENTICODE_TARGET;"
             "[pscustomobject]@{"
             "Status=$s.Status.ToString();"
             "Subject=if($s.SignerCertificate){$s.SignerCertificate.Subject}else{$null};"
             "Thumbprint=if($s.SignerCertificate){$s.SignerCertificate.Thumbprint}else{$null}"
             "}|ConvertTo-Json -Compress"
         ),
-        str(source),
     ]
     try:
         completed = execute(
@@ -64,6 +78,7 @@ def inspect_windows_authenticode(
             capture_output=True,
             text=True,
             timeout=10,
+            env=child_env,
         )
         value = json.loads(completed.stdout)
     except (OSError, subprocess.SubprocessError, json.JSONDecodeError) as exc:
