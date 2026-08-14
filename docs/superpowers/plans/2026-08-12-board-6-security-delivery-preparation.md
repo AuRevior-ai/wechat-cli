@@ -1,6 +1,6 @@
 # Board 6 Security & Delivery Preparation Implementation Plan
 
-> **APPROVED IMPLEMENTATION PLAN — B6-G0 through B6-G5 complete; B6-G6 Phase A provider-neutral readiness repair/research complete; real provider procurement/signing remains separately gated; every later gate remains independently authorized.**
+> **APPROVED IMPLEMENTATION PLAN — amended 2026-08-14 for the Private / Controlled Distribution profile. B6-G0 through B6-G5 complete; B6-G6 Phase A complete; real commercial Authenticode procurement/signing is deferred optional hardening and is not a current launch/closure blocker; every later mandatory gate remains independently authorized.**
 >
 > Approved seed content SHA-256: `9faa73f733fa714a49accc91b532471e097ea28f8224d6317908ad57a0261b89`. The exact approved seed remains retained, untracked and untouched, in the Board 5 evidence worktree. This tracked canonical copy originates from that exact seed and contains only the explicitly authorized B6-G0 governance/status corrections plus the approved lifecycle and Access/JWT/break-glass revisions.
 >
@@ -8,13 +8,13 @@
 
 **Goal:** Integrate the Board 5 product lineage onto a fresh Board 6 branch and harden update trust, administrator security, Windows delivery integrity, diagnostics/privacy, key rotation, and staging/production boundaries to a production-ready design while keeping production deployment and Board 7 separate.
 
-**Architecture:** Start from frozen main, selectively replay only product-relevant Board 5 changes, then implement security controls in four independent domains. Local TDD and schema design come before any staging mutation. Staging infrastructure, staging behavior, real code signing, key-rotation drill, and closure are five separate post-local gates; production provisioning/deployment remains Board 7.
+**Architecture:** Start from frozen main, selectively replay only product-relevant Board 5 changes, then implement security controls in four independent domains. Local TDD and schema design come before any staging mutation. Staging infrastructure, staging behavior, key-rotation drill, and closure are mandatory post-local gates for the current Private / Controlled Distribution profile. Real commercial Authenticode remains an optional future Public / Formal Distribution gate; production provisioning/deployment remains Board 7.
 
 **Tech Stack:** Python 3.12, PyInstaller, pywebview/WebView2, Windows DPAPI/WinTrust or PowerShell Authenticode verification, TypeScript, Hono, Cloudflare Workers/D1/R2/Access, GitHub Releases, Ed25519, SHA-256, Vitest, unittest.
 
 **Design source:** `docs/superpowers/specs/2026-08-12-board-6-security-delivery-preparation-design.md`
 
-**Current execution status (2026-08-14):** Board 5 accepted-complete evidence remains frozen at `67d3dec0fd1c4a02c87be1ab79c4f78ea63f49d6`; frozen main remains `a579a25cb7f16e6fdf88d618252b4a5cbffef53d`. Board 6 runs on `board6/security-delivery-preparation`. B6-G0 source integration is complete through `c1d045895a044dbb4c9998a787c77775654074fa`; B6-G1 Update Trust Local Gate is complete through `bdc98afc0d945c4c86f1e3b21686d2fe798ccdd1`; B6-G2 Admin & Data Security Local Gate is complete through `e0c91df`; B6-G3 Windows Integrity Local Gate is complete through implementation HEAD `1a074472360907be10d336729c3c28e0584b00f3`, with pre-staging security audit `d73cf3f`. B6-G3 local commits are `4b7fbfe` (exact pywebview pin + pre-load adapter), `a1dc6bd` (embedded Launcher deployment trust profile), `9b54710` (Authenticode/runtime/signing-provider boundary), `8d7493e` (production-capable signed installer target), and `1a07447` (fail-closed Worker deployment preflight). Fresh B6-G3 verification passed Python 607 run / 2 expected skips / 0 failures, Worker typecheck, Vitest 13 files / 89 tests, implementation diff/static trust-boundary checks, and targeted non-test sensitive-shape scanning. No Access app/policy, staging migration/deploy, real Secret mutation, credential rotation, real code-signing identity use, release action, cloud/production mutation, push, or merge occurred. B6-G4 Staging Infrastructure Gate is complete. The dedicated `wechat-cli-releases-staging` R2 bucket is live; D1 migrations `0004`–`0007` are applied with none pending; all seven Board 6 `_V1` staging Secret names are provisioned while legacy compatibility names remain; the Access application protects `wechat-cli-admin-staging.aurevior-devspace.com/v1/admin/login/start`; exact staging issuer/JWKS/AUD/email-identity/admin-origin vars are deployed; and Worker Version ID `14a19ea3-5a96-408b-a4e3-0a8d8e4ebe2c` is live on workers.dev plus the admin custom domain. B6-G4 local commits are `14db869`, `332c41a`, and `86da5a5`; closure evidence is `docs/superpowers/governance/2026-08-14-board-6-staging-infrastructure-gate.md`. Fresh pre-deploy verification passed Python 612 run / 2 expected skips / 0 failures, Worker typecheck, Vitest 89/89, deployment tests 27/27 and Wrangler dry-run. Post-deploy reconcile confirms both health origins 200/staging, Access login start 302 on the custom domain and 403 on workers.dev, all historical release rows unchanged, and `admin_principals` / `admin_sessions` still 0 at B6-G4 closure; B6-G5 later provisioned one scoped principal and short-lived sessions for acceptance, then revoked the G5 principal/sessions at cleanup with zero active sessions remaining. Production D1 remains a replacement placeholder and production routes remain intentionally empty, so production remains fail closed. **B6-G5 Staging Behavior Acceptance is accepted complete with evidence `docs/superpowers/governance/2026-08-14-board-6-staging-behavior-acceptance.md`; current staging Worker Version after G5 repairs is `6f2aad56-12cb-4d8e-8af5-9dceefbe1a49`. B6-G6 Phase A provider-neutral readiness repair/research is complete locally at `9f4ad0f` + `e9cb67b`, with provider decision draft `docs/superpowers/governance/2026-08-14-board-6-code-signing-provider-decision.md`; fresh Phase A verification passed Python 630 run / 2 expected skips / 0 failures, Worker typecheck, Vitest 92/92, signing-focused 103/103 and a real read-only Microsoft-signed system probe. Real provider selection/procurement, payment/application, identity verification, key provisioning, concrete signer adapter, staging publisher-policy mutation and actual signing remain pending separate explicit user approval; B6-G7/B6-G8 are not entered and Board 7 remains unstarted.** The completed-gate task checklists below remain the approved execution map; authoritative completion evidence is the Board 6 commit lineage, gate verification, pre-staging audit, and canonical project/roadmap state.
+**Current execution status (2026-08-14):** Board 5 accepted-complete evidence remains frozen at `67d3dec0fd1c4a02c87be1ab79c4f78ea63f49d6`; frozen main remains `a579a25cb7f16e6fdf88d618252b4a5cbffef53d`. Board 6 runs on `board6/security-delivery-preparation`. B6-G0 source integration is complete through `c1d045895a044dbb4c9998a787c77775654074fa`; B6-G1 Update Trust Local Gate is complete through `bdc98afc0d945c4c86f1e3b21686d2fe798ccdd1`; B6-G2 Admin & Data Security Local Gate is complete through `e0c91df`; B6-G3 Windows Integrity Local Gate is complete through implementation HEAD `1a074472360907be10d336729c3c28e0584b00f3`, with pre-staging security audit `d73cf3f`. B6-G3 local commits are `4b7fbfe` (exact pywebview pin + pre-load adapter), `a1dc6bd` (embedded Launcher deployment trust profile), `9b54710` (Authenticode/runtime/signing-provider boundary), `8d7493e` (production-capable signed installer target), and `1a07447` (fail-closed Worker deployment preflight). Fresh B6-G3 verification passed Python 607 run / 2 expected skips / 0 failures, Worker typecheck, Vitest 13 files / 89 tests, implementation diff/static trust-boundary checks, and targeted non-test sensitive-shape scanning. No Access app/policy, staging migration/deploy, real Secret mutation, credential rotation, real code-signing identity use, release action, cloud/production mutation, push, or merge occurred. B6-G4 Staging Infrastructure Gate is complete. The dedicated `wechat-cli-releases-staging` R2 bucket is live; D1 migrations `0004`–`0007` are applied with none pending; all seven Board 6 `_V1` staging Secret names are provisioned while legacy compatibility names remain; the Access application protects `wechat-cli-admin-staging.aurevior-devspace.com/v1/admin/login/start`; exact staging issuer/JWKS/AUD/email-identity/admin-origin vars are deployed; and Worker Version ID `14a19ea3-5a96-408b-a4e3-0a8d8e4ebe2c` is live on workers.dev plus the admin custom domain. B6-G4 local commits are `14db869`, `332c41a`, and `86da5a5`; closure evidence is `docs/superpowers/governance/2026-08-14-board-6-staging-infrastructure-gate.md`. Fresh pre-deploy verification passed Python 612 run / 2 expected skips / 0 failures, Worker typecheck, Vitest 89/89, deployment tests 27/27 and Wrangler dry-run. Post-deploy reconcile confirms both health origins 200/staging, Access login start 302 on the custom domain and 403 on workers.dev, all historical release rows unchanged, and `admin_principals` / `admin_sessions` still 0 at B6-G4 closure; B6-G5 later provisioned one scoped principal and short-lived sessions for acceptance, then revoked the G5 principal/sessions at cleanup with zero active sessions remaining. Production D1 remains a replacement placeholder and production routes remain intentionally empty, so production remains fail closed. **B6-G5 Staging Behavior Acceptance is accepted complete with evidence `docs/superpowers/governance/2026-08-14-board-6-staging-behavior-acceptance.md`; current staging Worker Version after G5 repairs is `6f2aad56-12cb-4d8e-8af5-9dceefbe1a49`. B6-G6 Phase A provider-neutral readiness repair/research is complete locally at `9f4ad0f` + `e9cb67b`, with retained provider research `docs/superpowers/governance/2026-08-14-board-6-code-signing-provider-decision.md`; fresh Phase A verification passed Python 630 run / 2 expected skips / 0 failures, Worker typecheck, Vitest 92/92, signing-focused 103/103 and a real read-only Microsoft-signed system probe. A dormant optional SSL.com eSigner adapter now exists at `50e7074` but has not been configured, provisioned, or used. Scope-amendment implementation `ebd3378` adds explicit schema-v2 `distribution_profile=private_controlled|public_formal`, preserves legacy schema-v1 production publisher requirements, and allows an explicitly private schema-v2 production profile to leave publisher policy empty; fresh verification passed Python 646 / 2 expected skips / 0 failures and Worker typecheck + Vitest 92/92, while the existing staging profile remained unchanged at schema v1 / legacy / staging / stable / empty publisher. Real provider selection/procurement, payment/application, identity verification, key provisioning, staging publisher-policy mutation and actual signing are explicitly deferred as optional Public / Formal Distribution hardening under the approved Private / Controlled Distribution amendment; B6-G7/B6-G8 are not entered and Board 7 remains unstarted.** The completed-gate task checklists below remain the approved execution map; authoritative completion evidence is the Board 6 commit lineage, gate verification, pre-staging audit, and canonical project/roadmap state.
 
 ---
 
@@ -1525,19 +1525,21 @@ Cleanup only the Board 6 test licenses/devices/releases/objects named in the app
 
 ### Mandatory STOP
 
-B6-G5 is accepted complete. Do not proceed to real code signing until **B6-G6** separately approves the provider/identity choice, any payment/application, identity verification, key provisioning, and actual signing operation.
+B6-G5 is accepted complete. Under the approved Private / Controlled Distribution amendment, real commercial code signing is deferred and is not the next mandatory gate. Do not perform provider procurement/KYC/payment/key provisioning/real signing unless a future Public / Formal Distribution gate separately authorizes it. The next mandatory Board 6 gate is **B6-G7 Staging Key Rotation Drill Gate**.
 
 ---
 
-## Task 17: B6-G6 real code-signing procurement and staging-signed acceptance
+## Task 17: B6-G6 commercial Authenticode — deferred optional Public / Formal Distribution hardening
 
-**Gate:** **B6-G6 Code Signing Procurement & Real Staging Signing Gate**
+**Status:** **DEFERRED by approved 2026-08-14 Private / Controlled Distribution scope change; not required for the current launch profile or Board 6 closure.**
 
-Approval must separately cover the vendor/identity choice, any payment/application, identity verification, key provisioning, and actual signing operation. No such action is implied by this plan.
+Design amendment: `docs/superpowers/specs/2026-08-14-board-6-private-distribution-profile-design-amendment.md`.
 
-- [ ] **Step 1: Select the signing provider against the approved design**
+B6-G6 Phase A provider-neutral readiness/evidence repair and provider research remain completed engineering evidence. Commit `50e7074` adds a dormant optional SSL.com eSigner adapter, but no account was configured, no provider software was activated, no certificate/key was provisioned, no publisher policy was changed, and no artifact was signed.
 
-Required properties:
+If the product later moves to Public / Formal Distribution, a new explicit authorization must separately cover the vendor/publisher identity, plan/fee/payment, KYC, signer installation/activation, managed/HSM key provisioning, non-empty publisher policy, actual signing, independent verification, and signed acceptance.
+
+Future activation requirements remain:
 
 ```text
 non-exportable/hardware-backed or managed signing key
@@ -1546,27 +1548,10 @@ timestamping support
 automation path with least privilege
 auditable signing events
 publisher identity suitable for formal distribution
+build -> sign -> verify -> package -> SHA-256 -> Ed25519 manifest signing
 ```
 
-- [ ] **Step 2: Provision only after explicit approval**
-
-Never copy private key material into the repository or generic `.env` files.
-
-- [ ] **Step 3: Sign a staging app, Launcher, and installer**
-
-Run build -> sign -> verify -> package -> SHA -> Ed25519 manifest signing in that order.
-
-- [ ] **Step 4: Verify Windows signatures independently**
-
-Use Windows trust verification and record only public certificate metadata: subject, issuer, validity, thumbprint/public identity, timestamp status.
-
-- [ ] **Step 5: Run one explicitly authorized signed staging update acceptance**
-
-Prove candidate Authenticode verification happens before process launch and that wrong/unsigned test candidates fail closed.
-
-### Mandatory STOP
-
-Request **B6-G7 Staging Key Rotation Drill Gate**.
+Do not treat this deferred task as completed. Do not perform any real provider or identity side effect under the current private-distribution plan.
 
 ---
 
@@ -1651,7 +1636,7 @@ admin Access/session state
 Origin/rate policy
 secret-version metadata/rotation evidence
 diagnostics retention policy
-real signed staging artifact/public certificate metadata
+private-distribution trust profile evidence (`windows_publisher_policy` intentionally empty) plus Ed25519 manifest/package SHA-256 integrity evidence; no real signing identity used
 staging/production isolation guard
 all disposable Board 6 test resources in their approved terminal states
 ```
@@ -1677,7 +1662,7 @@ C-domain signing/integrity acceptance
 D-domain staging/production isolation acceptance
 staging cloud mutations actually performed
 credential rotations actually performed
-real signing identity public metadata only
+real signing identity status (explicitly deferred/none for current private profile) and dormant optional signing capability
 deferred items
 explicit actions not performed
 Board 7 entry conditions
@@ -1685,7 +1670,7 @@ Board 7 entry conditions
 
 - [ ] **Step 6: Update roadmap only if every Board 6 exit condition is met**
 
-If any required signing/staging/rotation/integration acceptance remains incomplete, canonical status must stay `Board 6 in progress` and list the exact blocker. Do not claim Board 6 complete early.
+If any required private-profile staging/rotation/integration acceptance remains incomplete, canonical status must stay `Board 6 in progress` and list the exact blocker. Deferred commercial Authenticode is not a blocker for the approved Private / Controlled Distribution profile, but closure must record it explicitly rather than claiming real signing occurred.
 
 - [ ] **Step 7: Commit closure docs locally**
 
@@ -1718,9 +1703,9 @@ Board 7 remains unstarted. Present Board 6 closure evidence and request a separa
 | B5 key rotation | Task 8, 15, 18 |
 | B6 diagnostics data policy | Task 7, 15, 16 |
 | C1 pywebview dependency | Task 9 |
-| C2 Authenticode | Task 11, 17 |
+| C2 Authenticode | Task 11; Task 17 deferred optional for Public / Formal Distribution |
 | C3 embedded trust profile | Task 10, 16, 17 |
-| C4 signed installer/runtime verification | Task 11, 12, 17 |
+| C4 installer/runtime verification | Task 11, 12; real-signed Public / Formal Distribution path deferred in Task 17 |
 | D1 packaging dependency | Task 1 |
 | D2 source integration debt | Task 0.1, 0.2 |
 | D3 staging/production isolation | Task 10, 13, 15 |
@@ -1730,10 +1715,10 @@ Board 7 remains unstarted. Present Board 6 closure evidence and request a separa
 
 The design/plan are approved and **B6-G0 through B6-G5 are complete**. B6-G4 staging infrastructure closure is recorded in `docs/superpowers/governance/2026-08-14-board-6-staging-infrastructure-gate.md`; the live staging Worker Version ID is `14a19ea3-5a96-408b-a4e3-0a8d8e4ebe2c`. B6-G5 closure is recorded in `docs/superpowers/governance/2026-08-14-board-6-staging-behavior-acceptance.md`. This completion does not authorize real code-signing procurement/use, production mutation, push, or merge.
 
-The B6-G6 entry audit is recorded in `docs/superpowers/governance/2026-08-14-board-6-code-signing-entry-readiness.md`. Under the separately approved Phase A, provider-neutral local readiness repair/research is now complete at `9f4ad0f` + `e9cb67b`, and the provider decision draft is `docs/superpowers/governance/2026-08-14-board-6-code-signing-provider-decision.md`. This Phase A completion does **not** enter Task 17 real procurement/signing: real provider/publisher selection, any payment/application/identity verification/key provisioning, provider software installation, concrete signer adapter implementation, staging publisher-policy mutation, and actual signing remain unperformed.
+The B6-G6 entry audit is recorded in `docs/superpowers/governance/2026-08-14-board-6-code-signing-entry-readiness.md`. Phase A provider-neutral local readiness repair/research is complete at `9f4ad0f` + `e9cb67b`; provider research is retained in `docs/superpowers/governance/2026-08-14-board-6-code-signing-provider-decision.md`; dormant optional SSL.com adapter code is at `50e7074`. Under the approved Private / Controlled Distribution amendment, real provider/publisher procurement, payment/KYC, key provisioning, provider activation, non-empty publisher-policy mutation and actual Authenticode signing are now **deferred optional hardening**, not current Board 6 blockers.
 
-The **first and only next authorization request** is now:
+The **first and only next mandatory authorization request** is now:
 
-> **B6-G6 Real Signing Provider Approval** — the next authorization must name the selected provider/vendor, publisher identity, exact plan/tier and expected fee, account/subscription action, identity-verification action, required signer installation, managed/HSM key provisioning, staging publisher-policy public identity, concrete `WindowsSigningProvider` adapter, actual staging app + Launcher + installer signing, and one signed staging update acceptance. Production, Board 5 assets/JD25, push/merge, and unrelated cloud resources remain excluded.
+> **B6-G7 Staging Key Rotation Drill Gate** — authorize only the exact staging key/secret overlap rotations named for the drill. Production, commercial Authenticode provider actions, Board 5 assets/JD25, push/merge, and unrelated cloud resources remain excluded.
 
-Phase A is complete but the real B6-G6 signing gate is **not** implied by it or by any prior blanket continuation approval. Task 17 still requires separate explicit authorization of the selected provider/vendor and publisher identity, exact plan/tier/fee, payment/application, identity verification, signing-tool installation, managed/HSM key provisioning, concrete signer adapter, staging publisher-policy mutation, actual signing, and one signed staging update acceptance. B6-G7 and B6-G8 remain not entered; Board 7 remains unstarted.
+B6-G8 remains not entered; Board 7 remains unstarted. Any later Public / Formal Distribution signing activation must receive a new explicit authorization covering provider/vendor, publisher identity, plan/fee/payment, KYC, signer activation, managed/HSM key provisioning, publisher-policy identity, actual signing, and signed acceptance.

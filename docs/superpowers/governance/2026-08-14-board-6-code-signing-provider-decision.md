@@ -1,8 +1,8 @@
 # Board 6 Code-Signing Provider Decision
 
-> **DRAFT — provider research only, no procurement authorization.**
+> **RETAINED RESEARCH — commercial signing is deferred for the approved Private / Controlled Distribution profile.**
 >
-> This document records the provider-neutral B6-G6 Phase A local readiness repair and current official-provider research. It does **not** authorize a purchase, certificate application, identity verification, paid subscription, signing-key provisioning, signer installation, staging publisher-policy mutation, real signing, signed release publication, B6-G7, B6-G8, Board 7, production mutation, push, merge, or tag modification.
+> This document records the provider-neutral B6-G6 Phase A local readiness repair and provider research. It is no longer the current next-action decision document: `docs/superpowers/specs/2026-08-14-board-6-private-distribution-profile-design-amendment.md` explicitly defers commercial Authenticode to a future Public / Formal Distribution profile. This document does **not** authorize a purchase, certificate application, identity verification, paid subscription, signing-key provisioning, signer installation/activation, staging publisher-policy mutation, real signing, signed release publication, B6-G7, B6-G8, Board 7, production mutation, push, merge, or tag modification.
 
 Date: 2026-08-14
 
@@ -25,14 +25,14 @@ Canonical execution state remains:
 - B6-G3: complete.
 - B6-G4: complete.
 - B6-G5: accepted complete.
-- B6-G6 real procurement/signing: **not entered; still requires a separate explicit user approval**.
+- B6-G6 real procurement/signing: **not completed; explicitly deferred optional Public / Formal Distribution hardening and not a current Board 6 blocker**.
 - B6-G7: not entered.
 - B6-G8: not entered.
 - Board 7: unstarted.
 - Frozen main remains `a579a25cb7f16e6fdf88d618252b4a5cbffef53d` and must not be changed by this phase.
 - No push, merge, tag mutation, production mutation, real code signing, certificate application, or payment occurred in Phase A.
 
-The staging `windows_publisher_policy` remains intentionally empty. Phase A does not insert a fake, Microsoft, temporary production, or arbitrary publisher identity merely to make signing tests run.
+The staging `windows_publisher_policy` remains intentionally empty. Under the approved Private / Controlled Distribution profile, that empty publisher policy is now the deliberate current operating mode rather than merely a pre-signing placeholder. Phase A does not insert a fake, Microsoft, temporary production, or arbitrary publisher identity merely to make signing tests run.
 
 ## 2. Board 6 worktree `NUL` cleanup status
 
@@ -434,11 +434,11 @@ For SSL.com and DigiCert, leaf changes on reissue/renewal also argue against an 
 | DigiCert | Install Windows SDK/KeyLocker client tools | Local software installation | **No** until provider approval |
 | DigiCert | Sign app/Launcher/installer | Real signing | **No** |
 
-## 12. Concrete next-gate adapter work
+## 12. Future Public / Formal Distribution activation work
 
-After the user selects and explicitly approves one real provider, the next implementation should be narrow and provider-specific:
+This section is retained only for a future activation of commercial Authenticode. Commit `50e7074` already provides one dormant SSL.com implementation of `WindowsSigningProvider`; that adapter is not active and does not imply SSL.com remains selected. If public/formal signing is later authorized, implementation must remain narrow and provider-specific:
 
-1. add exactly one concrete implementation of existing `WindowsSigningProvider`;
+1. use exactly one approved concrete `WindowsSigningProvider` (reuse the dormant SSL.com adapter only if SSL.com is actually selected; otherwise implement only the selected provider);
 2. resolve the selected signer executable/tool from an explicit configured path, not generic PATH discovery;
 3. pin/verify the provider client version where practical;
 4. keep all credentials out of command-line logs and project files;
@@ -452,11 +452,11 @@ After the user selects and explicitly approves one real provider, the next imple
 12. create/sign the Ed25519 update manifest only after the signed package bytes are frozen;
 13. run exactly one separately authorized signed staging update acceptance.
 
-Do not implement adapters for all three providers. Only the selected provider gets a concrete adapter.
+Do not implement or activate adapters for all three providers. Only the provider selected by a future Public / Formal Distribution authorization may be activated.
 
 ## 13. What remains prohibited after this document
 
-Until the user grants **B6-G6 Real Signing Provider Approval**, do not:
+While the current Private / Controlled Distribution profile remains active, and until a future Public / Formal Distribution signing gate is separately approved, do not:
 
 - purchase a signing service or certificate;
 - submit a certificate application;
@@ -469,7 +469,7 @@ Until the user grants **B6-G6 Real Signing Provider Approval**, do not:
 - perform a real signing operation;
 - build/publish a formally signed staging release;
 - upload/register/enable a signed staging candidate;
-- enter B6-G7 or B6-G8;
+- treat this retained provider research as authorization for B6-G7 or B6-G8; those gates remain independently authorized even though B6-G7 is now the next mandatory Board 6 gate;
 - enter Board 7 or mutate production;
 - push, merge, or modify tags;
 - clean frozen main or Board 5 evidence;
@@ -533,4 +533,4 @@ The system probe still means only that the provider-neutral verifier works on a 
 
 Final diff/sensitive/frozen-boundary checks are part of the local governance commit preflight. The Board 6 `NUL` remains the only allowed worktree residual because its exact safe deletion is blocked by the current DevSpace tool contract.
 
-Phase A is therefore locally complete once the canonical governance commit containing this document passes those final checks. The next possible authorization is **B6-G6 Real Signing Provider Approval**. No commercial or identity side effect is implied by this draft.
+Phase A is therefore locally complete. Commit `50e7074` later added one dormant optional SSL.com eSigner adapter with no account, credential, key, publisher-policy, or signing side effect; it is retained only as future capability. Scope-amendment implementation `ebd3378` then added the explicit schema-v2 private/public distribution-profile contract while preserving legacy schema-v1 production publisher requirements. Under the approved Private / Controlled Distribution amendment, real commercial signing is deferred and is not a current closure blocker. The next mandatory Board 6 authorization is **B6-G7 Staging Key Rotation Drill Gate**. No commercial or identity side effect is implied by this retained research.
