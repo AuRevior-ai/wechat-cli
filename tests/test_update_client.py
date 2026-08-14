@@ -173,6 +173,36 @@ class UpdateApiClientTests(unittest.TestCase):
 
         self.assertEqual(ErrorCode.UPDATE_PLATFORM_MISMATCH, caught.exception.code)
 
+    def test_channel_mismatch_preserves_exact_non_retryable_error_code(self):
+        transport = FakeTransport(
+            (
+                409,
+                {
+                    "error": {
+                        "code": "UPDATE_CHANNEL_MISMATCH",
+                        "message": "许可证发布通道与请求通道不一致",
+                        "retryable": False,
+                    }
+                },
+            )
+        )
+
+        with self.assertRaises(UpdateError) as caught:
+            UpdateApiClient(transport, trusted_keys=self.keys).check(
+                device_token="token",
+                current_version="0.5.1",
+                launcher_version="0.1.0",
+                channel="beta",
+                platform="windows",
+                architecture="x86_64",
+                product="wechat-cli-web",
+                device_id="dev_01",
+                failed_versions=[],
+            )
+
+        self.assertEqual(ErrorCode.UPDATE_CHANNEL_MISMATCH, caught.exception.code)
+        self.assertFalse(caught.exception.retryable)
+
     def test_server_error_is_stable_update_error(self):
         transport = FakeTransport(
             (
