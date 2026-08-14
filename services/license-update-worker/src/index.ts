@@ -50,6 +50,56 @@ export function createApp(options: AdminLoginRouteOptions = {}): Hono<{
     }),
   );
 
+  app.get("/v1/health/access-jwks", async (c) => {
+    if (c.env.ENVIRONMENT !== "staging") {
+      return c.json({ error: { code: "NOT_FOUND", message: "接口不存在。" } }, 404);
+    }
+    const jwksUrl = c.env.ACCESS_JWKS_URL;
+    if (typeof jwksUrl !== "string" || jwksUrl.length === 0) {
+      return c.json({ ok: false, reachable: false, error_name: "ConfigurationError" });
+    }
+    try {
+      const response = await fetch(jwksUrl, {
+        headers: { Accept: "application/json" },
+        redirect: "error",
+      });
+      if (response.status !== 200) {
+        await response.body?.cancel();
+        return c.json({
+          ok: false,
+          reachable: true,
+          http_status: response.status,
+          keys_count: 0,
+        });
+      }
+      const value = await response.json<unknown>();
+      const keys =
+        typeof value === "object" && value !== null && !Array.isArray(value)
+          ? (value as { keys?: unknown }).keys
+          : undefined;
+      if (!Array.isArray(keys)) {
+        return c.json({
+          ok: false,
+          reachable: true,
+          http_status: 200,
+          keys_count: 0,
+        });
+      }
+      return c.json({
+        ok: true,
+        reachable: true,
+        http_status: 200,
+        keys_count: keys.length,
+      });
+    } catch (error) {
+      return c.json({
+        ok: false,
+        reachable: false,
+        error_name: error instanceof Error ? error.name : "UnknownError",
+      });
+    }
+  });
+
   registerLicenseRoutes(app);
   registerUpdateRoutes(app);
   registerDiagnosticRoutes(app);
