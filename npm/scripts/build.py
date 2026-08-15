@@ -9,10 +9,24 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from typing import Mapping
+
+from wechat_cli.version import production_build_id
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 NPM_DIR = ROOT / "npm"
 PLATFORMS_DIR = NPM_DIR / "platforms"
+
+def production_build_environment(
+    source_sha: str,
+    *,
+    base_environment: Mapping[str, str] | None = None,
+) -> dict[str, str]:
+    environment = dict(os.environ if base_environment is None else base_environment)
+    environment["WECHAT_CLI_BUILD_ID"] = production_build_id(source_sha)
+    environment["WECHAT_CLI_SOURCE_SHA"] = source_sha
+    return environment
+
 
 PLATFORM_MAP = {
     "darwin-arm64":  {"target": "macos"},
@@ -184,6 +198,7 @@ def build_platform(
     targets: list[str] | None = None,
     trust_profile_path: str | Path | None = None,
     installer_payload_path: str | Path | None = None,
+    source_sha: str | None = None,
 ):
     if platform not in PLATFORM_MAP:
         raise ValueError(f"Unknown platform: {platform}")
@@ -230,7 +245,10 @@ def build_platform(
         )
         print(f"[+] Running ({target}): {' '.join(cmd)}")
         try:
-            subprocess.check_call(cmd, cwd=str(ROOT))
+            check_call_kwargs = {"cwd": str(ROOT)}
+            if source_sha is not None:
+                check_call_kwargs["env"] = production_build_environment(source_sha)
+            subprocess.check_call(cmd, **check_call_kwargs)
         except subprocess.CalledProcessError as exc:
             print(f"[-] {target} build failed for {platform}: {exc}")
             return False
@@ -261,6 +279,10 @@ def main():
     parser.add_argument(
         "--installer-payload",
         help="Explicit bootstrap payload directory embedded into installer builds.",
+    )
+    parser.add_argument(
+        "--source-sha",
+        help="Validated full source SHA used to derive deterministic production build metadata.",
     )
     args = parser.parse_args()
     platforms = list(args.platforms)
@@ -303,6 +325,8 @@ def main():
             build_kwargs["trust_profile_path"] = args.trust_profile
         if args.installer_payload is not None:
             build_kwargs["installer_payload_path"] = args.installer_payload
+        if args.source_sha is not None:
+            build_kwargs["source_sha"] = args.source_sha
         results[p] = build_platform(p, **build_kwargs)
 
     print(f"\n{'='*60}")

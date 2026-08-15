@@ -81,7 +81,7 @@ class AdminApiClientTests(unittest.TestCase):
         )
 
         request = mocked_urlopen.call_args.args[0]
-        self.assertEqual("WeChatCliAdmin/0.5.1", request.get_header("User-agent"))
+        self.assertEqual("WeChatCliAdmin/0.6.0", request.get_header("User-agent"))
 
     @patch("wechat_cli.admin.client.urlopen")
     def test_download_transport_sets_application_user_agent(self, mocked_urlopen):
@@ -100,7 +100,7 @@ class AdminApiClientTests(unittest.TestCase):
             )
 
         request = mocked_urlopen.call_args.args[0]
-        self.assertEqual("WeChatCliAdmin/0.5.1", request.get_header("User-agent"))
+        self.assertEqual("WeChatCliAdmin/0.6.0", request.get_header("User-agent"))
 
     def test_create_license_uses_admin_header_and_operation_nonce(self):
         transport = FakeJsonTransport(

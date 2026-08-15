@@ -41,7 +41,7 @@ class WindowsPackagingTests(unittest.TestCase):
             ROOT / "packaging" / "windows" / "README-APP.md"
         ).read_text(encoding="utf-8")
 
-        self.assertIn('version = "0.5.1"', pyproject)
+        self.assertIn('version = "0.6.0"', pyproject)
         self.assertIn('authors = [{ name = "Au Revior" }]', pyproject)
         self.assertIn("作者：Au Revior", guide)
         self.assertIn("关于与支持", guide)
@@ -236,6 +236,36 @@ class WindowsPackagingTests(unittest.TestCase):
         joined = " ".join(check_call.call_args.args[0])
         self.assertIn("wechat-cli", joined)
         self.assertNotIn("wechat-cli-launcher", joined)
+
+    def test_windows_build_with_source_sha_passes_deterministic_production_metadata(self):
+        build = load_module(
+            "npm_build_source_sha",
+            ROOT / "npm" / "scripts" / "build.py",
+        )
+        source_sha = "abcdef0123456789abcdef0123456789abcdef01"
+        with tempfile.TemporaryDirectory() as tmp:
+            output_root = Path(tmp)
+            binary = output_root / "win32-x64" / "bin" / "wechat-cli.exe"
+
+            def create_binary(*_args, **_kwargs):
+                binary.write_bytes(b"app")
+
+            with patch.object(build, "PLATFORMS_DIR", output_root), patch.object(
+                build, "ensure_target_dependencies"
+            ), patch.object(
+                build.subprocess, "check_call", side_effect=create_binary
+            ) as check_call:
+                self.assertTrue(
+                    build.build_platform(
+                        "win32-x64",
+                        targets=["app"],
+                        source_sha=source_sha,
+                    )
+                )
+
+        environment = check_call.call_args.kwargs["env"]
+        self.assertEqual("prod-060-abcdef012345", environment["WECHAT_CLI_BUILD_ID"])
+        self.assertEqual(source_sha, environment["WECHAT_CLI_SOURCE_SHA"])
 
     def test_windows_installer_only_build_forwards_payload_and_checks_output(self):
         build = load_module(
@@ -434,7 +464,7 @@ class WindowsPackagingTests(unittest.TestCase):
             ) as binary_path:
                 update_zip = package.create_update_only_package(skip_build=True)
 
-            self.assertEqual("wechat-cli-app-0.5.1-win-x64.zip", update_zip.name)
+            self.assertEqual("wechat-cli-app-0.6.0-win-x64.zip", update_zip.name)
             binary_path.assert_called_once_with("wechat-cli.exe")
             self.assertEqual("keep", bootstrap_marker.read_text(encoding="utf-8"))
             self.assertEqual(b"keep-bootstrap", bootstrap_zip.read_bytes())
@@ -448,11 +478,11 @@ class WindowsPackagingTests(unittest.TestCase):
         self.assertEqual(
             {
                 "product": "wechat-cli-web",
-                "version": "0.5.1",
+                "version": "0.6.0",
                 "platform": "windows",
                 "architecture": "x86_64",
                 "entrypoint": "wechat-cli.exe",
-                "build_id": "staging-051-20260808.1",
+                "build_id": "dev",
             },
             manifest,
         )
@@ -465,7 +495,7 @@ class WindowsPackagingTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             dist = Path(tmp)
-            target = dist / "wechat-cli-app-0.5.1-win-x64.zip"
+            target = dist / "wechat-cli-app-0.6.0-win-x64.zip"
             target.write_bytes(b"existing")
             with patch.object(package, "DIST_DIR", dist), patch.object(
                 package, "_binary_path"

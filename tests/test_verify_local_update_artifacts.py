@@ -23,11 +23,11 @@ def load_module():
 def write_update_zip(path: Path) -> None:
     manifest = {
         "product": "wechat-cli-web",
-        "version": "0.5.1",
+        "version": "0.6.0",
         "platform": "windows",
         "architecture": "x86_64",
         "entrypoint": "wechat-cli.exe",
-        "build_id": "staging-051-20260808.1",
+        "build_id": "dev",
     }
     with zipfile.ZipFile(path, "w") as archive:
         archive.writestr("wechat-cli.exe", b"fake-executable")
@@ -64,7 +64,7 @@ class UpdateOnlyArtifactVerificationTests(unittest.TestCase):
 
         self.assertEqual(0, completed.returncode, completed.stdout)
         lines = completed.stdout.strip().splitlines()
-        self.assertEqual("0.5.1", lines[0])
+        self.assertEqual("0.6.0", lines[0])
         self.assertEqual(
             (ROOT / "wechat_cli" / "version.py").resolve(),
             Path(lines[1]).resolve(),
@@ -73,32 +73,32 @@ class UpdateOnlyArtifactVerificationTests(unittest.TestCase):
     def test_verify_update_only_does_not_require_bootstrap_artifacts(self):
         verifier = load_module()
         with tempfile.TemporaryDirectory() as tmp:
-            update_zip = Path(tmp) / "wechat-cli-app-0.5.1-win-x64.zip"
+            update_zip = Path(tmp) / "wechat-cli-app-0.6.0-win-x64.zip"
             write_update_zip(update_zip)
 
             with patch.object(
                 verifier,
                 "_execute_version",
-                return_value="wechat-cli, version 0.5.1",
+                return_value="wechat-cli, version 0.6.0",
             ):
                 result = verifier.verify_update_only(update_zip=update_zip)
 
         self.assertTrue(result["ok"])
         self.assertEqual("wechat-cli-web", result["product"])
-        self.assertEqual("0.5.1", result["version"])
-        self.assertEqual("0.1.0", result["launcher_version"])
+        self.assertEqual("0.6.0", result["version"])
+        self.assertEqual("0.2.0", result["launcher_version"])
         self.assertTrue(result["manifest_signature_verified"])
         self.assertTrue(result["safe_extraction_verified"])
-        self.assertEqual("wechat-cli, version 0.5.1", result["extracted_application_version"])
+        self.assertEqual("wechat-cli, version 0.6.0", result["extracted_application_version"])
         self.assertNotIn("bootstrap_zip_sha256", result)
 
     def test_update_only_cli_routes_without_bootstrap_defaults(self):
         verifier = load_module()
-        update_zip = Path("dist/wechat-cli-app-0.5.1-win-x64.zip")
+        update_zip = Path("dist/wechat-cli-app-0.6.0-win-x64.zip")
         expected = {
             "ok": True,
             "product": "wechat-cli-web",
-            "version": "0.5.1",
+            "version": "0.6.0",
         }
 
         with patch.object(
