@@ -1,6 +1,6 @@
 # Board 7 Strong Authorization Design Amendment
 
-Status: **DRAFT — awaiting user approval**
+Status: **APPROVED — Strong Authorization Envelope active**
 Date: 2026-08-15
 Parent design: `docs/superpowers/specs/2026-08-15-board-7-production-automation-controlled-launch-design.md`
 Parent implementation plan: `docs/superpowers/plans/2026-08-15-board-7-production-automation-controlled-launch.md`
@@ -649,4 +649,4 @@ The user can approve this entire amendment with one explicit statement equivalen
 
 Once approved, that statement is the sole routine authorization needed for the remainder of Board 7.
 
-Until the user explicitly approves this amendment, **none of the new consolidated external-effect permissions are active**. The current separately approved repair-branch push remains the latest completed hosted write.
+The user explicitly approved this amendment on 2026-08-15. The Strong Authorization Envelope is therefore active from this governance-activation commit forward. Per the approval, the first autonomous actions are constrained to governance/source-integration closure: complete the already-pushed `9185f5f` whitespace-repair PR/CI/merge, then integrate this amendment through its own PR/CI/merge, then fresh-read back the exact canonical remote `main`. B7-G3 production provisioning may begin only after those three checks succeed.
