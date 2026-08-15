@@ -1,5 +1,7 @@
 import base64
 import json
+import runpy
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -8,6 +10,21 @@ from Crypto.PublicKey import ECC
 
 
 class Board7ProductionMaterialTests(unittest.TestCase):
+    def test_direct_script_execution_resolves_repository_imports(self):
+        root = Path(__file__).resolve().parents[1]
+        script = root / "scripts" / "board7_prepare_production_material.py"
+        original_path = list(sys.path)
+        original_argv = list(sys.argv)
+        try:
+            sys.path[:] = [str(root / "scripts"), *[item for item in original_path if Path(item or ".").resolve() != root]]
+            sys.argv[:] = [str(script), "--help"]
+            with self.assertRaises(SystemExit) as raised:
+                runpy.run_path(str(script), run_name="__main__")
+            self.assertEqual(0, raised.exception.code)
+        finally:
+            sys.path[:] = original_path
+            sys.argv[:] = original_argv
+
     def test_generation_matches_exact_g4_contract(self):
         from scripts.board7_prepare_production_material import generate_material
 

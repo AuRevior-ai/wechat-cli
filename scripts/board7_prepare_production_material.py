@@ -15,15 +15,18 @@ import json
 import os
 import secrets
 import subprocess
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from Crypto.PublicKey import ECC
 
-from scripts.packaging_paths import assert_outside_repository
-
 ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from scripts.packaging_paths import assert_outside_repository
 
 LEASE_KEY_ID = "lease-key-production-01"
 RELEASE_KEY_ID = "release-key-production-01"
