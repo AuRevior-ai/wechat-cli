@@ -1,0 +1,49 @@
+{
+  "schema_version": 2,
+  "environments": {
+    "local": {
+      "worker_name": "wechat-cli-license-update-local"
+    },
+    "staging": {
+      "worker_name": "wechat-cli-license-update-staging"
+    },
+    "production": {
+      "worker_name": "wechat-cli-license-update",
+      "workers_dev": false,
+      "require_custom_route": true
+    }
+  },
+  "required_bindings": {
+    "d1": ["DB"],
+    "r2": ["DIAGNOSTICS", "RELEASES"]
+  },
+  "versioned_secret_prefixes": [
+    "LICENSE_KEY_PEPPER",
+    "DEVICE_TOKEN_PEPPER",
+    "ADMIN_SESSION_PEPPER",
+    "CONTACT_LOOKUP_PEPPER",
+    "DOWNLOAD_TICKET_SECRET",
+    "DIAGNOSTIC_UPLOAD_SECRET",
+    "RATE_LIMIT_PEPPER"
+  ],
+  "required_secret_names": [
+    "LEASE_SIGNING_PRIVATE_KEY"
+  ],
+  "local_staging_compatibility_secret_names": [
+    "ADMIN_TOKEN_PEPPER",
+    "GITHUB_RELEASE_READ_TOKEN"
+  ],
+  "production_contract": {
+    "public_api_origin_var": "PUBLIC_API_ORIGIN",
+    "admin_origin_var": "ACCESS_ADMIN_ORIGIN",
+    "access_issuer_var": "ACCESS_JWT_ISSUER",
+    "access_jwks_var": "ACCESS_JWKS_URL",
+    "human_audiences_var": "ACCESS_HUMAN_AUDIENCES",
+    "human_identity_claim_var": "ACCESS_HUMAN_IDENTITY_CLAIM",
+    "human_identity_claim": "email",
+    "automation_audiences_var": "ACCESS_AUTOMATION_AUDIENCES",
+    "automation_identity_claim_var": "ACCESS_AUTOMATION_IDENTITY_CLAIM",
+    "automation_identities_var": "ACCESS_AUTOMATION_IDENTITIES",
+    "required_custom_domain_count": 2
+  }
+}

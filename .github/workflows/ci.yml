@@ -1,0 +1,66 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 2
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: "3.12"
+      - name: Set up Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: services/license-update-worker/package-lock.json
+      - name: Install Python package
+        shell: pwsh
+        run: python -m pip install -e .
+      - name: Install Worker dependencies
+        shell: pwsh
+        working-directory: services/license-update-worker
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Python full suite
+        shell: pwsh
+        run: python -m unittest discover -s tests
+      - name: Worker typecheck
+        shell: pwsh
+        working-directory: services/license-update-worker
+        run: npm run typecheck
+      - name: Worker tests
+        shell: pwsh
+        working-directory: services/license-update-worker
+        run: npm test -- --run
+      - name: Production deployment and workflow policy tests
+        shell: pwsh
+        run: >-
+          python -m unittest
+          tests.test_worker_deployment_policy
+          tests.test_worker_deployment_preflight
+          tests.test_worker_deployment_actions
+          tests.test_workflow_policy
+          -v
+      - name: Verify workflow source policy
+        shell: pwsh
+        run: python scripts/verify_workflow_policy.py
+      - name: Reject high-risk tracked credential shapes outside synthetic tests
+        shell: pwsh
+        run: python scripts/verify_no_tracked_secrets.py
+      - name: Git whitespace check
+        shell: pwsh
+        run: git diff --check HEAD^

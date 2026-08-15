@@ -116,7 +116,8 @@ class InviteStatsCommandTests(unittest.TestCase):
             return CliRunner().invoke(cli, args)
 
     def test_command_is_registered(self):
-        result = CliRunner().invoke(cli, ["invite-stats", "--help"])
+        with patch("wechat_cli.main.AppContext", return_value=self.fake_app):
+            result = CliRunner().invoke(cli, ["invite-stats", "--help"])
 
         self.assertEqual(result.exit_code, 0, result.output)
         self.assertIn("--bind-identity", result.output)

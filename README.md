@@ -2,11 +2,11 @@
 
 # WeChat CLI
 
-**Query your local WeChat data from the command line.**
+**Local WeChat data access for people and AI agents, with a productized Windows 0.5.0 line.**
 
 [![npm version](https://img.shields.io/npm/v/@canghe_ai/wechat-cli.svg)](https://www.npmjs.com/package/@canghe_ai/wechat-cli)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
-[![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey.svg)](https://github.com/freestylefly/wechat-cli)
+[![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey.svg)](https://github.com/AuRevior-ai/wechat-cli)
 
 Chat history · Merged forwards · Voice transcription · AI media packages
 
@@ -20,28 +20,34 @@ Maintained by **Au Revior**.
 
 ## ✨ Highlights
 
-- **🖥️ Local Web console** — includes an “About & Support” page with the
-  author's local-only contact and support QR codes
-- **🚀 Zero-config install** — `npm install -g` and you're done, no Python needed
-- **📦 AI material packages** — recursively expands merged forwards and bundles images, stickers, decoded voice, and copy-ready text
-- **🤖 AI-first** — JSON output by default, designed for LLM agent tool calls
-- **🔒 Fully local** — on-the-fly SQLCipher decryption, data never leaves your machine
-- **📊 Rich analytics** — top senders, message type breakdown, 24-hour activity charts
-- **📝 Flexible export** — Markdown or plain text, with time range filtering
+- **AI-first local data access** — structured JSON, text export, search, analytics, and AI-ready media packages.
+- **Local Web console** — chat workflows, invite statistics, exports, and local management surfaces.
+- **Windows 0.5.0 product line** — WebView2 Launcher, licensed devices, signed updates, health checks, and rollback.
+- **Local-first processing** — WeChat database access and chat processing stay on the machine unless the user explicitly submits diagnostics.
+- **Read-only message access** — the tool queries local data and does not send, modify, or delete WeChat messages.
 
 ---
+
+## Distribution and version lines
+
+| Channel | Current repository version | Availability |
+|---|---:|---|
+| Python/source and Windows product line | 0.5.0 | Source checkout; Windows licensed builds are distributed through the private release system |
+| Existing npm wrapper | 0.2.4 | Existing npm package, currently carrying the macOS arm64 platform package |
+
+These lines are not synchronized. The npm badge reports the npm channel, not the Windows/Python product version.
 
 ## 📥 Installation (For Humans)
 
 AI Agents — skip ahead to "Installation (For AI Agents)" below.
 
-### npm (Recommended)
+### Existing npm channel (0.2.4)
 
 ```bash
 npm install -g @canghe_ai/wechat-cli
 ```
 
-> Currently ships a **macOS arm64** binary. Other platforms can use the pip method below. PRs with additional platform binaries are welcome.
+> This command installs the existing npm 0.2.4 line, which currently carries the macOS arm64 platform package. It does not install the Windows/Python 0.5.0 product line.
 
 **Update to the latest version:**
 
@@ -49,18 +55,18 @@ npm install -g @canghe_ai/wechat-cli
 npm update -g @canghe_ai/wechat-cli
 ```
 
-### pip
+### Existing Python package channel
 
 ```bash
 pip install wechat-cli
 ```
 
-Requires Python >= 3.10.
+Requires Python >= 3.10. The version published on the package index may differ from the current repository version.
 
 ### From Source
 
 ```bash
-git clone https://github.com/freestylefly/wechat-cli.git
+git clone https://github.com/AuRevior-ai/wechat-cli.git
 cd wechat-cli
 pip install -e .
 ```
@@ -185,6 +191,10 @@ Common commands:
 - `wechat-cli new-messages` — get messages since last check
 - `wechat-cli members "GROUP"` — list group members
 - `wechat-cli stats "CHAT" --format text` — chat statistics
+- `wechat-cli invite-stats "GROUP" --format text` — group invitation statistics
+- `wechat-cli ai-package "CHAT" --output chat-ai.zip` — build an AI-ready text and media package
+- `wechat-cli media export PATH --output-dir exported-media` — process a local media path returned by history
+- `wechat-cli web --open` — start the local Web console
 ```
 
 Then in conversation you can ask Claude things like:
@@ -291,6 +301,17 @@ wechat-cli stats "Team Group" --format text
 
 Returns: total messages, type breakdown, top 10 senders, 24-hour activity distribution.
 
+### `invite-stats` — Group invitation statistics
+
+```bash
+wechat-cli invite-stats "Group Name"
+wechat-cli invite-stats "Group Name" --format text
+wechat-cli invite-stats "Group Name" --format csv --output invite-stats.csv
+wechat-cli invite-stats "Group Name" --bind-identity "Historical Name=wxid_xxx"
+```
+
+The command parses invitation system notices, ranks inviters by unique invitees, and keeps event details for auditing. Identity resolution uses exact evidence; similar names are not merged automatically. Notices without a confirmed source remain source-unknown and are excluded from the ranking. Repeat `--bind-identity` to map a historical name to a stable account explicitly.
+
 ### `export` — Export Conversations
 
 ```bash
@@ -327,6 +348,26 @@ wechat-cli new-messages                    # Subsequent: only new since last cal
 
 State saved at `~/.wechat-cli/last_check.json`. Delete to reset.
 
+### `media` — Process local media
+
+Use this command with local media paths returned by `history --media`. Image `.dat` files are decoded when possible.
+
+```bash
+wechat-cli media export PATH
+wechat-cli media export PATH --output-dir exported-media --format text
+```
+
+**Options:** `--output-dir`, `--format json|text`
+
+### `web` — Start the local Web console
+
+```bash
+wechat-cli web
+wechat-cli web --port 8787 --open
+```
+
+The interface binds to the local machine. **Options:** `--port`, `--open`
+
 ---
 
 ## 🔍 Message Type Filter
@@ -350,21 +391,22 @@ The `--type` option (on `history` and `search`):
 
 ## 💻 System Requirements
 
-- **macOS** ≥ 26.3.1
-- **WeChat for Mac** ≤ 4.1.8.100
+- Python >= 3.10 for source installation.
+- A locally installed and running WeChat client for initialization and key extraction.
+- Platform-specific permissions for process-memory access.
 
-> Older macOS versions or newer WeChat versions may not be compatible.
+The recorded macOS compatibility baseline is macOS 26.3.1 or newer with WeChat for Mac up to 4.1.8.100. Other client versions may require compatibility work.
 
 ---
 
 ## 🖥️ Platform Support
 
-| Platform | Status | Notes |
-|----------|--------|-------|
-| macOS (Apple Silicon) | ✅ Supported | Bundled arm64 binary |
-| macOS (Intel) | ✅ Supported | x86_64 binary needed |
-| Windows | ✅ Supported | Reads Weixin.exe process memory |
-| Linux | ✅ Supported | Reads /proc/pid/mem, requires root |
+| Platform | Source capability | Current packaged channel |
+|---|---|---|
+| Windows x86-64 | Supported; reads `Weixin.exe` process memory | 0.5.0 Windows product and private update flow |
+| macOS Apple Silicon | Supported | Existing npm 0.2.4 arm64 platform package |
+| macOS Intel | Source support requires an x86-64 binary | No current bundled npm platform package recorded in this repository |
+| Linux | Supported through `/proc/<pid>/mem`; usually requires root | Source installation |
 
 ---
 
@@ -374,13 +416,15 @@ WeChat stores chat data in SQLCipher-encrypted SQLite databases locally. WeChat 
 
 1. **Extracts keys** — scans WeChat process memory for encryption keys (`init`)
 2. **Decrypts on-the-fly** — transparent page-level AES-256-CBC decryption with caching
-3. **Queries locally** — all data stays on your machine, no network access
+3. **Queries and processes locally** — core chat access remains on the machine; the 0.5.0 product line can contact its configured authorization/update service, and diagnostics upload requires explicit user action
 
 ---
 
 ## 📄 License
 
 [Apache License 2.0](LICENSE)
+
+The source license does not imply that every packaged build or private update asset is publicly downloadable. The Windows licensed distribution and its private release service are separate delivery channels.
 
 ---
 
@@ -389,9 +433,19 @@ WeChat stores chat data in SQLCipher-encrypted SQLite databases locally. WeChat 
 This project is a local data query tool for personal use only. Please note:
 
 - **Read-only** — this tool only reads locally stored data, it does not send, modify, or delete any messages
-- **No cloud transmission** — all data stays on your local machine, nothing is uploaded to any server
+- **Local-first** — core chat queries and processing are local. The 0.5.0 product line can contact the configured authorization/update service, and diagnostic upload occurs only after explicit user action
 - **No WeChat ecosystem disruption** — this tool does not interfere with WeChat's normal operation, does not automate any actions, and does not violate WeChat's Terms of Service
 - **Use at your own risk** — this project is for personal learning and research purposes only. Users are responsible for ensuring compliance with local laws and regulations
+
+---
+
+## Development records
+
+- [Current project state](docs/PROJECT_STATE.md)
+- [Changelog](CHANGELOG.md)
+- [Authorized update roadmap](docs/deployment/authorized-update-roadmap.md)
+- [Approved designs](docs/superpowers/specs/)
+- [Implementation plans](docs/superpowers/plans/) — historical plans are not current progress dashboards
 
 ---
 
@@ -403,4 +457,4 @@ This project is built on top of [wechat-decrypt](https://github.com/ylytdeng/wec
 
 ## ⭐ Star History
 
-[![Star History Chart](https://api.star-history.com/svg?repos=freestylefly/wechat-cli&type=Date)](https://star-history.com/#freestylefly/wechat-cli&Date)
+[![Star History Chart](https://api.star-history.com/svg?repos=AuRevior-ai/wechat-cli&type=Date)](https://star-history.com/#AuRevior-ai/wechat-cli&Date)

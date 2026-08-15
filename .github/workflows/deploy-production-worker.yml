@@ -1,0 +1,99 @@
+name: Deploy production Worker
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Exact accepted canonical main commit (40 lowercase hex characters)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-worker
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: windows-latest
+    environment: production
+    steps:
+      - name: Checkout exact requested source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ inputs.source_sha }}
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: "3.12"
+      - name: Set up Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: services/license-update-worker/package-lock.json
+      - name: Install Python package
+        shell: pwsh
+        run: python -m pip install -e .
+      - name: Install Worker dependencies
+        shell: pwsh
+        working-directory: services/license-update-worker
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Prove exact canonical main identity
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          $checked = (git rev-parse HEAD).Trim()
+          $headers = @{
+            Authorization = "Bearer $env:GITHUB_TOKEN"
+            Accept = "application/vnd.github+json"
+            'X-GitHub-Api-Version' = '2026-03-10'
+          }
+          $branch = Invoke-RestMethod -Uri '${{ github.api_url }}/repos/${{ github.repository }}/branches/main' -Headers $headers
+          python scripts/verify_canonical_main.py --requested-sha '${{ inputs.source_sha }}' --checked-out-sha $checked --observed-main-sha $branch.commit.sha
+      - name: Fresh Python verification
+        shell: pwsh
+        run: python -m unittest discover -s tests
+      - name: Fresh Worker verification
+        shell: pwsh
+        working-directory: services/license-update-worker
+        run: npm run typecheck; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; npm test -- --run
+      - name: Materialize production trust profile in runner temp
+        shell: pwsh
+        env:
+          PRODUCTION_TRUST_PROFILE_JSON: ${{ vars.PRODUCTION_TRUST_PROFILE_JSON }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:PRODUCTION_TRUST_PROFILE_JSON)) { throw 'production trust profile is unavailable' }
+          $path = Join-Path $env:RUNNER_TEMP 'deployment-trust-profile.json'
+          [IO.File]::WriteAllText($path, $env:PRODUCTION_TRUST_PROFILE_JSON, (New-Object Text.UTF8Encoding($false)))
+      - name: Atomic production Worker deploy after fail-closed preflight
+        shell: pwsh
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          $profile = Join-Path $env:RUNNER_TEMP 'deployment-trust-profile.json'
+          python scripts/deploy_worker.py deploy `
+            --environment production `
+            --source-sha '${{ inputs.source_sha }}' `
+            --config services/license-update-worker/wrangler.jsonc `
+            --trust-profile $profile `
+            --api-origin '${{ vars.PRODUCTION_API_ORIGIN }}' `
+            --secret-name ADMIN_SESSION_PEPPER_V1 `
+            --secret-name CONTACT_ENCRYPTION_KEY_V1 `
+            --secret-name CONTACT_LOOKUP_PEPPER_V1 `
+            --secret-name DEVICE_TOKEN_PEPPER_V1 `
+            --secret-name DIAGNOSTIC_UPLOAD_SECRET_V1 `
+            --secret-name DOWNLOAD_TICKET_SECRET_V1 `
+            --secret-name LEASE_SIGNING_PRIVATE_KEY `
+            --secret-name LICENSE_KEY_PEPPER_V1 `
+            --secret-name RATE_LIMIT_PEPPER_V1
+      - name: Remove temporary trust profile
+        if: always()
+        shell: pwsh
+        run: Remove-Item -LiteralPath (Join-Path $env:RUNNER_TEMP 'deployment-trust-profile.json') -Force -ErrorAction SilentlyContinue

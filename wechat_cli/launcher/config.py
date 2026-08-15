@@ -9,6 +9,21 @@ from typing import Any, Mapping
 from urllib.parse import urlparse
 
 from ..update.crypto import TrustedEd25519Keys
+from .trust_profile import DeploymentTrustProfile
+
+
+_TRUST_CRITICAL_EXTERNAL_FIELDS = frozenset(
+    {
+        "api_base_url",
+        "channel",
+        "fingerprint_salt",
+        "release_public_keys",
+        "lease_public_keys",
+        "windows_publisher_policy",
+        "distribution_profile",
+        "environment",
+    }
+)
 
 
 def _required_string(data: Mapping[str, Any], name: str) -> str:
@@ -41,6 +56,9 @@ class LauncherConfig:
     fingerprint_salt: str
     release_keys: TrustedEd25519Keys = field(repr=False)
     lease_keys: TrustedEd25519Keys = field(repr=False)
+    environment: str
+    distribution_profile: str
+    windows_publisher_policy: str
 
     @property
     def update_download_url(self) -> str:
@@ -52,9 +70,32 @@ class LauncherConfig:
         data: Mapping[str, Any],
         *,
         allow_insecure_loopback: bool = False,
+        trust_profile: DeploymentTrustProfile | None = None,
     ) -> "LauncherConfig":
         if not isinstance(data, Mapping):
             raise ValueError("launcher config root must be an object")
+        if trust_profile is not None:
+            forbidden = _TRUST_CRITICAL_EXTERNAL_FIELDS.intersection(data)
+            if forbidden:
+                names = ", ".join(sorted(forbidden))
+                raise ValueError(f"external launcher config cannot contain trust-critical fields: {names}")
+            if data.get("schema_version") != 2:
+                raise ValueError("unsupported operational launcher config schema")
+            port = data.get("port")
+            if isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65535:
+                raise ValueError("port must be between 1 and 65535")
+            return cls(
+                schema_version=2,
+                api_base_url=trust_profile.api_base_url,
+                port=port,
+                channel=trust_profile.expected_channel,
+                fingerprint_salt=trust_profile.fingerprint_salt,
+                release_keys=TrustedEd25519Keys.from_base64(trust_profile.release_public_keys),
+                lease_keys=TrustedEd25519Keys.from_base64(trust_profile.lease_public_keys),
+                environment=trust_profile.environment,
+                distribution_profile=trust_profile.distribution_profile,
+                windows_publisher_policy=trust_profile.windows_publisher_policy,
+            )
         schema = data.get("schema_version")
         if schema != 1:
             raise ValueError("unsupported launcher config schema")
@@ -91,6 +132,9 @@ class LauncherConfig:
             fingerprint_salt=fingerprint_salt,
             release_keys=release_keys,
             lease_keys=lease_keys,
+            environment="legacy",
+            distribution_profile="legacy",
+            windows_publisher_policy="",
         )
 
     @classmethod
@@ -99,6 +143,7 @@ class LauncherConfig:
         path: str | Path,
         *,
         allow_insecure_loopback: bool = False,
+        trust_profile: DeploymentTrustProfile | None = None,
     ) -> "LauncherConfig":
         source = Path(path)
         try:
@@ -108,4 +153,5 @@ class LauncherConfig:
         return cls.from_mapping(
             value,
             allow_insecure_loopback=allow_insecure_loopback,
+            trust_profile=trust_profile,
         )

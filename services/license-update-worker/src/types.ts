@@ -5,20 +5,58 @@ export interface WorkerVariables {
 export interface Env {
   DB: D1Database;
   DIAGNOSTICS: R2Bucket;
+  RELEASES: R2Bucket;
 
   ENVIRONMENT: string;
   LEASE_SIGNING_KEY_ID: string;
   CONTACT_ENCRYPTION_KEY_VERSION: string;
   MAX_DIAGNOSTIC_BYTES: string;
 
-  LICENSE_KEY_PEPPER: string;
-  DEVICE_TOKEN_PEPPER: string;
-  ADMIN_TOKEN_PEPPER: string;
-  CONTACT_LOOKUP_PEPPER: string;
+  LICENSE_KEY_PEPPER_CURRENT_VERSION?: string;
+  LICENSE_KEY_PEPPER_READABLE_VERSIONS?: string;
+  LICENSE_KEY_PEPPER_V1?: string;
+  LICENSE_KEY_PEPPER_V2?: string;
+  DEVICE_TOKEN_PEPPER_CURRENT_VERSION?: string;
+  DEVICE_TOKEN_PEPPER_READABLE_VERSIONS?: string;
+  DEVICE_TOKEN_PEPPER_V1?: string;
+  DEVICE_TOKEN_PEPPER_V2?: string;
+  RATE_LIMIT_PEPPER_CURRENT_VERSION?: string;
+  RATE_LIMIT_PEPPER_READABLE_VERSIONS?: string;
+  RATE_LIMIT_PEPPER_V1?: string;
+  RATE_LIMIT_PEPPER_V2?: string;
+  ADMIN_TOKEN_PEPPER?: string;
+  ADMIN_SESSION_PEPPER_CURRENT_VERSION?: string;
+  ADMIN_SESSION_PEPPER_READABLE_VERSIONS?: string;
+  ADMIN_SESSION_PEPPER_V1?: string;
+  ADMIN_SESSION_PEPPER_V2?: string;
+  ALLOW_LEGACY_ADMIN_AUTH?: string;
+  ADMIN_BREAK_GLASS_POLICY?: string;
+  ACCESS_JWT_ISSUER?: string;
+  ACCESS_JWKS_URL?: string;
+  ACCESS_AUDIENCES?: string;
+  ACCESS_IDENTITY_CLAIM?: string;
+  ACCESS_HUMAN_AUDIENCES?: string;
+  ACCESS_HUMAN_IDENTITY_CLAIM?: string;
+  ACCESS_AUTOMATION_AUDIENCES?: string;
+  ACCESS_AUTOMATION_IDENTITY_CLAIM?: string;
+  ACCESS_AUTOMATION_IDENTITIES?: string;
+  PUBLIC_API_ORIGIN?: string;
+  ACCESS_ADMIN_ORIGIN?: string;
+  CONTACT_LOOKUP_PEPPER_CURRENT_VERSION?: string;
+  CONTACT_LOOKUP_PEPPER_READABLE_VERSIONS?: string;
+  CONTACT_LOOKUP_PEPPER_V1?: string;
+  CONTACT_LOOKUP_PEPPER_V2?: string;
   CONTACT_ENCRYPTION_KEY_V1: string;
   LEASE_SIGNING_PRIVATE_KEY: string;
-  DOWNLOAD_TICKET_SECRET: string;
-  GITHUB_RELEASE_READ_TOKEN: string;
+  DOWNLOAD_TICKET_SECRET_CURRENT_VERSION?: string;
+  DOWNLOAD_TICKET_SECRET_READABLE_VERSIONS?: string;
+  DOWNLOAD_TICKET_SECRET_V1?: string;
+  DOWNLOAD_TICKET_SECRET_V2?: string;
+  DIAGNOSTIC_UPLOAD_SECRET_CURRENT_VERSION?: string;
+  DIAGNOSTIC_UPLOAD_SECRET_READABLE_VERSIONS?: string;
+  DIAGNOSTIC_UPLOAD_SECRET_V1?: string;
+  DIAGNOSTIC_UPLOAD_SECRET_V2?: string;
+  GITHUB_RELEASE_READ_TOKEN?: string;
 }
 
 export type LicenseStatus = "active" | "suspended" | "revoked";
@@ -28,6 +66,7 @@ export type ReleaseChannel = "stable" | "beta";
 export interface LicenseRow {
   id: string;
   key_digest: string;
+  key_secret_version: number;
   key_hint: string;
   status: LicenseStatus;
   max_devices: number;
@@ -49,6 +88,7 @@ export interface DeviceRow {
   status: DeviceStatus;
   token_id: string;
   token_secret_digest: string;
+  token_secret_version: number;
   token_version: number;
   device_revision: number;
   first_activated_at: string;
@@ -72,6 +112,8 @@ export interface ReleaseRow {
   github_release_id: string;
   github_asset_id: string;
   github_asset_name: string;
+  distribution_backend: "github" | "r2";
+  distribution_object_key: string | null;
   rollout_percentage: number;
   rollout_seed: string;
   paused: number;
@@ -88,6 +130,16 @@ export interface AuthenticatedDevice {
 export interface AuthenticatedAdmin {
   id: string;
   scopes: Set<string>;
+  authMode: "session" | "legacy_local" | "legacy_staging" | "legacy_break_glass";
+  authenticatedAt: string;
+}
+
+export interface AuthenticatedAutomation {
+  id: string;
+  identity: string;
+  scopes: Set<string>;
+  authMode: "access_service";
+  authenticatedAt: string;
 }
 
 export interface ApiErrorBody {

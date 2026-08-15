@@ -3,14 +3,18 @@ import type { Hono } from "hono";
 import { authenticateDevice } from "./auth";
 import {
   bytesToBase64,
-  constantTimeEqual,
   createDownloadTicket,
-  hmacSha256Hex,
   parseDownloadTicket,
   rolloutBucket,
 } from "./crypto";
+import { fetchReleasePackage } from "./distribution";
+export { fetchGithubReleaseAsset } from "./distribution";
 import { ApiError, readJsonObject, requiredString } from "./http";
 import { compareSemanticVersions, parseSemanticVersion } from "./semver";
+import {
+  verifyVersionedHmacDigest,
+  versionedHmacDigest,
+} from "./secret_versions";
 import { addSeconds, enforceRateLimit, isoNow, writeAudit } from "./service";
 import type { Env, ReleaseRow } from "./types";
 
@@ -68,6 +72,11 @@ function releaseFromRow(row: Record<string, unknown>): ReleaseRow {
     github_release_id: String(row.github_release_id),
     github_asset_id: String(row.github_asset_id),
     github_asset_name: String(row.github_asset_name),
+    distribution_backend: (row.distribution_backend ?? "github") as ReleaseRow["distribution_backend"],
+    distribution_object_key:
+      row.distribution_object_key === null || row.distribution_object_key === undefined
+        ? null
+        : String(row.distribution_object_key),
     rollout_percentage: Number(row.rollout_percentage),
     rollout_seed: String(row.rollout_seed),
     paused: Number(row.paused),
@@ -75,6 +84,11 @@ function releaseFromRow(row: Record<string, unknown>): ReleaseRow {
     published_at: String(row.published_at),
     created_at: String(row.created_at),
   };
+}
+
+interface FailedReleaseIdentity {
+  version: string;
+  manifest_sha256: string;
 }
 
 function stringArray(value: unknown, name: string, maximum = 32): string[] {
@@ -103,6 +117,54 @@ function stringArray(value: unknown, name: string, maximum = 32): string[] {
   return result;
 }
 
+function failedReleaseArray(
+  value: unknown,
+  name: string,
+  maximum = 32,
+): FailedReleaseIdentity[] {
+  if (!Array.isArray(value) || value.length > maximum) {
+    throw new ApiError("INVALID_REQUEST", `${name} 必须是有限数组。`, {
+      status: 400,
+    });
+  }
+  const result: FailedReleaseIdentity[] = [];
+  for (const item of value) {
+    if (typeof item !== "object" || item === null || Array.isArray(item)) {
+      throw new ApiError("INVALID_REQUEST", `${name} 包含无效值。`, {
+        status: 400,
+      });
+    }
+    const record = item as Record<string, unknown>;
+    const version = record.version;
+    const manifestSha256 = record.manifest_sha256;
+    if (typeof version !== "string" || typeof manifestSha256 !== "string") {
+      throw new ApiError("INVALID_REQUEST", `${name} 包含无效值。`, {
+        status: 400,
+      });
+    }
+    try {
+      parseSemanticVersion(version);
+    } catch (error) {
+      throw new ApiError("INVALID_REQUEST", `${name} 包含无效版本。`, {
+        status: 400,
+        cause: error,
+      });
+    }
+    const normalizedSha = manifestSha256.toLowerCase();
+    if (!/^[0-9a-f]{64}$/u.test(normalizedSha)) {
+      throw new ApiError("INVALID_REQUEST", `${name} 包含无效清单摘要。`, {
+        status: 400,
+      });
+    }
+    result.push({ version, manifest_sha256: normalizedSha });
+  }
+  return result;
+}
+
+function failedReleaseKey(version: string, manifestSha256: string): string {
+  return `${version}|${manifestSha256.toLowerCase()}`;
+}
+
 function validTargetValue(
   request: Record<string, unknown>,
   name: string,
@@ -121,6 +183,7 @@ async function selectRelease(
     channel: string;
     currentVersion: string;
     failedVersions: Set<string>;
+    failedReleases: Set<string>;
     licenseId: string;
     deviceId: string;
   },
@@ -129,7 +192,8 @@ async function selectRelease(
     `SELECT id, version, channel, manifest_content, manifest_signature,
             manifest_sha256, package_sha256, package_size,
             github_repository, github_release_id, github_asset_id,
-            github_asset_name, rollout_percentage, rollout_seed,
+            github_asset_name, distribution_backend, distribution_object_key,
+            rollout_percentage, rollout_seed,
             paused, enabled, published_at, created_at
        FROM releases
       WHERE channel = ? AND enabled = 1
@@ -151,7 +215,13 @@ async function selectRelease(
         cause: error,
       });
     }
-    if (options.failedVersions.has(release.version) || release.paused !== 0) {
+    if (
+      options.failedVersions.has(release.version) ||
+      options.failedReleases.has(
+        failedReleaseKey(release.version, release.manifest_sha256),
+      ) ||
+      release.paused !== 0
+    ) {
       continue;
     }
     if (release.rollout_percentage <= 0) {
@@ -183,22 +253,6 @@ function downloadAuthorization(request: Request): string {
   return match[1];
 }
 
-function githubAssetUrl(repository: string, assetId: string): string {
-  if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/u.test(repository)) {
-    throw new ApiError("RELEASE_STATE_INVALID", "发布仓库标识无效。", {
-      status: 500,
-      retryable: true,
-    });
-  }
-  if (!/^\d+$/u.test(assetId)) {
-    throw new ApiError("RELEASE_STATE_INVALID", "发布资源标识无效。", {
-      status: 500,
-      retryable: true,
-    });
-  }
-  return `https://api.github.com/repos/${repository}/releases/assets/${assetId}`;
-}
-
 export function registerUpdateRoutes(app: WorkerApp): void {
   app.post("/v1/updates/check", async (c) => {
     const authenticated = await authenticateDevice(c);
@@ -224,7 +278,15 @@ export function registerUpdateRoutes(app: WorkerApp): void {
         cause: error,
       });
     }
-    const channel = validTargetValue(request, "channel", ["stable", "beta"]);
+    const requestedChannel = validTargetValue(request, "channel", ["stable", "beta"]);
+    const effectiveChannel = authenticated.license.release_channel;
+    if (requestedChannel !== effectiveChannel) {
+      throw new ApiError(
+        "UPDATE_CHANNEL_MISMATCH",
+        "更新通道与许可证授权不匹配。",
+        { status: 409, retryable: false },
+      );
+    }
     validTargetValue(request, "platform", ["windows"]);
     validTargetValue(request, "architecture", ["x86_64", "arm64"]);
     const product = requiredString(request, "product", { maximum: 64 });
@@ -242,10 +304,16 @@ export function registerUpdateRoutes(app: WorkerApp): void {
     const failedVersions = new Set(
       stringArray(request.failed_versions ?? [], "failed_versions"),
     );
+    const failedReleases = new Set(
+      failedReleaseArray(request.failed_releases ?? [], "failed_releases").map(
+        (item) => failedReleaseKey(item.version, item.manifest_sha256),
+      ),
+    );
     const release = await selectRelease(c.env, {
-      channel,
+      channel: effectiveChannel,
       currentVersion,
       failedVersions,
+      failedReleases,
       licenseId: authenticated.license.id,
       deviceId: authenticated.device.id,
     });
@@ -254,26 +322,28 @@ export function registerUpdateRoutes(app: WorkerApp): void {
       return c.json({
         update_available: false,
         current_version: currentVersion,
-        channel,
+        channel: effectiveChannel,
         checked_at: checkedAt,
       });
     }
 
     const ticket = createDownloadTicket();
-    const ticketDigest = await hmacSha256Hex(
-      c.env.DOWNLOAD_TICKET_SECRET,
+    const ticketDigest = await versionedHmacDigest(
+      c.env,
+      "download-ticket-secret",
       ticket.secret,
     );
     const expiresAt = isoNow(addSeconds(new Date(), 10 * 60));
     await c.env.DB.prepare(
       `INSERT INTO download_tickets (
-         id, ticket_digest, release_id, license_id, device_id,
+         id, ticket_digest, secret_version, release_id, license_id, device_id,
          expected_sha256, expected_size, expires_at, created_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
       .bind(
         ticket.ticketId,
-        ticketDigest,
+        ticketDigest.digest,
+        ticketDigest.version,
         release.id,
         authenticated.license.id,
         authenticated.device.id,
@@ -295,7 +365,7 @@ export function registerUpdateRoutes(app: WorkerApp): void {
         current_version: currentVersion,
         target_version: release.version,
         launcher_version: launcherVersion,
-        channel,
+        channel: effectiveChannel,
       },
     });
     return c.json({
@@ -323,9 +393,10 @@ export function registerUpdateRoutes(app: WorkerApp): void {
     }
     const row = await c.env.DB.prepare(
       `SELECT
-         t.id, t.ticket_digest, t.release_id, t.license_id, t.device_id,
+         t.id, t.ticket_digest, t.secret_version, t.release_id, t.license_id, t.device_id,
          t.expected_sha256, t.expected_size, t.expires_at, t.revoked_at,
          r.github_repository, r.github_asset_id, r.github_asset_name,
+         r.distribution_backend, r.distribution_object_key,
          r.package_sha256, r.package_size, r.enabled, r.paused,
          l.status AS license_status, d.status AS device_status
        FROM download_tickets t
@@ -342,11 +413,18 @@ export function registerUpdateRoutes(app: WorkerApp): void {
         status: 401,
       });
     }
-    const expectedDigest = await hmacSha256Hex(
-      c.env.DOWNLOAD_TICKET_SECRET,
-      ticket.secret,
-    );
-    if (!constantTimeEqual(expectedDigest, String(row.ticket_digest))) {
+    const ticketSecretVersion = Number(row.secret_version);
+    if (
+      !Number.isSafeInteger(ticketSecretVersion) ||
+      ticketSecretVersion < 1 ||
+      !(await verifyVersionedHmacDigest(
+        c.env,
+        "download-ticket-secret",
+        ticketSecretVersion,
+        ticket.secret,
+        String(row.ticket_digest),
+      ))
+    ) {
       throw new ApiError("DOWNLOAD_NOT_AUTHORIZED", "下载票据无效。", {
         status: 401,
       });
@@ -375,20 +453,28 @@ export function registerUpdateRoutes(app: WorkerApp): void {
       });
     }
 
-    const headers = new Headers({
-      Accept: "application/octet-stream",
-      Authorization: `Bearer ${c.env.GITHUB_RELEASE_READ_TOKEN}`,
-      "User-Agent": "wechat-cli-license-update-worker",
-      "X-GitHub-Api-Version": "2022-11-28",
-    });
     const range = c.req.header("Range");
     const ifRange = c.req.header("If-Range");
-    if (range !== undefined) headers.set("Range", range);
-    if (ifRange !== undefined) headers.set("If-Range", ifRange);
-    const upstream = await fetch(
-      githubAssetUrl(String(row.github_repository), String(row.github_asset_id)),
-      { headers, redirect: "follow" },
-    );
+    const backend = String(row.distribution_backend ?? "github");
+    if (backend !== "github" && backend !== "r2") {
+      throw new ApiError("RELEASE_STATE_INVALID", "发布分发后端无效。", {
+        status: 500,
+        retryable: false,
+      });
+    }
+    const upstream = await fetchReleasePackage(c.env, {
+      backend,
+      objectKey:
+        row.distribution_object_key === null || row.distribution_object_key === undefined
+          ? undefined
+          : String(row.distribution_object_key),
+      githubRepository: String(row.github_repository),
+      githubAssetId: String(row.github_asset_id),
+      expectedSha256: String(row.package_sha256),
+      expectedSize: Number(row.package_size),
+      range,
+      ifRange,
+    });
     if (upstream.status !== 200 && upstream.status !== 206) {
       throw new ApiError("DOWNLOAD_UPSTREAM_FAILED", "发布资源下载失败。", {
         status: upstream.status === 404 ? 404 : 502,

@@ -2,6 +2,7 @@ import type { Context } from "hono";
 
 import { hmacSha256Hex, randomId, sha256Hex } from "./crypto";
 import { ApiError } from "./http";
+import { versionedSecretSet } from "./secret_versions";
 import type { Env, WorkerVariables } from "./types";
 
 export function isoNow(now = new Date()): string {
@@ -37,7 +38,7 @@ export function stableJson(value: unknown): string {
 export async function writeAudit(
   env: Env,
   options: {
-    actorType: "admin" | "license" | "device" | "system";
+    actorType: "admin" | "automation" | "license" | "device" | "system";
     actorId?: string;
     action: string;
     targetType?: string;
@@ -90,8 +91,9 @@ export async function enforceRateLimit(
     c.req.header("CF-Connecting-IP") ??
     c.req.header("X-Forwarded-For")?.split(",", 1)[0]?.trim() ??
     "unknown";
+  const rateLimitSecret = versionedSecretSet(c.env, "rate-limit-pepper").current();
   const identityDigest = await hmacSha256Hex(
-    c.env.DEVICE_TOKEN_PEPPER,
+    rateLimitSecret.value,
     `rate-limit\u0000${identity}`,
   );
   const epochSeconds = Math.floor(Date.now() / 1000);

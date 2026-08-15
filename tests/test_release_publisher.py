@@ -1,3 +1,4 @@
+import inspect
 import tempfile
 import unittest
 from pathlib import Path
@@ -8,14 +9,15 @@ from wechat_cli.release.publisher import publish_signed_release
 
 
 class FakeGitHub:
-    def __init__(self, fail_upload_index=None):
+    def __init__(self, events, *, fail_upload_index=None, fail_publish=False):
         self.repository = "example/releases"
-        self.calls = []
+        self.events = events
         self.fail_upload_index = fail_upload_index
+        self.fail_publish = fail_publish
         self.upload_count = 0
 
     def create_release(self, **kwargs):
-        self.calls.append(("create_release", kwargs))
+        self.events.append(("github.create_draft", kwargs))
         return GitHubRelease(
             release_id=123,
             tag_name=kwargs["tag_name"],
@@ -25,19 +27,19 @@ class FakeGitHub:
 
     def upload_asset(self, upload_url, path, *, content_type):
         self.upload_count += 1
-        self.calls.append(
+        source = Path(path)
+        self.events.append(
             (
-                "upload_asset",
+                "github.upload_asset",
                 {
                     "upload_url": upload_url,
-                    "path": Path(path),
+                    "path": source,
                     "content_type": content_type,
                 },
             )
         )
         if self.fail_upload_index == self.upload_count:
             raise RuntimeError("upload failed")
-        source = Path(path)
         return GitHubAsset(
             asset_id=400 + self.upload_count,
             name=source.name,
@@ -45,21 +47,74 @@ class FakeGitHub:
             state="uploaded",
         )
 
+    def publish_release(self, release_id, *, prerelease, make_latest):
+        self.events.append(
+            (
+                "github.publish_release",
+                {
+                    "release_id": release_id,
+                    "prerelease": prerelease,
+                    "make_latest": make_latest,
+                },
+            )
+        )
+        if self.fail_publish:
+            raise RuntimeError("publish failed")
+        return GitHubRelease(
+            release_id=release_id,
+            tag_name="v0.5.1",
+            upload_url="https://uploads.github.com/repos/example/releases/releases/123/assets{?name,label}",
+            draft=False,
+        )
+
     def delete_asset(self, asset_id):
-        self.calls.append(("delete_asset", {"asset_id": asset_id}))
+        self.events.append(("github.delete_asset", {"asset_id": asset_id}))
 
     def delete_release(self, release_id):
-        self.calls.append(("delete_release", {"release_id": release_id}))
+        self.events.append(("github.delete_release", {"release_id": release_id}))
 
 
 class FakeAdmin:
-    def __init__(self, fail_register=False, fail_enable=False):
-        self.calls = []
+    def __init__(self, events, *, fail_register=False, fail_readiness=False):
+        self.events = events
         self.fail_register = fail_register
-        self.fail_enable = fail_enable
+        self.fail_readiness = fail_readiness
+
+    def upload_release_package(
+        self,
+        release_id,
+        *,
+        channel,
+        package_path,
+        package_sha256,
+        operation_nonce,
+    ):
+        source = Path(package_path)
+        self.events.append(
+            (
+                "admin.r2_ready",
+                {
+                    "release_id": release_id,
+                    "channel": channel,
+                    "package_path": source,
+                    "package_sha256": package_sha256,
+                    "operation_nonce": operation_nonce,
+                },
+            )
+        )
+        if self.fail_readiness:
+            raise RuntimeError("r2 readiness failed")
+        return {
+            "release_id": release_id,
+            "distribution_backend": "r2",
+            "distribution_object_key": f"releases/{channel}/{release_id}/{package_sha256}.zip",
+            "package_sha256": package_sha256,
+            "package_size": source.stat().st_size,
+            "ready": True,
+        }
 
     def register_release(self, payload):
-        self.calls.append(("register_release", dict(payload)))
+        self.events.append(("admin.register_release", dict(payload)))
         if self.fail_register:
             raise RuntimeError("worker registration failed")
         return {
@@ -67,14 +122,6 @@ class FakeAdmin:
             "enabled": False,
             "paused": True,
         }
-
-    def update_release(self, release_id, **kwargs):
-        self.calls.append(
-            ("update_release", {"release_id": release_id, **kwargs})
-        )
-        if self.fail_enable:
-            raise RuntimeError("worker enable failed")
-        return {"ok": True, "release_id": release_id, **kwargs}
 
 
 class ReleasePublisherTests(unittest.TestCase):
@@ -94,133 +141,110 @@ class ReleasePublisherTests(unittest.TestCase):
             signing_key_id="release-key-demo-01",
         )
 
-    def test_uploads_package_manifest_signature_then_registers_disabled_release(self):
-        github = FakeGitHub()
-        admin = FakeAdmin()
+    def publish(self, signed, github, admin, **kwargs):
+        self.assertIn(
+            "upload_operation_nonce",
+            inspect.signature(publish_signed_release).parameters,
+        )
+        return publish_signed_release(
+            signed,
+            github_client=github,
+            admin_client=admin,
+            repository="example/releases",
+            target_commitish="main",
+            release_name="WeChat CLI Web 0.5.1",
+            release_body="Private update",
+            operation_nonce="nonce_release_01",
+            upload_operation_nonce="nonce_upload_01",
+            **kwargs,
+        )
+
+    def test_r2_readiness_precedes_immutable_github_publication_and_registration(self):
+        events = []
+        github = FakeGitHub(events)
+        admin = FakeAdmin(events)
         with tempfile.TemporaryDirectory() as tmp:
             signed = self.make_signed(Path(tmp))
+            result = self.publish(signed, github, admin)
 
-            result = publish_signed_release(
-                signed,
-                github_client=github,
-                admin_client=admin,
-                repository="example/releases",
-                target_commitish="main",
-                release_name="WeChat CLI Web 0.5.1",
-                release_body="Private update",
-                operation_nonce="nonce_release_01",
-            )
-
-        upload_calls = [call for call in github.calls if call[0] == "upload_asset"]
-        self.assertEqual(3, len(upload_calls))
-        self.assertEqual(
-            [
-                "wechat-cli-app-0.5.1-win-x64.zip",
-                "wechat-cli-update-manifest-0.5.1.json",
-                "wechat-cli-update-manifest-0.5.1.sig",
-            ],
-            [call[1]["path"].name for call in upload_calls],
+        names = [name for name, _payload in events]
+        self.assertLess(names.index("admin.r2_ready"), names.index("github.publish_release"))
+        self.assertLess(
+            names.index("github.publish_release"), names.index("admin.register_release")
         )
-        payload = admin.calls[0][1]
-        self.assertEqual("example/releases", payload["github_repository"])
-        self.assertEqual("123", payload["github_release_id"])
-        self.assertEqual("401", payload["github_asset_id"])
-        self.assertEqual(signed.package_path.name, payload["github_asset_name"])
-        self.assertEqual("nonce_release_01", payload["operation_nonce"])
+        publish_payload = next(
+            payload for name, payload in events if name == "github.publish_release"
+        )
+        self.assertFalse(publish_payload["make_latest"])
+        registration = next(
+            payload for name, payload in events if name == "admin.register_release"
+        )
+        self.assertEqual("r2", registration["distribution_backend"])
+        self.assertEqual(
+            f"releases/stable/rel_051/{signed.package_sha256}.zip",
+            registration["distribution_object_key"],
+        )
         self.assertFalse(result.enabled)
         self.assertTrue(result.paused)
+        self.assertNotIn("admin.update_release", names)
 
-    def test_enable_after_registration_is_explicit(self):
-        github = FakeGitHub()
-        admin = FakeAdmin()
+    def test_enable_is_never_coupled_to_publish_or_registration(self):
+        events = []
+        github = FakeGitHub(events)
+        admin = FakeAdmin(events)
         with tempfile.TemporaryDirectory() as tmp:
-            result = publish_signed_release(
-                self.make_signed(Path(tmp)),
-                github_client=github,
-                admin_client=admin,
-                repository="example/releases",
-                target_commitish="main",
-                release_name="0.5.1",
-                release_body="",
-                operation_nonce="nonce_release_01",
-                enable=True,
-                enable_operation_nonce="nonce_enable_01",
-            )
-
-        self.assertTrue(result.enabled)
-        self.assertFalse(result.paused)
-        self.assertEqual("update_release", admin.calls[1][0])
-        self.assertTrue(admin.calls[1][1]["enabled"])
-        self.assertFalse(admin.calls[1][1]["paused"])
-
-    def test_asset_upload_failure_rolls_back_uploaded_assets_and_draft_release(self):
-        github = FakeGitHub(fail_upload_index=2)
-        admin = FakeAdmin()
-        with tempfile.TemporaryDirectory() as tmp:
-            with self.assertRaises(RuntimeError):
-                publish_signed_release(
+            with self.assertRaises(ValueError):
+                self.publish(
                     self.make_signed(Path(tmp)),
-                    github_client=github,
-                    admin_client=admin,
-                    repository="example/releases",
-                    target_commitish="main",
-                    release_name="0.5.1",
-                    release_body="",
-                    operation_nonce="nonce_release_01",
-                )
-
-        self.assertIn(("delete_asset", {"asset_id": 401}), github.calls)
-        self.assertIn(("delete_release", {"release_id": 123}), github.calls)
-        self.assertEqual([], admin.calls)
-
-    def test_enable_failure_preserves_registered_github_assets(self):
-        github = FakeGitHub()
-        admin = FakeAdmin(fail_enable=True)
-        with tempfile.TemporaryDirectory() as tmp:
-            with self.assertRaises(RuntimeError):
-                publish_signed_release(
-                    self.make_signed(Path(tmp)),
-                    github_client=github,
-                    admin_client=admin,
-                    repository="example/releases",
-                    target_commitish="main",
-                    release_name="0.5.1",
-                    release_body="",
-                    operation_nonce="nonce_release_01",
+                    github,
+                    admin,
                     enable=True,
                     enable_operation_nonce="nonce_enable_01",
                 )
+        self.assertEqual([], events)
 
-        self.assertEqual(
-            [],
-            [call for call in github.calls if call[0].startswith("delete_")],
-        )
-        self.assertEqual("register_release", admin.calls[0][0])
-        self.assertEqual("update_release", admin.calls[1][0])
-
-    def test_worker_registration_failure_rolls_back_all_github_objects(self):
-        github = FakeGitHub()
-        admin = FakeAdmin(fail_register=True)
+    def test_asset_upload_failure_rolls_back_only_the_unpublished_draft(self):
+        events = []
+        github = FakeGitHub(events, fail_upload_index=2)
+        admin = FakeAdmin(events)
         with tempfile.TemporaryDirectory() as tmp:
             with self.assertRaises(RuntimeError):
-                publish_signed_release(
-                    self.make_signed(Path(tmp)),
-                    github_client=github,
-                    admin_client=admin,
-                    repository="example/releases",
-                    target_commitish="main",
-                    release_name="0.5.1",
-                    release_body="",
-                    operation_nonce="nonce_release_01",
-                )
+                self.publish(self.make_signed(Path(tmp)), github, admin)
 
-        deleted_assets = [
-            call[1]["asset_id"]
-            for call in github.calls
-            if call[0] == "delete_asset"
-        ]
-        self.assertEqual([403, 402, 401], deleted_assets)
-        self.assertIn(("delete_release", {"release_id": 123}), github.calls)
+        names = [name for name, _payload in events]
+        self.assertNotIn("admin.r2_ready", names)
+        self.assertNotIn("github.publish_release", names)
+        self.assertIn("github.delete_asset", names)
+        self.assertIn("github.delete_release", names)
+
+    def test_r2_readiness_failure_never_publishes_github_provenance(self):
+        events = []
+        github = FakeGitHub(events)
+        admin = FakeAdmin(events, fail_readiness=True)
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaises(RuntimeError):
+                self.publish(self.make_signed(Path(tmp)), github, admin)
+
+        names = [name for name, _payload in events]
+        self.assertIn("admin.r2_ready", names)
+        self.assertNotIn("github.publish_release", names)
+        self.assertNotIn("admin.register_release", names)
+        self.assertIn("github.delete_release", names)
+
+    def test_registration_failure_after_publish_preserves_immutable_provenance(self):
+        events = []
+        github = FakeGitHub(events)
+        admin = FakeAdmin(events, fail_register=True)
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaises(RuntimeError):
+                self.publish(self.make_signed(Path(tmp)), github, admin)
+
+        names = [name for name, _payload in events]
+        self.assertIn("admin.r2_ready", names)
+        self.assertIn("github.publish_release", names)
+        self.assertIn("admin.register_release", names)
+        self.assertNotIn("github.delete_asset", names)
+        self.assertNotIn("github.delete_release", names)
 
 
 if __name__ == "__main__":

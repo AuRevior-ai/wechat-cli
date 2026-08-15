@@ -1,8 +1,6 @@
 import type { Hono } from "hono";
 
-import { authenticateAdmin } from "./auth";
 import {
-  base64ToBytes,
   decryptContacts,
   deriveLicenseKey,
   deriveOpaqueId,
@@ -11,7 +9,6 @@ import {
   licenseKeyHint,
   normalizeLicenseKey,
   randomId,
-  sha256Hex,
 } from "./crypto";
 import {
   ApiError,
@@ -20,9 +17,20 @@ import {
   requiredInteger,
   requiredString,
 } from "./http";
-import { parseSemanticVersion } from "./semver";
 import {
-  enforceRateLimit,
+  assertHumanReleaseStateAuthority,
+  listReleaseMetadataOperation,
+  prepareReleasePackageOperation,
+  registerDisabledReleaseOperation,
+  updateReleaseStateOperation,
+} from "./release_operations";
+export { assertReleaseVersionImmutable } from "./release_operations";
+import { authenticateAdminForRoute } from "./security_policy";
+import {
+  readableHmacDigests,
+  versionedSecretSet,
+} from "./secret_versions";
+import {
   isoNow,
   runIdempotent,
   runSecretIdempotent,
@@ -37,15 +45,7 @@ interface WorkerVariables {
 
 type WorkerApp = Hono<{ Bindings: Env; Variables: WorkerVariables }>;
 
-function parseBoolean(value: unknown, name: string): boolean | undefined {
-  if (value === undefined) return undefined;
-  if (typeof value !== "boolean") {
-    throw new ApiError("INVALID_REQUEST", `${name} 必须是布尔值。`, { status: 400 });
-  }
-  return value;
-}
-
-function databaseBytes(value: unknown, name: string): Uint8Array<ArrayBuffer> {
+export function databaseBytes(value: unknown, name: string): Uint8Array<ArrayBuffer> {
   if (value instanceof ArrayBuffer) {
     return new Uint8Array(value);
   }
@@ -58,6 +58,18 @@ function databaseBytes(value: unknown, name: string): Uint8Array<ArrayBuffer> {
     const copy: Uint8Array<ArrayBuffer> = new Uint8Array(source.byteLength);
     copy.set(source);
     return copy;
+  }
+  if (
+    Array.isArray(value) &&
+    value.every(
+      (item) =>
+        typeof item === "number" &&
+        Number.isInteger(item) &&
+        item >= 0 &&
+        item <= 255,
+    )
+  ) {
+    return Uint8Array.from(value);
   }
   throw new ApiError(
     "CONTACT_ENCRYPTION_STATE_INVALID",
@@ -119,23 +131,30 @@ interface GeneratedLicense {
   licenseKey: string;
   keyHint: string;
   keyDigest: string;
+  keySecretVersion: number;
   generationIndex: number;
 }
 
-async function deriveGeneratedLicense(
+export async function deriveGeneratedLicense(
   env: Env,
   adminId: string,
   generationRequestId: string,
   generationIndex: number,
+  secretVersion?: number,
 ): Promise<GeneratedLicense> {
   if (!Number.isInteger(generationIndex) || generationIndex < 0) {
     throw new Error("generationIndex must be a non-negative integer");
   }
   const context = `${adminId}\u0000${generationRequestId}\u0000${generationIndex}`;
-  const licenseKey = await deriveLicenseKey(env.LICENSE_KEY_PEPPER, context);
+  const secretSet = versionedSecretSet(env, "license-key-pepper");
+  const licenseSecret =
+    secretVersion === undefined
+      ? secretSet.current()
+      : { version: secretVersion, value: secretSet.value(secretVersion) };
+  const licenseKey = await deriveLicenseKey(licenseSecret.value, context);
   const licenseId = await deriveOpaqueId(
     "lic_",
-    env.LICENSE_KEY_PEPPER,
+    licenseSecret.value,
     context,
   );
   const normalized = normalizeLicenseKey(licenseKey);
@@ -144,9 +163,10 @@ async function deriveGeneratedLicense(
     licenseKey,
     keyHint: licenseKeyHint(licenseKey),
     keyDigest: await hmacSha256Hex(
-      env.LICENSE_KEY_PEPPER,
+      licenseSecret.value,
       `license-key\u0000${normalized}`,
     ),
+    keySecretVersion: licenseSecret.version,
     generationIndex,
   };
 }
@@ -164,13 +184,14 @@ function licenseInsertStatement(
 ): D1PreparedStatement {
   return env.DB.prepare(
     `INSERT INTO licenses (
-       id, key_digest, key_hint, status, max_devices,
+       id, key_digest, key_secret_version, key_hint, status, max_devices,
        release_channel, revision, created_at, updated_at,
        created_by_admin_id, generation_request_id, generation_index
-     ) VALUES (?, ?, ?, 'active', ?, ?, 1, ?, ?, ?, ?, ?)`,
+     ) VALUES (?, ?, ?, ?, 'active', ?, ?, 1, ?, ?, ?, ?, ?)`,
   ).bind(
     generated.licenseId,
     generated.keyDigest,
+    generated.keySecretVersion,
     generated.keyHint,
     options.maximumDevices,
     options.channel,
@@ -210,19 +231,20 @@ async function createSingleLicenseRecord(
   ];
   if (Object.keys(options.contacts).length > 0) {
     const encryption = currentContactKey(env);
+    const lookupSecret = versionedSecretSet(env, "contact-lookup-pepper").current();
     const encrypted = await encryptContacts(options.contacts, {
       licenseId: generated.licenseId,
       keyVersion: encryption.version,
       encryptionKeyBase64: encryption.key,
-      lookupPepper: env.CONTACT_LOOKUP_PEPPER,
+      lookupPepper: lookupSecret.value,
     });
     statements.push(
       env.DB.prepare(
         `INSERT INTO license_contacts (
            license_id, ciphertext, iv, encryption_key_version,
            email_lookup_digest, wechat_lookup_digest,
-           other_lookup_digest, updated_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+           other_lookup_digest, lookup_secret_version, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).bind(
         generated.licenseId,
         encrypted.ciphertext,
@@ -231,6 +253,7 @@ async function createSingleLicenseRecord(
         encrypted.emailLookupDigest,
         encrypted.wechatLookupDigest,
         encrypted.otherLookupDigest,
+        lookupSecret.version,
         options.now,
       ),
     );
@@ -284,7 +307,7 @@ async function replayGeneratedLicenses(
   >
 > {
   const rows = await env.DB.prepare(
-    `SELECT generation_index, max_devices, release_channel, created_at
+    `SELECT generation_index, key_secret_version, max_devices, release_channel, created_at
        FROM licenses
       WHERE created_by_admin_id = ? AND generation_request_id = ?
       ORDER BY generation_index ASC`,
@@ -313,6 +336,7 @@ async function replayGeneratedLicenses(
         adminId,
         generationRequestId,
         generationIndex,
+        Number(row.key_secret_version),
       );
       return {
         ...generated,
@@ -357,15 +381,46 @@ function licenseSummary(row: Record<string, unknown>): Record<string, unknown> {
   };
 }
 
+export function contactRotationSelection(
+  encryptionVersion: number,
+  lookupVersion: number,
+  limit: number,
+): { sql: string; bindings: unknown[] } {
+  return {
+    sql: `SELECT license_id, ciphertext, iv, encryption_key_version, lookup_secret_version
+            FROM license_contacts
+           WHERE (encryption_key_version != ? OR lookup_secret_version != ?)
+           ORDER BY updated_at ASC
+           LIMIT ?`,
+    bindings: [encryptionVersion, lookupVersion, limit],
+  };
+}
+
+export function diagnosticAdminRecord(
+  row: Record<string, unknown>,
+): Record<string, unknown> {
+  return {
+    submission_id: String(row.id),
+    license_id: String(row.license_id),
+    device_id: String(row.device_id),
+    size_bytes: row.size === null ? null : Number(row.size),
+    sha256: row.sha256,
+    client_version: String(row.client_version),
+    launcher_version: String(row.launcher_version),
+    status: String(row.status),
+    submitted_at: row.submitted_at,
+    upload_expires_at: String(row.upload_expires_at),
+    retention_expires_at: String(row.retention_expires_at),
+    retention_days: 7,
+    consent_version: String(row.consent_version),
+    downloaded_at: row.downloaded_at,
+    created_at: String(row.created_at),
+  };
+}
+
 export function registerAdminRoutes(app: WorkerApp): void {
   app.post("/v1/admin/licenses", async (c) => {
-    const admin = await authenticateAdmin(c, "licenses:write");
-    await enforceRateLimit(c, {
-      name: "admin-license-create",
-      maximum: 120,
-      windowSeconds: 60,
-      identity: admin.id,
-    });
+    const admin = await authenticateAdminForRoute(c, "licenses:write", "write");
     const request = await readJsonObject(c.req.raw);
     const maximumDevices =
       request.maximum_devices === undefined
@@ -449,7 +504,7 @@ export function registerAdminRoutes(app: WorkerApp): void {
   });
 
   app.post("/v1/admin/licenses/batch", async (c) => {
-    const admin = await authenticateAdmin(c, "licenses:write");
+    const admin = await authenticateAdminForRoute(c, "licenses:write", "write");
     const request = await readJsonObject(c.req.raw);
     const count = requiredInteger(request, "count", { minimum: 1, maximum: 100 });
     const maximumDevices =
@@ -527,7 +582,7 @@ export function registerAdminRoutes(app: WorkerApp): void {
   });
 
   app.get("/v1/admin/licenses", async (c) => {
-    await authenticateAdmin(c, "licenses:read");
+    await authenticateAdminForRoute(c, "licenses:read", "read");
     const status = c.req.query("status")?.trim();
     const query = c.req.query("query")?.trim();
     const limit = Math.min(200, Math.max(1, Number.parseInt(c.req.query("limit") ?? "50", 10) || 50));
@@ -542,16 +597,23 @@ export function registerAdminRoutes(app: WorkerApp): void {
     }
     if (query !== undefined && query.length > 0) {
       const normalizedQuery = query.normalize("NFKC").trim().toLowerCase();
-      const lookupDigest = await hmacSha256Hex(
-        c.env.CONTACT_LOOKUP_PEPPER,
+      const lookupDigests = await readableHmacDigests(
+        c.env,
+        "contact-lookup-pepper",
         normalizedQuery,
       );
       const hint = query.replace(/[^A-Za-z0-9]/gu, "").slice(-4).toUpperCase();
-      clauses.push(
-        `(l.id = ? OR l.key_hint = ? OR lc.email_lookup_digest = ? OR
-          lc.wechat_lookup_digest = ? OR lc.other_lookup_digest = ?)`,
+      const lookupClauses = lookupDigests.flatMap(() => [
+        "lc.email_lookup_digest = ?",
+        "lc.wechat_lookup_digest = ?",
+        "lc.other_lookup_digest = ?",
+      ]);
+      clauses.push(`(l.id = ? OR l.key_hint = ? OR ${lookupClauses.join(" OR ")})`);
+      bindings.push(
+        query,
+        hint,
+        ...lookupDigests.flatMap((item) => [item.digest, item.digest, item.digest]),
       );
-      bindings.push(query, hint, lookupDigest, lookupDigest, lookupDigest);
     }
     const where = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
     const rows = await c.env.DB.prepare(
@@ -572,7 +634,7 @@ export function registerAdminRoutes(app: WorkerApp): void {
   });
 
   app.patch("/v1/admin/licenses/:licenseId/status", async (c) => {
-    const admin = await authenticateAdmin(c, "licenses:write");
+    const admin = await authenticateAdminForRoute(c, "licenses:write", "high-risk");
     const licenseId = requiredString(
       { license_id: c.req.param("licenseId") },
       "license_id",
@@ -621,7 +683,7 @@ export function registerAdminRoutes(app: WorkerApp): void {
   });
 
   app.get("/v1/admin/licenses/:licenseId/devices", async (c) => {
-    await authenticateAdmin(c, "devices:read");
+    await authenticateAdminForRoute(c, "devices:read", "read");
     const licenseId = c.req.param("licenseId");
     const rows = await c.env.DB.prepare(
       `SELECT id, display_name, status, first_activated_at,
@@ -648,7 +710,7 @@ export function registerAdminRoutes(app: WorkerApp): void {
   });
 
   app.patch("/v1/admin/devices/:deviceId/status", async (c) => {
-    const admin = await authenticateAdmin(c, "devices:write");
+    const admin = await authenticateAdminForRoute(c, "devices:write", "write");
     const deviceId = c.req.param("deviceId");
     const request = await readJsonObject(c.req.raw);
     const status = requiredString(request, "status", { maximum: 16 });
@@ -691,7 +753,7 @@ export function registerAdminRoutes(app: WorkerApp): void {
   });
 
   app.post("/v1/admin/devices/:deviceId/unbind", async (c) => {
-    const admin = await authenticateAdmin(c, "devices:write");
+    const admin = await authenticateAdminForRoute(c, "devices:write", "write");
     const deviceId = c.req.param("deviceId");
     const request = await readJsonObject(c.req.raw);
     const nonce = requiredString(request, "operation_nonce", { minimum: 8, maximum: 256 });
@@ -728,259 +790,69 @@ export function registerAdminRoutes(app: WorkerApp): void {
     return c.json(response.body, response.status as 200);
   });
 
+  app.put("/v1/admin/releases/:releaseId/package", async (c) => {
+    const admin = await authenticateAdminForRoute(c, "releases:upload", "write");
+    const result = await prepareReleasePackageOperation(
+      c.env,
+      c.req.raw,
+      c.req.param("releaseId"),
+      {
+        actorType: "admin",
+        actorId: admin.id,
+        requestId: c.get("requestId"),
+      },
+    );
+    return c.json(result.body, result.status as 200);
+  });
+
   app.post("/v1/admin/releases", async (c) => {
-    const admin = await authenticateAdmin(c, "releases:write");
-    const request = await readJsonObject(c.req.raw, { maximumBytes: 2 * 1024 * 1024 });
-    const releaseId = requiredString(request, "release_id", { maximum: 128 });
-    const version = requiredString(request, "version", { maximum: 64 });
-    try {
-      parseSemanticVersion(version);
-    } catch (error) {
-      throw new ApiError("INVALID_REQUEST", "发布版本无效。", { status: 400, cause: error });
-    }
-    const channel = requiredString(request, "channel", { maximum: 16 });
-    if (channel !== "stable" && channel !== "beta") {
-      throw new ApiError("INVALID_REQUEST", "发布通道无效。", { status: 400 });
-    }
-    const manifestContent = base64ToBytes(
-      requiredString(request, "manifest_content_base64", { maximum: 1_500_000 }),
-    );
-    const manifestSignature = base64ToBytes(
-      requiredString(request, "manifest_signature_base64", { maximum: 4096 }),
-      64,
-    );
-    const manifestSha256 = requiredString(request, "manifest_sha256", {
-      minimum: 64,
-      maximum: 64,
-      pattern: /^[0-9a-f]{64}$/iu,
-    }).toLowerCase();
-    if ((await sha256Hex(manifestContent)) !== manifestSha256) {
-      throw new ApiError("UPDATE_HASH_MISMATCH", "清单摘要与原始字节不一致。", {
-        status: 409,
-      });
-    }
-    const packageSha256 = requiredString(request, "package_sha256", {
-      minimum: 64,
-      maximum: 64,
-      pattern: /^[0-9a-f]{64}$/iu,
-    }).toLowerCase();
-    const packageSize = requiredInteger(request, "package_size", {
-      minimum: 1,
-      maximum: 8 * 1024 * 1024 * 1024,
+    const admin = await authenticateAdminForRoute(c, "releases:register", "high-risk");
+    const result = await registerDisabledReleaseOperation(c.env, c.req.raw, {
+      actorType: "admin",
+      actorId: admin.id,
+      requestId: c.get("requestId"),
     });
-    const repository = requiredString(request, "github_repository", {
-      maximum: 256,
-      pattern: /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/u,
-    });
-    const githubReleaseId = requiredString(request, "github_release_id", {
-      maximum: 64,
-      pattern: /^\d+$/u,
-    });
-    const githubAssetId = requiredString(request, "github_asset_id", {
-      maximum: 64,
-      pattern: /^\d+$/u,
-    });
-    const assetName = requiredString(request, "github_asset_name", { maximum: 256 });
-    const rolloutPercentage =
-      request.rollout_percentage === undefined
-        ? 100
-        : requiredInteger(request, "rollout_percentage", { minimum: 0, maximum: 100 });
-    const rolloutSeed = optionalString(request, "rollout_seed", 256) ?? randomId("rollout_", 18);
-    const nonce = requiredString(request, "operation_nonce", { minimum: 8, maximum: 256 });
-    const response = await runIdempotent(c.env, {
-      scope: `admin-release-create:${admin.id}`,
-      key: nonce,
-      request: {
-        releaseId,
-        version,
-        channel,
-        manifestSha256,
-        packageSha256,
-        packageSize,
-        repository,
-        githubReleaseId,
-        githubAssetId,
-        assetName,
-        rolloutPercentage,
-      },
-      operation: async () => {
-        const now = isoNow();
-        await c.env.DB.prepare(
-          `INSERT INTO releases (
-             id, version, channel, manifest_content, manifest_signature,
-             manifest_sha256, package_sha256, package_size,
-             github_repository, github_release_id, github_asset_id,
-             github_asset_name, rollout_percentage, rollout_seed,
-             paused, enabled, published_at, created_at
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?)`,
-        )
-          .bind(
-            releaseId,
-            version,
-            channel,
-            manifestContent,
-            manifestSignature,
-            manifestSha256,
-            packageSha256,
-            packageSize,
-            repository,
-            githubReleaseId,
-            githubAssetId,
-            assetName,
-            rolloutPercentage,
-            rolloutSeed,
-            now,
-            now,
-          )
-          .run();
-        await writeAudit(c.env, {
-          actorType: "admin",
-          actorId: admin.id,
-          action: "release.register",
-          targetType: "release",
-          targetId: releaseId,
-          result: "success",
-          requestId: c.get("requestId"),
-          metadata: { version, channel, enabled: false, paused: true },
-        });
-        return {
-          status: 201,
-          body: {
-            release_id: releaseId,
-            version,
-            channel,
-            enabled: false,
-            paused: true,
-            rollout_percentage: rolloutPercentage,
-            created_at: now,
-          },
-        };
-      },
-    });
-    return c.json(response.body, response.status as 201);
+    return c.json(result.body, result.status as 201);
   });
 
   app.get("/v1/admin/releases", async (c) => {
-    await authenticateAdmin(c, "releases:read");
-    const rows = await c.env.DB.prepare(
-      `SELECT id, version, channel, manifest_sha256, package_sha256,
-              package_size, github_repository, github_release_id,
-              github_asset_id, github_asset_name, rollout_percentage,
-              paused, enabled, published_at, created_at
-         FROM releases ORDER BY published_at DESC LIMIT 200`,
-    ).all<Record<string, unknown>>();
-    return c.json({
-      releases: rows.results.map((row) => ({
-        release_id: String(row.id),
-        version: String(row.version),
-        channel: String(row.channel),
-        manifest_sha256: String(row.manifest_sha256),
-        package_sha256: String(row.package_sha256),
-        package_size: Number(row.package_size),
-        github_repository: String(row.github_repository),
-        github_release_id: String(row.github_release_id),
-        github_asset_id: String(row.github_asset_id),
-        github_asset_name: String(row.github_asset_name),
-        rollout_percentage: Number(row.rollout_percentage),
-        paused: Number(row.paused) === 1,
-        enabled: Number(row.enabled) === 1,
-        published_at: String(row.published_at),
-        created_at: String(row.created_at),
-      })),
-    });
+    await authenticateAdminForRoute(c, "releases:read", "read");
+    return c.json({ releases: await listReleaseMetadataOperation(c.env) });
   });
 
   app.patch("/v1/admin/releases/:releaseId", async (c) => {
-    const admin = await authenticateAdmin(c, "releases:write");
-    const releaseId = c.req.param("releaseId");
-    const request = await readJsonObject(c.req.raw);
-    const enabled = parseBoolean(request.enabled, "enabled");
-    const paused = parseBoolean(request.paused, "paused");
-    const rolloutPercentage =
-      request.rollout_percentage === undefined
-        ? undefined
-        : requiredInteger(request, "rollout_percentage", { minimum: 0, maximum: 100 });
-    if (enabled === undefined && paused === undefined && rolloutPercentage === undefined) {
-      throw new ApiError("INVALID_REQUEST", "至少需要一个发布状态字段。", { status: 400 });
-    }
-    const nonce = requiredString(request, "operation_nonce", { minimum: 8, maximum: 256 });
-    const response = await runIdempotent(c.env, {
-      scope: `admin-release-update:${admin.id}`,
-      key: nonce,
-      request: { releaseId, enabled, paused, rolloutPercentage },
-      operation: async () => {
-        const updated = await c.env.DB.prepare(
-          `UPDATE releases
-              SET enabled = COALESCE(?, enabled),
-                  paused = COALESCE(?, paused),
-                  rollout_percentage = COALESCE(?, rollout_percentage)
-            WHERE id = ?`,
-        )
-          .bind(
-            enabled === undefined ? null : enabled ? 1 : 0,
-            paused === undefined ? null : paused ? 1 : 0,
-            rolloutPercentage ?? null,
-            releaseId,
-          )
-          .run();
-        if (Number(updated.meta.changes ?? 0) !== 1) {
-          throw new ApiError("RELEASE_NOT_FOUND", "发布不存在。", { status: 404 });
-        }
-        await writeAudit(c.env, {
-          actorType: "admin",
-          actorId: admin.id,
-          action: "release.update",
-          targetType: "release",
-          targetId: releaseId,
-          result: "success",
-          requestId: c.get("requestId"),
-          metadata: { enabled, paused, rollout_percentage: rolloutPercentage },
-        });
-        return {
-          body: {
-            ok: true,
-            release_id: releaseId,
-            ...(enabled === undefined ? {} : { enabled }),
-            ...(paused === undefined ? {} : { paused }),
-            ...(rolloutPercentage === undefined
-              ? {}
-              : { rollout_percentage: rolloutPercentage }),
-          },
-        };
+    const admin = await authenticateAdminForRoute(c, "releases:state", "high-risk");
+    assertHumanReleaseStateAuthority(admin);
+    const result = await updateReleaseStateOperation(
+      c.env,
+      c.req.raw,
+      c.req.param("releaseId"),
+      {
+        actorType: "admin",
+        actorId: admin.id,
+        requestId: c.get("requestId"),
       },
-    });
-    return c.json(response.body, response.status as 200);
+    );
+    return c.json(result.body, result.status as 200);
   });
 
   app.get("/v1/admin/diagnostics", async (c) => {
-    await authenticateAdmin(c, "diagnostics:read");
+    await authenticateAdminForRoute(c, "diagnostics:read", "read");
     const rows = await c.env.DB.prepare(
       `SELECT id, license_id, device_id, size, sha256,
               client_version, launcher_version, status,
-              submitted_at, expires_at, downloaded_at, created_at
+              submitted_at, upload_expires_at, retention_expires_at,
+              consent_version, downloaded_at, created_at
          FROM diagnostic_submissions
         ORDER BY created_at DESC LIMIT 200`,
     ).all<Record<string, unknown>>();
     return c.json({
-      diagnostics: rows.results.map((row) => ({
-        submission_id: String(row.id),
-        license_id: String(row.license_id),
-        device_id: String(row.device_id),
-        size_bytes: row.size === null ? null : Number(row.size),
-        sha256: row.sha256,
-        client_version: String(row.client_version),
-        launcher_version: String(row.launcher_version),
-        status: String(row.status),
-        submitted_at: row.submitted_at,
-        expires_at: String(row.expires_at),
-        downloaded_at: row.downloaded_at,
-        created_at: String(row.created_at),
-      })),
+      diagnostics: rows.results.map(diagnosticAdminRecord),
     });
   });
 
   app.get("/v1/admin/diagnostics/:submissionId/content", async (c) => {
-    const admin = await authenticateAdmin(c, "diagnostics:read");
+    const admin = await authenticateAdminForRoute(c, "diagnostics:read", "read");
     const submissionId = c.req.param("submissionId");
     const row = await c.env.DB.prepare(
       `SELECT object_key, status FROM diagnostic_submissions
@@ -1025,7 +897,7 @@ export function registerAdminRoutes(app: WorkerApp): void {
   });
 
   app.delete("/v1/admin/diagnostics/:submissionId", async (c) => {
-    const admin = await authenticateAdmin(c, "diagnostics:delete");
+    const admin = await authenticateAdminForRoute(c, "diagnostics:delete", "high-risk");
     const submissionId = c.req.param("submissionId");
     const row = await c.env.DB.prepare(
       "SELECT object_key FROM diagnostic_submissions WHERE id = ? LIMIT 1",
@@ -1054,7 +926,7 @@ export function registerAdminRoutes(app: WorkerApp): void {
   });
 
   app.post("/v1/admin/contact-encryption/rotate", async (c) => {
-    const admin = await authenticateAdmin(c, "contacts:rotate");
+    const admin = await authenticateAdminForRoute(c, "contacts:rotate", "high-risk");
     const request = await readJsonObject(c.req.raw);
     const limit =
       request.limit === undefined
@@ -1065,25 +937,30 @@ export function registerAdminRoutes(app: WorkerApp): void {
       maximum: 256,
     });
     const current = currentContactKey(c.env);
+    const currentLookup = versionedSecretSet(c.env, "contact-lookup-pepper").current();
     const response = await runIdempotent(c.env, {
       scope: `admin-contact-rotation:${admin.id}`,
       key: nonce,
-      request: { limit, currentKeyVersion: current.version },
+      request: {
+        limit,
+        currentKeyVersion: current.version,
+        currentLookupVersion: currentLookup.version,
+      },
       operation: async () => {
-        const rows = await c.env.DB.prepare(
-          `SELECT license_id, ciphertext, iv, encryption_key_version
-             FROM license_contacts
-            WHERE encryption_key_version != ?
-            ORDER BY updated_at ASC
-            LIMIT ?`,
-        )
-          .bind(current.version, limit)
+        const selection = contactRotationSelection(
+          current.version,
+          currentLookup.version,
+          limit,
+        );
+        const rows = await c.env.DB.prepare(selection.sql)
+          .bind(...selection.bindings)
           .all<Record<string, unknown>>();
         const updatedAt = isoNow();
         const statements: D1PreparedStatement[] = [];
         for (const row of rows.results) {
           const licenseId = String(row.license_id);
           const previousVersion = Number(row.encryption_key_version);
+          const previousLookupVersion = Number(row.lookup_secret_version);
           const contacts = await decryptContacts(
             {
               ciphertext: databaseBytes(row.ciphertext, "ciphertext"),
@@ -1099,15 +976,16 @@ export function registerAdminRoutes(app: WorkerApp): void {
             licenseId,
             keyVersion: current.version,
             encryptionKeyBase64: current.key,
-            lookupPepper: c.env.CONTACT_LOOKUP_PEPPER,
+            lookupPepper: currentLookup.value,
           });
           statements.push(
             c.env.DB.prepare(
               `UPDATE license_contacts
                   SET ciphertext = ?, iv = ?, encryption_key_version = ?,
                       email_lookup_digest = ?, wechat_lookup_digest = ?,
-                      other_lookup_digest = ?, updated_at = ?
-                WHERE license_id = ? AND encryption_key_version = ?`,
+                      other_lookup_digest = ?, lookup_secret_version = ?, updated_at = ?
+                WHERE license_id = ? AND encryption_key_version = ?
+                  AND lookup_secret_version = ?`,
             ).bind(
               encrypted.ciphertext,
               encrypted.iv,
@@ -1115,9 +993,11 @@ export function registerAdminRoutes(app: WorkerApp): void {
               encrypted.emailLookupDigest,
               encrypted.wechatLookupDigest,
               encrypted.otherLookupDigest,
+              currentLookup.version,
               updatedAt,
               licenseId,
               previousVersion,
+              previousLookupVersion,
             ),
           );
         }
@@ -1126,9 +1006,9 @@ export function registerAdminRoutes(app: WorkerApp): void {
         }
         const remaining = await c.env.DB.prepare(
           `SELECT COUNT(*) AS count FROM license_contacts
-            WHERE encryption_key_version != ?`,
+            WHERE (encryption_key_version != ? OR lookup_secret_version != ?)`,
         )
-          .bind(current.version)
+          .bind(current.version, currentLookup.version)
           .first<{ count: number }>();
         await writeAudit(c.env, {
           actorType: "admin",
@@ -1138,6 +1018,7 @@ export function registerAdminRoutes(app: WorkerApp): void {
           requestId: c.get("requestId"),
           metadata: {
             current_key_version: current.version,
+            current_lookup_secret_version: currentLookup.version,
             rotated_count: statements.length,
             remaining_count: Number(remaining?.count ?? 0),
           },
@@ -1146,6 +1027,7 @@ export function registerAdminRoutes(app: WorkerApp): void {
           body: {
             ok: true,
             current_key_version: current.version,
+            current_lookup_secret_version: currentLookup.version,
             rotated_count: statements.length,
             remaining_count: Number(remaining?.count ?? 0),
           },
@@ -1156,18 +1038,21 @@ export function registerAdminRoutes(app: WorkerApp): void {
   });
 
   app.get("/v1/admin/contact-encryption/status", async (c) => {
-    await authenticateAdmin(c, "contacts:rotate");
+    await authenticateAdminForRoute(c, "contacts:rotate", "read");
     const current = currentContactKey(c.env);
+    const currentLookup = versionedSecretSet(c.env, "contact-lookup-pepper").current();
     const rows = await c.env.DB.prepare(
-      `SELECT encryption_key_version, COUNT(*) AS count
+      `SELECT encryption_key_version, lookup_secret_version, COUNT(*) AS count
          FROM license_contacts
-        GROUP BY encryption_key_version
-        ORDER BY encryption_key_version`,
+        GROUP BY encryption_key_version, lookup_secret_version
+        ORDER BY encryption_key_version, lookup_secret_version`,
     ).all<Record<string, unknown>>();
     return c.json({
       current_key_version: current.version,
+      current_lookup_secret_version: currentLookup.version,
       records_by_version: rows.results.map((row) => ({
         key_version: Number(row.encryption_key_version),
+        lookup_secret_version: Number(row.lookup_secret_version),
         count: Number(row.count),
       })),
     });

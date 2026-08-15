@@ -2,16 +2,20 @@ import hashlib
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from wechat_cli.diagnostics_upload import (
     DiagnosticUploadClient,
     DiagnosticUploadError,
     DiagnosticUploadResult,
     InstalledDiagnosticSubmitter,
+    UrllibDiagnosticBinaryTransport,
+    UrllibDiagnosticJsonTransport,
 )
 from wechat_cli.license.lease import TrustedTimeState
 from wechat_cli.license.storage import LocalLicenseState
 from wechat_cli.update.layout import CurrentVersion, InstallLayout
+from wechat_cli.version import APP_VERSION
 
 
 class FakeJsonTransport:
@@ -136,6 +140,82 @@ class InstalledDiagnosticSubmitterTests(unittest.TestCase):
         self.assertEqual("DIAGNOSTIC_LICENSE_STATE_MISSING", caught.exception.code)
 
 
+class _TransportResponse:
+    def __init__(self, *, status=200, payload=b"{}"):
+        self.status = status
+        self._payload = payload
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        return False
+
+    def read(self, _size=-1):
+        return self._payload
+
+
+class DiagnosticUrllibTransportTests(unittest.TestCase):
+    def test_json_transport_uses_product_user_agent_without_auth_in_url(self):
+        captured = {}
+
+        def opener(request, timeout):
+            captured["request"] = request
+            captured["timeout"] = timeout
+            return _TransportResponse(payload=b'{"ok":true}')
+
+        transport = UrllibDiagnosticJsonTransport("https://api.example.test")
+        with patch("wechat_cli.diagnostics_upload.urlopen", side_effect=opener):
+            status, payload = transport(
+                "POST",
+                "/v1/diagnostics/sessions",
+                {"Authorization": "Bearer TEST_AUTH_VALUE"},
+                {"size_bytes": 10},
+            )
+
+        self.assertEqual(200, status)
+        self.assertEqual({"ok": True}, payload)
+        request = captured["request"]
+        self.assertEqual(
+            f"WeChatCliDiagnostics/{APP_VERSION}",
+            request.get_header("User-agent"),
+        )
+        self.assertEqual("Bearer TEST_AUTH_VALUE", request.get_header("Authorization"))
+        self.assertNotIn("TEST_AUTH_VALUE", request.full_url)
+
+    def test_binary_transport_uses_product_user_agent_without_auth_in_url(self):
+        captured = {}
+
+        def opener(request, timeout):
+            captured["request"] = request
+            captured["timeout"] = timeout
+            return _TransportResponse(payload=b'{"ok":true}')
+
+        with tempfile.TemporaryDirectory() as tmp:
+            bundle = Path(tmp) / "diagnostic.zip"
+            bundle.write_bytes(b"zip-bytes")
+            transport = UrllibDiagnosticBinaryTransport("https://api.example.test")
+            with patch("wechat_cli.diagnostics_upload.urlopen", side_effect=opener):
+                status, payload = transport(
+                    "/v1/diagnostics/diag_01/content",
+                    {"Authorization": "Diagnostic TEST_UPLOAD_AUTH"},
+                    bundle,
+                )
+
+        self.assertEqual(200, status)
+        self.assertEqual({"ok": True}, payload)
+        request = captured["request"]
+        self.assertEqual(
+            f"WeChatCliDiagnostics/{APP_VERSION}",
+            request.get_header("User-agent"),
+        )
+        self.assertEqual(
+            "Diagnostic TEST_UPLOAD_AUTH",
+            request.get_header("Authorization"),
+        )
+        self.assertNotIn("TEST_UPLOAD_AUTH", request.full_url)
+
+
 class DiagnosticUploadClientTests(unittest.TestCase):
     def make_bundle(self, root: Path):
         path = root / "wechat-cli-diagnostics.zip"
@@ -152,6 +232,10 @@ class DiagnosticUploadClientTests(unittest.TestCase):
                         "upload_url": "/v1/diagnostics/diag_01/content",
                         "upload_token": "diag_9999999999.nonce.signature",
                         "expires_at": "2026-08-05T12:15:00Z",
+                        "upload_expires_at": "2026-08-05T12:15:00Z",
+                        "retention_expires_at": "2026-08-12T12:00:00Z",
+                        "retention_days": 7,
+                        "consent_version": "diagnostics-consent-v1",
                         "maximum_bytes": 20 * 1024 * 1024,
                     },
                 )
@@ -189,6 +273,7 @@ class DiagnosticUploadClientTests(unittest.TestCase):
         self.assertEqual(("POST", "/v1/diagnostics/sessions"), (method, path))
         self.assertEqual("Bearer wcdt_token.secret", headers["Authorization"])
         self.assertEqual(bundle_size, payload["size_bytes"])
+        self.assertEqual("diagnostics-consent-v1", payload.get("consent_version"))
         self.assertEqual(
             hashlib.sha256(b"diagnostic bundle bytes").hexdigest(),
             payload["sha256"],
@@ -205,6 +290,55 @@ class DiagnosticUploadClientTests(unittest.TestCase):
         self.assertEqual("diag_01", result.submission_id)
         self.assertNotIn("upload_token", repr(result))
 
+    def test_rejects_server_retention_policy_drift(self):
+        client = DiagnosticUploadClient(
+            FakeJsonTransport(
+                [
+                    (
+                        201,
+                        {
+                            "submission_id": "diag_01",
+                            "upload_url": "/v1/diagnostics/diag_01/content",
+                            "upload_token": "diag_token",
+                            "expires_at": "2026-08-05T12:15:00Z",
+                            "upload_expires_at": "2026-08-05T12:15:00Z",
+                            "retention_expires_at": "2026-09-05T12:00:00Z",
+                            "retention_days": 30,
+                            "consent_version": "diagnostics-consent-v1",
+                            "maximum_bytes": 1000,
+                        },
+                    )
+                ]
+            ),
+            FakeUploadTransport(
+                [
+                    (
+                        200,
+                        {
+                            "ok": True,
+                            "submission_id": "diag_01",
+                            "status": "complete",
+                            "size_bytes": len(b"diagnostic bundle bytes"),
+                            "sha256": hashlib.sha256(
+                                b"diagnostic bundle bytes"
+                            ).hexdigest(),
+                        },
+                    )
+                ]
+            ),
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            bundle = self.make_bundle(Path(tmp))
+            with self.assertRaises(DiagnosticUploadError) as caught:
+                client.submit(
+                    bundle,
+                    device_token="token",
+                    client_version="0.5.0",
+                    launcher_version="0.1.0",
+                )
+
+        self.assertEqual("DIAGNOSTIC_SESSION_INVALID", caught.exception.code)
+
     def test_rejects_absolute_or_cross_origin_upload_url(self):
         client = DiagnosticUploadClient(
             FakeJsonTransport(
@@ -216,6 +350,10 @@ class DiagnosticUploadClientTests(unittest.TestCase):
                             "upload_url": "https://malicious.example/upload",
                             "upload_token": "diag_token",
                             "expires_at": "2026-08-05T12:15:00Z",
+                            "upload_expires_at": "2026-08-05T12:15:00Z",
+                            "retention_expires_at": "2026-08-12T12:00:00Z",
+                            "retention_days": 7,
+                            "consent_version": "diagnostics-consent-v1",
                             "maximum_bytes": 1000,
                         },
                     )
@@ -247,6 +385,10 @@ class DiagnosticUploadClientTests(unittest.TestCase):
                             "upload_url": "/v1/diagnostics/diag_01/content",
                             "upload_token": "diag_token",
                             "expires_at": "2026-08-05T12:15:00Z",
+                            "upload_expires_at": "2026-08-05T12:15:00Z",
+                            "retention_expires_at": "2026-08-12T12:00:00Z",
+                            "retention_days": 7,
+                            "consent_version": "diagnostics-consent-v1",
                             "maximum_bytes": 1,
                         },
                     )

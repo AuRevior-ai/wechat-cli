@@ -350,6 +350,48 @@ class GitHubReleaseClient:
             )
         return asset
 
+    def publish_release(
+        self,
+        release_id: int,
+        *,
+        prerelease: bool,
+        make_latest: bool = False,
+    ) -> GitHubRelease:
+        if (
+            isinstance(release_id, bool)
+            or not isinstance(release_id, int)
+            or release_id <= 0
+        ):
+            raise ValueError("release_id must be positive")
+        response = self._request(
+            "PATCH",
+            f"{_GITHUB_API_ROOT}/repos/{self.repository}/releases/{release_id}",
+            {
+                "draft": False,
+                "prerelease": bool(prerelease),
+                "make_latest": "true" if make_latest else "false",
+            },
+            content_type="application/json",
+            expected_statuses=(200,),
+        )
+        if response.get("draft") is not False:
+            raise GitHubReleaseError(
+                "GITHUB_INVALID_RESPONSE",
+                "GitHub release remained a draft after publication",
+            )
+        returned_id = _required_integer(response, "id")
+        if returned_id != release_id:
+            raise GitHubReleaseError(
+                "GITHUB_INVALID_RESPONSE",
+                "GitHub returned another release identifier",
+            )
+        return GitHubRelease(
+            release_id=returned_id,
+            tag_name=_required_string(response, "tag_name"),
+            upload_url=_required_string(response, "upload_url"),
+            draft=False,
+        )
+
     def delete_asset(self, asset_id: int) -> None:
         if isinstance(asset_id, bool) or not isinstance(asset_id, int) or asset_id <= 0:
             raise ValueError("asset_id must be positive")

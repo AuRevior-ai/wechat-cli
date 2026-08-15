@@ -1,9 +1,22 @@
 import { Hono } from "hono";
 
 import { registerAdminRoutes } from "./admin";
-import { registerDiagnosticRoutes } from "./diagnostics";
+import {
+  registerAdminLoginRoutes,
+  type AdminLoginRouteOptions,
+} from "./admin_login";
+import {
+  registerAutomationRoutes,
+  type AutomationRouteOptions,
+} from "./automation";
+import {
+  cleanupExpiredDiagnostics,
+  registerDiagnosticRoutes,
+} from "./diagnostics";
 import { ApiError, apiErrorResponse, requestId } from "./http";
+import { assertWorkerHostPathAllowed } from "./ingress_policy";
 import { registerLicenseRoutes } from "./licenses";
+import { assertWorkerOriginAllowed } from "./security_policy";
 import { isoNow } from "./service";
 import type { Env } from "./types";
 import { registerUpdateRoutes } from "./updates";
@@ -12,7 +25,9 @@ interface WorkerVariables {
   requestId: string;
 }
 
-export function createApp(): Hono<{
+export function createApp(
+  options: AdminLoginRouteOptions & AutomationRouteOptions = {},
+): Hono<{
   Bindings: Env;
   Variables: WorkerVariables;
 }> {
@@ -28,6 +43,12 @@ export function createApp(): Hono<{
     c.header("Cache-Control", "no-store");
   });
 
+  app.use("/v1/*", async (c, next) => {
+    assertWorkerHostPathAllowed(c.req.raw, c.env);
+    assertWorkerOriginAllowed(c.req.raw, c.env);
+    await next();
+  });
+
   app.get("/v1/health", (c) =>
     c.json({
       ok: true,
@@ -40,6 +61,8 @@ export function createApp(): Hono<{
   registerLicenseRoutes(app);
   registerUpdateRoutes(app);
   registerDiagnosticRoutes(app);
+  registerAdminLoginRoutes(app, options);
+  registerAutomationRoutes(app, options);
   registerAdminRoutes(app);
 
   app.notFound((c) => {
@@ -90,24 +113,7 @@ const app = createApp();
 
 async function cleanupExpired(env: Env): Promise<void> {
   const now = isoNow();
-  const expiredDiagnostics = await env.DB.prepare(
-    `SELECT id, object_key, status
-       FROM diagnostic_submissions
-      WHERE expires_at <= ? AND status != 'deleted'
-      LIMIT 500`,
-  )
-    .bind(now)
-    .all<Record<string, unknown>>();
-  for (const row of expiredDiagnostics.results) {
-    if (row.status === "complete") {
-      await env.DIAGNOSTICS.delete(String(row.object_key));
-    }
-    await env.DB.prepare(
-      "UPDATE diagnostic_submissions SET status = 'deleted' WHERE id = ?",
-    )
-      .bind(String(row.id))
-      .run();
-  }
+  await cleanupExpiredDiagnostics(env, new Date(now));
   await env.DB.batch([
     env.DB.prepare("DELETE FROM rate_limit_windows WHERE expires_at <= ?").bind(now),
     env.DB.prepare("DELETE FROM idempotency_records WHERE expires_at <= ?").bind(now),

@@ -22,11 +22,13 @@ from ..update.layout import InstallLayout
 from ..update.prepare import prepare_checked_update
 from ..update.transaction import TransactionState, UpdateTransactionEngine
 from ..version import ARCHITECTURE, LAUNCHER_VERSION, PLATFORM, PRODUCT
+from ..windows.authenticode import AuthenticodePolicy
 from ..windows.dpapi import WindowsDpapiProtector
 from .config import LauncherConfig
 from .locks import LauncherInstanceLock, default_launcher_mutex_name
 from .process import LocalApplicationRuntime
 from .service import LauncherResult, LauncherService, LauncherStatus
+from .trust_profile import load_embedded_trust_profile
 from .ui_controller import LauncherUiController
 from .webview import LauncherWindow
 
@@ -68,7 +70,15 @@ def _build_service(
         protector,
     )
     license_client = LicenseApiClient(_transport(config))
-    runtime = LocalApplicationRuntime(layout, port=config.port)
+    publisher = config.windows_publisher_policy.strip()
+    runtime = LocalApplicationRuntime(
+        layout,
+        port=config.port,
+        authenticode_policy=AuthenticodePolicy(
+            required=bool(publisher),
+            expected_subject=publisher or None,
+        ),
+    )
     service = LauncherService(
         layout=layout,
         state_storage=storage,
@@ -145,9 +155,8 @@ def _run_update_download(
         _transport(config),
         trusted_keys=config.release_keys,
     )
-    failed_versions = UpdateTransactionEngine(
-        layout
-    ).failed_versions.failed_versions()
+    failed_registry = UpdateTransactionEngine(layout).failed_versions
+    failed_releases = failed_registry.failed_releases()
     result = client.check(
         device_token=state.device_token,
         current_version=current.current_version,
@@ -157,7 +166,8 @@ def _run_update_download(
         architecture=ARCHITECTURE,
         product=PRODUCT,
         device_id=state.device_id,
-        failed_versions=failed_versions,
+        failed_versions=[],
+        failed_releases=failed_releases,
     )
     if not result.update_available:
         return 0
@@ -269,9 +279,11 @@ def run_launcher_mode(
         return 4
     layout = InstallLayout.from_environment()
     path = Path(config_path) if config_path else _default_config_path(layout)
+    trust_profile = load_embedded_trust_profile()
     config = LauncherConfig.load(
         path,
         allow_insecure_loopback=_allow_loopback(path),
+        trust_profile=trust_profile,
     )
     mutex_name = default_launcher_mutex_name(read_current_user_sid())
     if mode == "download-update":

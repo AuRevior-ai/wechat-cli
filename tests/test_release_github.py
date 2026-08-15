@@ -66,6 +66,40 @@ class GitHubReleaseClientTests(unittest.TestCase):
         self.assertEqual(123, release.release_id)
         self.assertNotIn("github_pat_secret", repr(client))
 
+    def test_publish_release_makes_provenance_immutable_without_latest(self):
+        transport = FakeTransport(
+            [
+                (
+                    200,
+                    {
+                        "id": 123,
+                        "tag_name": "v0.5.1",
+                        "draft": False,
+                        "upload_url": "https://uploads.github.com/repos/example/releases/releases/123/assets{?name,label}",
+                    },
+                )
+            ]
+        )
+        client = GitHubReleaseClient(
+            repository="example/releases",
+            token="github_pat_secret",
+            transport=transport,
+        )
+
+        release = client.publish_release(123, prerelease=False, make_latest=False)
+
+        method, url, _headers, payload, content_type = transport.calls[0]
+        self.assertEqual("PATCH", method)
+        self.assertEqual(
+            "https://api.github.com/repos/example/releases/releases/123",
+            url,
+        )
+        self.assertEqual("application/json", content_type)
+        self.assertFalse(payload["draft"])
+        self.assertFalse(payload["prerelease"])
+        self.assertEqual("false", payload["make_latest"])
+        self.assertFalse(release.draft)
+
     def test_upload_asset_uses_upload_host_and_encoded_name(self):
         content = b"package bytes"
         transport = FakeTransport(

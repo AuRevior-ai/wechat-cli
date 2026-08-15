@@ -4,7 +4,6 @@ import { authenticateDevice } from "./auth";
 import {
   bytesToBase64,
   createDeviceToken,
-  hmacSha256Hex,
   licenseKeyHint,
   normalizeLicenseKey,
   randomId,
@@ -16,6 +15,10 @@ import {
   readJsonObject,
   requiredString,
 } from "./http";
+import {
+  readableHmacDigests,
+  versionedHmacDigest,
+} from "./secret_versions";
 import {
   addDays,
   enforceRateLimit,
@@ -44,6 +47,7 @@ function licenseFromRow(row: Record<string, unknown>): LicenseRow {
   return {
     id: String(row.id),
     key_digest: String(row.key_digest),
+    key_secret_version: Number(row.key_secret_version),
     key_hint: String(row.key_hint),
     status: row.status as LicenseRow["status"],
     max_devices: Number(row.max_devices),
@@ -69,6 +73,7 @@ function deviceFromRow(row: Record<string, unknown>): DeviceRow {
     status: row.status as DeviceRow["status"],
     token_id: String(row.token_id),
     token_secret_digest: String(row.token_secret_digest),
+    token_secret_version: Number(row.token_secret_version),
     token_version: Number(row.token_version),
     device_revision: Number(row.device_revision),
     first_activated_at: String(row.first_activated_at),
@@ -143,7 +148,7 @@ async function findDevice(env: Env, deviceId: string): Promise<DeviceRow | null>
   const row = await env.DB.prepare(
     `SELECT id, license_id, client_install_id_digest, fingerprint_digest,
             display_name, status, token_id, token_secret_digest,
-            token_version, device_revision, first_activated_at,
+            token_secret_version, token_version, device_revision, first_activated_at,
             last_validated_at, last_app_version, last_launcher_version,
             disabled_at, unbound_at
        FROM devices
@@ -198,39 +203,53 @@ export function registerLicenseRoutes(app: WorkerApp): void {
         cause: error,
       });
     }
-    const keyDigest = await hmacSha256Hex(
-      c.env.LICENSE_KEY_PEPPER,
+    const keyCandidates = await readableHmacDigests(
+      c.env,
+      "license-key-pepper",
       `license-key\u0000${normalizedKey}`,
     );
+    const placeholders = keyCandidates.map(() => "?").join(", ");
     const licenseRow = await c.env.DB.prepare(
-      `SELECT id, key_digest, key_hint, status, max_devices,
+      `SELECT id, key_digest, key_secret_version, key_hint, status, max_devices,
               release_channel, revision, created_at, updated_at,
               suspended_at, revoked_at, created_by_admin_id
          FROM licenses
-        WHERE key_digest = ?
+        WHERE key_digest IN (${placeholders})
         LIMIT 1`,
     )
-      .bind(keyDigest)
+      .bind(...keyCandidates.map((candidate) => candidate.digest))
       .first<Record<string, unknown>>();
     if (licenseRow === null) {
       throw new ApiError("LICENSE_NOT_FOUND", "许可证密钥无效。", {
         status: 404,
       });
     }
+    const candidate = keyCandidates.find(
+      (item) => item.digest === String(licenseRow.key_digest),
+    );
+    if (
+      candidate === undefined ||
+      Number(licenseRow.key_secret_version) !== candidate.version
+    ) {
+      throw new ApiError("LICENSE_NOT_FOUND", "许可证密钥无效。", { status: 404 });
+    }
     const license = licenseFromRow(licenseRow);
     assertActiveLicense(license);
 
-    const installDigest = await hmacSha256Hex(
-      c.env.DEVICE_TOKEN_PEPPER,
+    const installDigest = await versionedHmacDigest(
+      c.env,
+      "device-token-pepper",
       `install-id\u0000${deviceId}`,
     );
-    const fingerprintDigest = await hmacSha256Hex(
-      c.env.DEVICE_TOKEN_PEPPER,
+    const fingerprintDigest = await versionedHmacDigest(
+      c.env,
+      "device-token-pepper",
       `fingerprint\u0000${fingerprint.toLowerCase()}`,
     );
     const token = createDeviceToken();
-    const tokenSecretDigest = await hmacSha256Hex(
-      c.env.DEVICE_TOKEN_PEPPER,
+    const tokenSecretDigest = await versionedHmacDigest(
+      c.env,
+      "device-token-pepper",
       token.tokenSecret,
     );
     const now = isoNow();
@@ -245,11 +264,11 @@ export function registerLicenseRoutes(app: WorkerApp): void {
       const inserted = await c.env.DB.prepare(
         `INSERT INTO devices (
            id, license_id, client_install_id_digest, fingerprint_digest,
-           display_name, status, token_id, token_secret_digest,
+           display_name, status, token_id, token_secret_digest, token_secret_version,
            token_version, device_revision, first_activated_at,
            last_validated_at, last_app_version, last_launcher_version
          )
-         SELECT ?, l.id, ?, ?, ?, 'active', ?, ?, 1, 1, ?, ?, ?, ?
+         SELECT ?, l.id, ?, ?, ?, 'active', ?, ?, ?, 1, 1, ?, ?, ?, ?
            FROM licenses l
           WHERE l.id = ?
             AND (
@@ -259,11 +278,12 @@ export function registerLicenseRoutes(app: WorkerApp): void {
       )
         .bind(
           deviceId,
-          installDigest,
-          fingerprintDigest,
+          installDigest.digest,
+          fingerprintDigest.digest,
           deviceName,
           token.tokenId,
-          tokenSecretDigest,
+          tokenSecretDigest.digest,
+          tokenSecretDigest.version,
           now,
           now,
           appVersion,
@@ -284,7 +304,7 @@ export function registerLicenseRoutes(app: WorkerApp): void {
         `UPDATE devices
             SET client_install_id_digest = ?, fingerprint_digest = ?,
                 display_name = ?, status = 'active', token_id = ?,
-                token_secret_digest = ?, token_version = token_version + 1,
+                token_secret_digest = ?, token_secret_version = ?, token_version = token_version + 1,
                 device_revision = device_revision + 1,
                 last_validated_at = ?, last_app_version = ?,
                 last_launcher_version = ?, unbound_at = NULL
@@ -295,11 +315,12 @@ export function registerLicenseRoutes(app: WorkerApp): void {
             ) < ?`,
       )
         .bind(
-          installDigest,
-          fingerprintDigest,
+          installDigest.digest,
+          fingerprintDigest.digest,
           deviceName,
           token.tokenId,
-          tokenSecretDigest,
+          tokenSecretDigest.digest,
+          tokenSecretDigest.version,
           now,
           appVersion,
           launcherVersion,
@@ -320,18 +341,19 @@ export function registerLicenseRoutes(app: WorkerApp): void {
         `UPDATE devices
             SET client_install_id_digest = ?, fingerprint_digest = ?,
                 display_name = ?, token_id = ?, token_secret_digest = ?,
-                token_version = token_version + 1,
+                token_secret_version = ?, token_version = token_version + 1,
                 device_revision = device_revision + 1,
                 last_validated_at = ?, last_app_version = ?,
                 last_launcher_version = ?
           WHERE id = ? AND license_id = ? AND status = 'active'`,
       )
         .bind(
-          installDigest,
-          fingerprintDigest,
+          installDigest.digest,
+          fingerprintDigest.digest,
           deviceName,
           token.tokenId,
-          tokenSecretDigest,
+          tokenSecretDigest.digest,
+          tokenSecretDigest.version,
           now,
           appVersion,
           launcherVersion,

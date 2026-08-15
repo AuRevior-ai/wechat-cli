@@ -1,5 +1,13 @@
 # Author Support Page Implementation Plan
 
+> **Historical construction plan:** This file records the intended implementation steps at the time. Its unchecked boxes are not the current project progress. Read [`docs/PROJECT_STATE.md`](../../PROJECT_STATE.md) and the relevant specialist roadmap for current status.
+
+## Final result
+
+- Commits: `0722d49`, `09b7152`, `9af3767`, and `d8e4a2e`.
+- Delivered local author assets, the About & Support Web page, a focused layout, and 0.4.1 delivery preparation.
+- Verification is covered by the Web static-resource and page tests.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add an unobtrusive “作者 Au Revior” credit and a local-only “关于与支持” page containing the supplied WeChat contact and payment QR codes, then ship and install Windows version 0.4.1.

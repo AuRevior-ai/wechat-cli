@@ -136,7 +136,7 @@ class ReleaseCliTests(unittest.TestCase):
             self.assertNotEqual(0, second.exit_code)
             self.assertIn("已存在", second.output)
 
-    def test_publish_uses_configured_clients_and_explicit_enable(self):
+    def test_publish_uses_configured_clients_and_keeps_enable_separate(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             key = self.make_key(root)
@@ -161,8 +161,8 @@ class ReleaseCliTests(unittest.TestCase):
                 package_asset_id=401,
                 manifest_asset_id=402,
                 signature_asset_id=403,
-                enabled=True,
-                paused=False,
+                enabled=False,
+                paused=True,
             )
             with (
                 patch("wechat_cli.release.cli._storage", return_value=storage),
@@ -188,17 +188,17 @@ class ReleaseCliTests(unittest.TestCase):
                         "0.1.0",
                         "--published-at",
                         "2026-08-05T00:00:00Z",
-                        "--enable",
                     ],
                 )
 
         self.assertEqual(0, result.exit_code, result.output)
         payload = json.loads(result.output)
-        self.assertTrue(payload["enabled"])
-        self.assertFalse(payload["paused"])
-        self.assertTrue(publish.call_args.kwargs["enable"])
+        self.assertFalse(payload["enabled"])
+        self.assertTrue(payload["paused"])
+        self.assertNotIn("enable", publish.call_args.kwargs)
+        self.assertNotIn("enable_operation_nonce", publish.call_args.kwargs)
         self.assertGreaterEqual(
-            len(publish.call_args.kwargs["enable_operation_nonce"]),
+            len(publish.call_args.kwargs["upload_operation_nonce"]),
             8,
         )
 

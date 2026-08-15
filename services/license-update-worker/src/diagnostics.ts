@@ -3,12 +3,15 @@ import type { Hono } from "hono";
 import { authenticateDevice } from "./auth";
 import {
   constantTimeEqual,
-  hmacSha256Hex,
   randomId,
   randomToken,
   sha256Hex,
 } from "./crypto";
 import { ApiError, readJsonObject, requiredInteger, requiredString } from "./http";
+import {
+  verifyVersionedHmacDigest,
+  versionedHmacDigest,
+} from "./secret_versions";
 import { addSeconds, enforceRateLimit, isoNow, writeAudit } from "./service";
 import type { Env } from "./types";
 
@@ -17,6 +20,84 @@ interface WorkerVariables {
 }
 
 type WorkerApp = Hono<{ Bindings: Env; Variables: WorkerVariables }>;
+
+export const DIAGNOSTIC_CONSENT_VERSION = "diagnostics-consent-v1";
+
+export function diagnosticDeadlines(now: Date): {
+  upload_expires_at: string;
+  retention_expires_at: string;
+} {
+  if (!(now instanceof Date) || !Number.isFinite(now.getTime())) {
+    throw new TypeError("diagnostic clock is invalid");
+  }
+  return {
+    upload_expires_at: addSeconds(now, 15 * 60).toISOString(),
+    retention_expires_at: addSeconds(now, 7 * 24 * 60 * 60).toISOString(),
+  };
+}
+
+export function diagnosticObjectKey(now: Date, submissionId: string): string {
+  if (!(now instanceof Date) || !Number.isFinite(now.getTime())) {
+    throw new TypeError("diagnostic clock is invalid");
+  }
+  if (!/^diag_[A-Za-z0-9_-]{12,128}$/u.test(submissionId)) {
+    throw new TypeError("diagnostic submission id is invalid");
+  }
+  return `diagnostics/${now.toISOString().slice(0, 10)}/${submissionId}.zip`;
+}
+
+export function validateDiagnosticConsent(value: unknown): string {
+  if (value !== DIAGNOSTIC_CONSENT_VERSION) {
+    throw new ApiError("DIAGNOSTIC_CONSENT_REQUIRED", "诊断提交需要当前版本的明确同意。", {
+      status: 400,
+      retryable: false,
+    });
+  }
+  return DIAGNOSTIC_CONSENT_VERSION;
+}
+
+export async function putDiagnosticObject(
+  env: Env,
+  options: {
+    objectKey: string;
+    content: ArrayBuffer;
+    submissionId: string;
+    sha256: string;
+  },
+): Promise<void> {
+  await env.DIAGNOSTICS.put(options.objectKey, options.content, {
+    httpMetadata: { contentType: "application/zip" },
+    customMetadata: {
+      submission_id: options.submissionId,
+      sha256: options.sha256,
+    },
+  });
+}
+
+export async function cleanupExpiredDiagnostics(
+  env: Env,
+  now: Date = new Date(),
+): Promise<void> {
+  const nowIso = now.toISOString();
+  const expired = await env.DB.prepare(
+    `SELECT id, object_key, status
+       FROM diagnostic_submissions
+      WHERE retention_expires_at <= ? AND status != 'deleted'
+      LIMIT 500`,
+  )
+    .bind(nowIso)
+    .all<Record<string, unknown>>();
+  for (const row of expired.results) {
+    if (row.status === "complete") {
+      await env.DIAGNOSTICS.delete(String(row.object_key));
+    }
+    await env.DB.prepare(
+      "UPDATE diagnostic_submissions SET status = 'deleted' WHERE id = ?",
+    )
+      .bind(String(row.id))
+      .run();
+  }
+}
 
 function maximumDiagnosticBytes(env: Env): number {
   const value = Number.parseInt(env.MAX_DIAGNOSTIC_BYTES, 10);
@@ -29,46 +110,55 @@ function maximumDiagnosticBytes(env: Env): number {
   return value;
 }
 
-async function createUploadToken(
+export async function createUploadToken(
   env: Env,
   sessionId: string,
   expiresAtEpoch: number,
 ): Promise<string> {
   const nonce = randomToken(18);
   const message = `${sessionId}\u0000${expiresAtEpoch}\u0000${nonce}`;
-  const signature = await hmacSha256Hex(env.DOWNLOAD_TICKET_SECRET, message);
-  return `diag_${expiresAtEpoch}.${nonce}.${signature}`;
+  const signature = await versionedHmacDigest(
+    env,
+    "diagnostic-upload-secret",
+    message,
+  );
+  return `diag_v${signature.version}_${expiresAtEpoch}.${nonce}.${signature.digest}`;
 }
 
-async function verifyUploadToken(
+export async function verifyUploadToken(
   env: Env,
   sessionId: string,
   token: string,
 ): Promise<void> {
-  const match = /^diag_(\d{10})\.([A-Za-z0-9_-]{16,128})\.([0-9a-f]{64})$/u.exec(
+  const match = /^diag_v(\d{1,3})_(\d{10})\.([A-Za-z0-9_-]{16,128})\.([0-9a-f]{64})$/u.exec(
     token,
   );
   if (
     match === null ||
     match[1] === undefined ||
     match[2] === undefined ||
-    match[3] === undefined
+    match[3] === undefined ||
+    match[4] === undefined
   ) {
     throw new ApiError("DIAGNOSTIC_UPLOAD_NOT_AUTHORIZED", "诊断上传令牌无效。", {
       status: 401,
     });
   }
-  const expiresAtEpoch = Number.parseInt(match[1], 10);
+  const secretVersion = Number.parseInt(match[1], 10);
+  const expiresAtEpoch = Number.parseInt(match[2], 10);
   if (expiresAtEpoch <= Math.floor(Date.now() / 1000)) {
     throw new ApiError("DIAGNOSTIC_UPLOAD_TOKEN_EXPIRED", "诊断上传令牌已过期。", {
       status: 401,
     });
   }
-  const expected = await hmacSha256Hex(
-    env.DOWNLOAD_TICKET_SECRET,
-    `${sessionId}\u0000${expiresAtEpoch}\u0000${match[2]}`,
+  const verified = await verifyVersionedHmacDigest(
+    env,
+    "diagnostic-upload-secret",
+    secretVersion,
+    `${sessionId}\u0000${expiresAtEpoch}\u0000${match[3]}`,
+    match[4],
   );
-  if (!constantTimeEqual(expected, match[3])) {
+  if (!verified) {
     throw new ApiError("DIAGNOSTIC_UPLOAD_NOT_AUTHORIZED", "诊断上传令牌无效。", {
       status: 401,
     });
@@ -109,22 +199,18 @@ export function registerDiagnosticRoutes(app: WorkerApp): void {
       maximum: 64,
       pattern: /^[0-9a-f]{64}$/iu,
     }).toLowerCase();
+    const consentVersion = validateDiagnosticConsent(request.consent_version);
     const now = new Date();
-    const expiresAt = addSeconds(now, 15 * 60);
-    const expiresEpoch = Math.floor(expiresAt.getTime() / 1000);
+    const deadlines = diagnosticDeadlines(now);
+    const expiresEpoch = Math.floor(Date.parse(deadlines.upload_expires_at) / 1000);
     const sessionId = randomId("diag_", 18);
-    const objectKey = [
-      "diagnostics",
-      now.toISOString().slice(0, 10),
-      authenticated.license.id,
-      authenticated.device.id,
-      `${sessionId}.zip`,
-    ].join("/");
+    const objectKey = diagnosticObjectKey(now, sessionId);
     await c.env.DB.prepare(
       `INSERT INTO diagnostic_submissions (
          id, license_id, device_id, object_key, size, sha256,
-         client_version, launcher_version, status, expires_at, created_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'created', ?, ?)`,
+         client_version, launcher_version, status, expires_at,
+         upload_expires_at, retention_expires_at, consent_version, created_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'created', ?, ?, ?, ?, ?)`,
     )
       .bind(
         sessionId,
@@ -135,7 +221,10 @@ export function registerDiagnosticRoutes(app: WorkerApp): void {
         declaredSha256,
         clientVersion,
         launcherVersion,
-        expiresAt.toISOString(),
+        deadlines.retention_expires_at,
+        deadlines.upload_expires_at,
+        deadlines.retention_expires_at,
+        consentVersion,
         now.toISOString(),
       )
       .run();
@@ -148,14 +237,22 @@ export function registerDiagnosticRoutes(app: WorkerApp): void {
       targetId: sessionId,
       result: "success",
       requestId: c.get("requestId"),
-      metadata: { size_bytes: declaredSize },
+      metadata: {
+        size_bytes: declaredSize,
+        consent_version: consentVersion,
+        retention_days: 7,
+      },
     });
     return c.json(
       {
         submission_id: sessionId,
         upload_url: `/v1/diagnostics/${sessionId}/content`,
         upload_token: uploadToken,
-        expires_at: expiresAt.toISOString(),
+        expires_at: deadlines.upload_expires_at,
+        upload_expires_at: deadlines.upload_expires_at,
+        retention_expires_at: deadlines.retention_expires_at,
+        retention_days: 7,
+        consent_version: consentVersion,
         maximum_bytes: maximumDiagnosticBytes(c.env),
       },
       201,
@@ -179,7 +276,7 @@ export function registerDiagnosticRoutes(app: WorkerApp): void {
     );
     const row = await c.env.DB.prepare(
       `SELECT id, license_id, device_id, object_key, size, sha256,
-              status, expires_at
+              status, upload_expires_at, retention_expires_at
          FROM diagnostic_submissions
         WHERE id = ?
         LIMIT 1`,
@@ -192,7 +289,7 @@ export function registerDiagnosticRoutes(app: WorkerApp): void {
       });
     }
     const now = isoNow();
-    if (String(row.expires_at) <= now) {
+    if (String(row.upload_expires_at) <= now) {
       throw new ApiError("DIAGNOSTIC_SESSION_EXPIRED", "诊断提交会话已过期。", {
         status: 410,
       });
@@ -250,14 +347,11 @@ export function registerDiagnosticRoutes(app: WorkerApp): void {
           status: 409,
         });
       }
-      await c.env.DIAGNOSTICS.put(String(row.object_key), content, {
-        httpMetadata: { contentType: "application/zip" },
-        customMetadata: {
-          submission_id: submissionId,
-          license_id: String(row.license_id),
-          device_id: String(row.device_id),
-          sha256: digest,
-        },
+      await putDiagnosticObject(c.env, {
+        objectKey: String(row.object_key),
+        content,
+        submissionId,
+        sha256: digest,
       });
       const submittedAt = isoNow();
       await c.env.DB.prepare(

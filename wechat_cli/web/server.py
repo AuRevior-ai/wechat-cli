@@ -1000,6 +1000,50 @@ class WeChatWebHandler(BaseHTTPRequestHandler):
         if not self._license_session_valid():
             self._send_license_error()
             return
+        if parsed.path == "/api/diagnostics/delete":
+            try:
+                payload = self._read_json()
+                token = payload.get("submission_token")
+                try:
+                    bundle_path = self._resolve_diagnostic_export(token)
+                except ValueError:
+                    self._send_json(
+                        {
+                            "ok": False,
+                            "error": {
+                                "code": "DIAGNOSTIC_SUBMISSION_INVALID",
+                                "message": "诊断包删除凭证无效或已过期。",
+                                "retryable": False,
+                            },
+                        },
+                        HTTPStatus.BAD_REQUEST,
+                    )
+                    return
+                filename = bundle_path.name
+                bundle_path.unlink()
+                self._consume_diagnostic_export(token)
+                self._send_json(
+                    {
+                        "ok": True,
+                        "deleted": True,
+                        "filename": filename,
+                    }
+                )
+            except ValueError:
+                self._send_management_failure(invalid_request=True)
+            except Exception:
+                self._send_json(
+                    {
+                        "ok": False,
+                        "error": {
+                            "code": "DIAGNOSTIC_DELETE_FAILED",
+                            "message": "本地诊断包删除未完成。",
+                            "retryable": True,
+                        },
+                    },
+                    HTTPStatus.BAD_GATEWAY,
+                )
+            return
         if parsed.path == "/api/diagnostics/generate":
             try:
                 payload = self._read_json()

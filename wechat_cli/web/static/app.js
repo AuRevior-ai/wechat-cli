@@ -20,6 +20,7 @@ const defaultTodayInputs = [...document.querySelectorAll("[data-default-today]")
 const licenseRefreshButton = document.querySelector("#license-refresh");
 const manualUpdateButton = document.querySelector("#manual-update-check");
 const diagnosticsGenerateButton = document.querySelector("#diagnostics-generate");
+const diagnosticsDeleteButton = document.querySelector("#diagnostics-delete");
 const diagnosticsSubmitButton = document.querySelector("#diagnostics-submit");
 
 let lastText = "";
@@ -1600,6 +1601,7 @@ async function triggerManualUpdateCheck() {
 async function generateLocalDiagnostics() {
   const status = document.getElementById("diagnostics-status");
   if (diagnosticsGenerateButton) diagnosticsGenerateButton.disabled = true;
+  if (diagnosticsDeleteButton) diagnosticsDeleteButton.disabled = true;
   if (diagnosticsSubmitButton) diagnosticsSubmitButton.disabled = true;
   diagnosticSubmissionToken = "";
   try {
@@ -1611,6 +1613,9 @@ async function generateLocalDiagnostics() {
     if (status) {
       status.textContent = `诊断包已保存到本机日志目录：${payload.filename || "diagnostic.zip"}`;
     }
+    if (diagnosticsDeleteButton) {
+      diagnosticsDeleteButton.disabled = !diagnosticSubmissionToken;
+    }
     if (diagnosticsSubmitButton) {
       diagnosticsSubmitButton.disabled = !(
         payload.can_submit && diagnosticSubmissionToken
@@ -1618,6 +1623,32 @@ async function generateLocalDiagnostics() {
     }
   } finally {
     if (diagnosticsGenerateButton) diagnosticsGenerateButton.disabled = false;
+  }
+}
+
+async function deleteGeneratedDiagnostics() {
+  const status = document.getElementById("diagnostics-status");
+  if (!diagnosticSubmissionToken) {
+    if (status) status.textContent = "请先生成本地诊断包。";
+    return;
+  }
+  const accepted = confirm("将仅删除刚刚生成的本地诊断 ZIP，不会执行上传。是否继续？");
+  if (!accepted) return;
+  if (diagnosticsDeleteButton) diagnosticsDeleteButton.disabled = true;
+  if (diagnosticsSubmitButton) diagnosticsSubmitButton.disabled = true;
+  try {
+    const payload = await managementRequest("/api/diagnostics/delete", {
+      method: "POST",
+      body: JSON.stringify({ submission_token: diagnosticSubmissionToken }),
+    });
+    diagnosticSubmissionToken = "";
+    if (status) {
+      status.textContent = `本地诊断包已删除：${payload.filename || "diagnostic.zip"}`;
+    }
+  } catch (error) {
+    if (diagnosticsDeleteButton) diagnosticsDeleteButton.disabled = false;
+    if (diagnosticsSubmitButton) diagnosticsSubmitButton.disabled = false;
+    throw error;
   }
 }
 
@@ -1641,6 +1672,7 @@ async function submitGeneratedDiagnostics() {
       }),
     });
     diagnosticSubmissionToken = "";
+    if (diagnosticsDeleteButton) diagnosticsDeleteButton.disabled = true;
     if (status) {
       status.textContent = `诊断包已提交，编号：${payload.submission_id || "—"}`;
     }
@@ -1684,6 +1716,12 @@ diagnosticsGenerateButton?.addEventListener("click", () => {
   generateLocalDiagnostics().catch((error) => {
     const status = document.getElementById("diagnostics-status");
     if (status) status.textContent = error.message || "诊断包生成失败。";
+  });
+});
+diagnosticsDeleteButton?.addEventListener("click", () => {
+  deleteGeneratedDiagnostics().catch((error) => {
+    const status = document.getElementById("diagnostics-status");
+    if (status) status.textContent = error.message || "本地诊断包删除失败。";
   });
 });
 diagnosticsSubmitButton?.addEventListener("click", () => {

@@ -1,5 +1,13 @@
 # Reusable Session and Date Picker Implementation Plan
 
+> **Historical construction plan:** This file records the intended implementation steps at the time. Its unchecked boxes are not the current project progress. Read [`docs/PROJECT_STATE.md`](../../PROJECT_STATE.md) and the relevant specialist roadmap for current status.
+
+## Final result
+
+- Commits: `6344502`, `9212262`, `c59f775`, and `6ba081c`.
+- Delivered shared session and date pickers, including stale-request protection and preservation of selection when Escape closes the picker.
+- Verification is covered by the reusable-picker Web contract tests.
+
 > **For Codex:** Execute this plan task-by-task with test-driven development. Keep the shared picker API generic; do not add page-specific JavaScript branches.
 
 **Goal:** Replace every manual chat/group/date field in the Web console with one reusable session picker system and native graphical date controls.

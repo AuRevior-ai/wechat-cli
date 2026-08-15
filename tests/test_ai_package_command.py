@@ -87,7 +87,8 @@ class AiPackageCommandTests(unittest.TestCase):
             return CliRunner().invoke(cli, args), patches[-1].target
 
     def test_command_is_registered(self):
-        result = CliRunner().invoke(cli, ["ai-package", "--help"])
+        with patch("wechat_cli.main.AppContext", return_value=self.fake_app):
+            result = CliRunner().invoke(cli, ["ai-package", "--help"])
 
         self.assertEqual(result.exit_code, 0, result.output)
         self.assertIn("--output", result.output)

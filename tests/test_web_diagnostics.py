@@ -63,9 +63,9 @@ class WebDiagnosticsTests(unittest.TestCase):
         self.thread.join(timeout=3)
         self.temp.cleanup()
 
-    def post(self, payload, *, origin=None):
+    def post(self, payload, *, origin=None, path="/api/diagnostics/generate"):
         request = Request(
-            self.base + "/api/diagnostics/generate",
+            self.base + path,
             data=json.dumps(payload).encode("utf-8"),
             headers={
                 "Content-Type": "application/json",
@@ -109,6 +109,45 @@ class WebDiagnosticsTests(unittest.TestCase):
         self.assertEqual("complete", submitted["status"])
         self.assertEqual(1, len(self.submitter.calls))
         self.assertEqual(self.diagnostics.path, self.submitter.calls[0])
+
+    def test_user_can_explicitly_delete_local_diagnostic_without_submission(self):
+        with self.post({"submit": False}) as response:
+            generated = json.loads(response.read().decode("utf-8"))
+        self.assertTrue(self.diagnostics.path.is_file())
+
+        try:
+            with self.post(
+                {"submission_token": generated["submission_token"]},
+                path="/api/diagnostics/delete",
+            ) as response:
+                deleted = json.loads(response.read().decode("utf-8"))
+        except HTTPError as exc:
+            self.fail(f"diagnostics delete endpoint must return 200, got {exc.code}")
+
+        self.assertEqual(200, response.status)
+        self.assertTrue(deleted["deleted"])
+        self.assertFalse(self.diagnostics.path.exists())
+        self.assertEqual(0, len(self.submitter.calls))
+
+    def test_ui_discloses_seven_day_cloud_retention_and_local_delete_control(self):
+        source = (
+            Path(__file__).resolve().parents[1]
+            / "wechat_cli"
+            / "web"
+            / "static"
+            / "index.html"
+        ).read_text(encoding="utf-8")
+        self.assertIn("最多保留 7 天", source)
+        self.assertIn('id="diagnostics-delete"', source)
+        script = (
+            Path(__file__).resolve().parents[1]
+            / "wechat_cli"
+            / "web"
+            / "static"
+            / "app.js"
+        ).read_text(encoding="utf-8")
+        self.assertIn('querySelector("#diagnostics-delete")', script)
+        self.assertIn('managementRequest("/api/diagnostics/delete"', script)
 
     def test_submit_without_generated_token_is_rejected(self):
         with self.assertRaises(HTTPError) as caught:

@@ -1,5 +1,13 @@
 # Web Navigation Simplification Implementation Plan
 
+> **Historical construction plan:** This file records the intended implementation steps at the time. Its unchecked boxes are not the current project progress. Read [`docs/PROJECT_STATE.md`](../../PROJECT_STATE.md) and the relevant specialist roadmap for current status.
+
+## Final result
+
+- Main commit: `6583db7`.
+- Delivered simplified Web navigation and a unified chat-record workflow.
+- Verification is covered by the Web static and server regression tests.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 精简 Web 控制台导航，把聊天总结交互并入聊天记录，并发布 Windows 0.2.8 安装包。

@@ -5,6 +5,7 @@ from pathlib import Path
 
 from wechat_cli.update.download import DownloadRequest, download_update
 from wechat_cli.update.errors import ErrorCode, UpdateError
+from wechat_cli.version import APP_VERSION
 
 
 class FakeResponse:
@@ -82,6 +83,7 @@ class UpdateDownloadTests(unittest.TestCase):
         url, headers, _ = opener.calls[0]
         self.assertEqual("https://api.example.test/v1/updates/download", url)
         self.assertEqual("Download dlt_secret_ticket", headers["Authorization"])
+        self.assertEqual(f"WeChatCliUpdate/{APP_VERSION}", headers["User-Agent"])
         self.assertNotIn("dlt_secret_ticket", url)
         self.assertNotIn("Range", headers)
 

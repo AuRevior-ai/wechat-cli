@@ -13,6 +13,8 @@ from wechat_cli.update.errors import ErrorCode, UpdateError
 
 TEST_PRIVATE_KEY = ECC.construct(curve="Ed25519", seed=bytes(range(32)))
 TEST_PUBLIC_KEY = TEST_PRIVATE_KEY.public_key().export_key(format="raw")
+NEXT_PRIVATE_KEY = ECC.construct(curve="Ed25519", seed=bytes(range(31, -1, -1)))
+NEXT_PUBLIC_KEY = NEXT_PRIVATE_KEY.public_key().export_key(format="raw")
 
 
 class TrustedEd25519KeysTests(unittest.TestCase):
@@ -53,6 +55,25 @@ class TrustedEd25519KeysTests(unittest.TestCase):
     def test_rejects_invalid_public_key_length(self):
         with self.assertRaises(ValueError):
             TrustedEd25519Keys({"bad": b"short"})
+
+    def test_signing_key_overlap_accepts_old_and_new_then_retirement_rejects_old(self):
+        message = b"release-key-overlap"
+        old_signature = eddsa.new(TEST_PRIVATE_KEY, "rfc8032").sign(message)
+        new_signature = eddsa.new(NEXT_PRIVATE_KEY, "rfc8032").sign(message)
+        overlap = TrustedEd25519Keys(
+            {
+                "release-key-old": TEST_PUBLIC_KEY,
+                "release-key-new": NEXT_PUBLIC_KEY,
+            }
+        )
+
+        overlap.verify("release-key-old", message, old_signature)
+        overlap.verify("release-key-new", message, new_signature)
+
+        retired = TrustedEd25519Keys({"release-key-new": NEXT_PUBLIC_KEY})
+        with self.assertRaises(UpdateError) as caught:
+            retired.verify("release-key-old", message, old_signature)
+        self.assertEqual(ErrorCode.UPDATE_SIGNING_KEY_UNKNOWN, caught.exception.code)
 
 
 class FileDigestTests(unittest.TestCase):

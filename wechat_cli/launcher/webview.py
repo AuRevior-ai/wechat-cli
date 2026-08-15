@@ -6,10 +6,9 @@ import importlib
 from pathlib import Path
 from typing import Any, Callable, Mapping
 from urllib.parse import unquote, urlparse
+from urllib.request import url2pathname
 
-
-class WebViewUnavailable(RuntimeError):
-    pass
+from .webview_compat import PreloadUrlReader, WebViewUnavailable
 
 
 _ALLOWED_UI_FIELDS = {
@@ -133,9 +132,11 @@ class LauncherWindow:
         *,
         webview_module: Any | None = ...,
         importer: Callable[[str], Any] = importlib.import_module,
+        preload_url_reader: PreloadUrlReader | None = None,
     ) -> None:
         self._webview_module = webview_module
         self._importer = importer
+        self._preload_url_reader = preload_url_reader or PreloadUrlReader()
         self.window = None
 
     def _load_webview(self):
@@ -155,10 +156,10 @@ class LauncherWindow:
     @staticmethod
     def _navigation_is_local(url: str) -> bool:
         parsed = urlparse(url)
-        if parsed.scheme != "file":
+        if parsed.scheme != "file" or parsed.netloc:
             return False
         try:
-            current = Path(unquote(parsed.path)).resolve(strict=False)
+            current = Path(url2pathname(unquote(parsed.path))).resolve(strict=False)
             current.relative_to(launcher_ui_directory().resolve(strict=False))
             return True
         except (OSError, ValueError):
@@ -185,7 +186,7 @@ class LauncherWindow:
         def guard_navigation(window=None):
             target = window or self.window
             try:
-                url = target.get_current_url()
+                url = self._preload_url_reader.read(target)
             except Exception:
                 target.destroy()
                 return

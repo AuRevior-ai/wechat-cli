@@ -1,3 +1,4 @@
+import hashlib
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -24,6 +25,21 @@ class FakeJsonTransport:
         return response
 
 
+class FakeUploadTransport:
+    def __init__(self):
+        self.calls = []
+
+    def __call__(self, path, headers, source, metadata_headers):
+        source = Path(source)
+        self.calls.append((path, dict(headers), source, dict(metadata_headers)))
+        return {
+            "release_id": source.stem,
+            "distribution_backend": "r2",
+            "distribution_object_key": "releases/stable/rel_01/object.zip",
+            "ready": True,
+        }
+
+
 class FakeDownloadTransport:
     def __init__(self, content=b"diagnostic zip"):
         self.content = content
@@ -36,6 +52,18 @@ class FakeDownloadTransport:
 
 
 class AdminApiClientTests(unittest.TestCase):
+    def test_short_lived_session_token_uses_existing_admin_authorization_scheme(self):
+        transport = FakeJsonTransport([(200, {"releases": []})])
+        token = "wcas_adms_identifier123456.secret_value_abcdefghijklmnopqrstuvwxyz123456"
+        try:
+            client = AdminApiClient(transport, admin_token=token)
+        except ValueError as exc:
+            self.fail(f"short-lived admin session token should be accepted: {exc}")
+
+        self.assertEqual([], client.list_releases())
+        self.assertEqual(f"Admin {token}", transport.calls[0][2]["Authorization"])
+        self.assertNotIn("secret_value", repr(client))
+
     @patch("wechat_cli.admin.client.urlopen")
     def test_json_transport_sets_application_user_agent(self, mocked_urlopen):
         response = MagicMock()
@@ -53,7 +81,7 @@ class AdminApiClientTests(unittest.TestCase):
         )
 
         request = mocked_urlopen.call_args.args[0]
-        self.assertEqual("WeChatCliAdmin/0.5.0", request.get_header("User-agent"))
+        self.assertEqual("WeChatCliAdmin/0.6.0", request.get_header("User-agent"))
 
     @patch("wechat_cli.admin.client.urlopen")
     def test_download_transport_sets_application_user_agent(self, mocked_urlopen):
@@ -72,7 +100,7 @@ class AdminApiClientTests(unittest.TestCase):
             )
 
         request = mocked_urlopen.call_args.args[0]
-        self.assertEqual("WeChatCliAdmin/0.5.0", request.get_header("User-agent"))
+        self.assertEqual("WeChatCliAdmin/0.6.0", request.get_header("User-agent"))
 
     def test_create_license_uses_admin_header_and_operation_nonce(self):
         transport = FakeJsonTransport(
@@ -146,6 +174,36 @@ class AdminApiClientTests(unittest.TestCase):
             ],
             [(method, path) for method, path, _headers, _payload in transport.calls],
         )
+
+    def test_release_package_upload_uses_binary_transport_and_exact_metadata(self):
+        transport = FakeJsonTransport([])
+        upload = FakeUploadTransport()
+        client = AdminApiClient(
+            transport,
+            admin_token="wcadmin_adm_id.secret",
+            upload_transport=upload,
+        )
+        with TemporaryDirectory() as tmp:
+            package = Path(tmp) / "rel_01.zip"
+            package.write_bytes(b"signed package bytes")
+            digest = hashlib.sha256(package.read_bytes()).hexdigest()
+            result = client.upload_release_package(
+                "rel_01",
+                channel="stable",
+                package_path=package,
+                package_sha256=digest,
+                operation_nonce="nonce_upload_01",
+            )
+
+        path, headers, source, metadata = upload.calls[0]
+        self.assertEqual("/v1/admin/releases/rel_01/package", path)
+        self.assertEqual("Admin wcadmin_adm_id.secret", headers["Authorization"])
+        self.assertEqual(package, source)
+        self.assertEqual("stable", metadata["X-Release-Channel"])
+        self.assertEqual(digest, metadata["X-Package-Sha256"])
+        self.assertEqual("nonce_upload_01", metadata["X-Operation-Nonce"])
+        self.assertEqual(str(len(b"signed package bytes")), metadata["Content-Length"])
+        self.assertTrue(result["ready"])
 
     def test_release_and_diagnostic_operations(self):
         transport = FakeJsonTransport(

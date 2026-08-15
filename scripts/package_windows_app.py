@@ -9,8 +9,14 @@ import runpy
 import shutil
 import subprocess
 import sys
+import tempfile
 import tomllib
 from pathlib import Path
+
+try:
+    from scripts.packaging_paths import assert_outside_repository
+except ModuleNotFoundError:  # Direct execution: python scripts/package_windows_app.py
+    from packaging_paths import assert_outside_repository
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -56,16 +62,33 @@ def build_manifest(version: str | None = None) -> list[str]:
     ]
 
 
-def build_binary() -> None:
-    subprocess.check_call(
-        [sys.executable, str(ROOT / "npm" / "scripts" / "build.py"), PLATFORM],
-        cwd=ROOT,
-    )
+def build_binary(
+    *,
+    targets: list[str] | None = None,
+    trust_profile_path: str | Path | None = None,
+    installer_payload_path: str | Path | None = None,
+) -> None:
+    command = [sys.executable, str(ROOT / "npm" / "scripts" / "build.py"), PLATFORM]
+    for target in targets or []:
+        command.extend(["--target", target])
+    if trust_profile_path is not None:
+        command.extend(["--trust-profile", str(trust_profile_path)])
+    if installer_payload_path is not None:
+        command.extend(["--installer-payload", str(installer_payload_path)])
+    subprocess.check_call(command, cwd=ROOT)
 
 
-def _binary_path(name: str) -> Path:
-    path = ROOT / "npm" / "platforms" / PLATFORM / "bin" / name
-    if not path.is_file():
+def _source_path(source_root: Path, relative: str) -> Path:
+    path = source_root / relative
+    if path.is_symlink() or not path.exists():
+        raise FileNotFoundError(path)
+    return path
+
+
+def _binary_path(name: str, *, binary_root: Path | None = None) -> Path:
+    root = binary_root or (ROOT / "npm" / "platforms" / PLATFORM / "bin")
+    path = root / name
+    if path.is_symlink() or not path.is_file():
         raise FileNotFoundError(f"Missing binary: {path}")
     return path
 
@@ -78,28 +101,39 @@ def _validate_launcher_config(path: str | Path) -> Path:
         value = json.loads(source.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise ValueError("launcher config must be valid UTF-8 JSON") from exc
-    required = {
-        "schema_version",
-        "api_base_url",
-        "port",
-        "channel",
-        "fingerprint_salt",
-        "release_public_keys",
-        "lease_public_keys",
-    }
-    if not isinstance(value, dict) or not required.issubset(value):
-        raise ValueError("launcher config is missing required fields")
+    if not isinstance(value, dict) or value.get("schema_version") != 2:
+        raise ValueError("launcher config must use operational schema version 2")
+    allowed = {"schema_version", "port"}
+    unexpected = set(value).difference(allowed)
+    if unexpected:
+        raise ValueError(
+            "operational launcher config contains forbidden fields: "
+            + ", ".join(sorted(unexpected))
+        )
+    port = value.get("port")
+    if isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65535:
+        raise ValueError("operational launcher config port must be between 1 and 65535")
     return source
 
 
-def _app_manifest(version: str) -> dict[str, object]:
+def _app_manifest(
+    version: str,
+    *,
+    build_id: str | None = None,
+    source_root: Path = ROOT,
+) -> dict[str, object]:
+    resolved_build_id = build_id
+    if resolved_build_id is None:
+        resolved_build_id = runpy.run_path(
+            str(source_root / "wechat_cli" / "version.py")
+        )["BUILD_ID"]
     return {
         "product": "wechat-cli-web",
         "version": version,
         "platform": "windows",
         "architecture": "x86_64",
         "entrypoint": "wechat-cli.exe",
-        "build_id": runpy.run_path(str(ROOT / "wechat_cli" / "version.py"))["BUILD_ID"],
+        "build_id": resolved_build_id,
     }
 
 
@@ -108,6 +142,9 @@ def copy_package_files(
     *,
     launcher_config_path: str | Path,
     version: str,
+    build_id: str | None = None,
+    source_root: Path = ROOT,
+    binary_root: Path | None = None,
 ) -> None:
     launcher_config = _validate_launcher_config(launcher_config_path)
     launcher_dir = package_dir / "launcher"
@@ -116,17 +153,17 @@ def copy_package_files(
     version_dir.mkdir(parents=True, exist_ok=True)
 
     shutil.copy2(
-        _binary_path("wechat-cli-launcher.exe"),
+        _binary_path("wechat-cli-launcher.exe", binary_root=binary_root),
         launcher_dir / "wechat-cli-launcher.exe",
     )
     shutil.copy2(launcher_config, launcher_dir / "launcher-config.json")
     shutil.copy2(
-        _binary_path("wechat-cli.exe"),
+        _binary_path("wechat-cli.exe", binary_root=binary_root),
         version_dir / "wechat-cli.exe",
     )
     (version_dir / "app-manifest.json").write_text(
         json.dumps(
-            _app_manifest(version),
+            _app_manifest(version, build_id=build_id, source_root=source_root),
             ensure_ascii=False,
             sort_keys=True,
             separators=(",", ":"),
@@ -135,11 +172,12 @@ def copy_package_files(
     )
 
     for name in WINDOWS_PACKAGE_FILES:
-        source = (
-            ROOT / name
+        relative = (
+            name
             if name in {"LICENSE", "THIRD_PARTY_NOTICES.md"}
-            else WINDOWS_TEMPLATES / name
+            else f"packaging/windows/{name}"
         )
+        source = _source_path(source_root, relative)
         if not source.is_file():
             raise FileNotFoundError(f"Missing package template: {source}")
         shutil.copy2(source, package_dir / name)
@@ -153,6 +191,8 @@ def copy_package_files(
                 "legacy_version": LEGACY_BOOTSTRAP_VERSION,
                 "platform": "windows",
                 "architecture": "x86_64",
+                "production_capable": False,
+                "distribution_tier": "compatibility",
                 "launcher": "launcher/wechat-cli-launcher.exe",
                 "application": f"versions/{version}/wechat-cli.exe",
             },
@@ -164,8 +204,24 @@ def copy_package_files(
     )
 
 
-def create_update_package(version_dir: Path, version: str) -> Path:
-    archive_base = DIST_DIR / f"{UPDATE_PACKAGE_STEM}-{version}-win-x64"
+def _update_archive_base(version: str) -> Path:
+    return DIST_DIR / f"{UPDATE_PACKAGE_STEM}-{version}-win-x64"
+
+
+def _update_archive_path(version: str) -> Path:
+    return Path(str(_update_archive_base(version)) + ".zip")
+
+
+def create_update_package(
+    version_dir: Path,
+    version: str,
+    *,
+    allow_overwrite: bool = True,
+) -> Path:
+    archive_base = _update_archive_base(version)
+    archive_path = _update_archive_path(version)
+    if archive_path.exists() and not allow_overwrite:
+        raise FileExistsError(f"Update archive already exists: {archive_path}")
     return Path(
         shutil.make_archive(
             str(archive_base),
@@ -175,13 +231,179 @@ def create_update_package(version_dir: Path, version: str) -> Path:
     )
 
 
+def create_update_only_package(*, skip_build: bool = False) -> Path:
+    version = read_version()
+    archive_path = _update_archive_path(version)
+    if archive_path.exists():
+        raise FileExistsError(f"Update archive already exists: {archive_path}")
+
+    if not skip_build:
+        build_binary(targets=["app"])
+
+    app_binary = _binary_path("wechat-cli.exe")
+    DIST_DIR.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix=f"wechat-cli-app-{version}-") as tmp:
+        assembly_dir = Path(tmp)
+        shutil.copy2(app_binary, assembly_dir / "wechat-cli.exe")
+        (assembly_dir / "app-manifest.json").write_text(
+            json.dumps(
+                _app_manifest(version),
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ),
+            encoding="utf-8",
+        )
+        return create_update_package(
+            assembly_dir,
+            version,
+            allow_overwrite=False,
+        )
+
+
+def create_bootstrap_package(
+    *,
+    launcher_config_path: str | Path,
+    source_root: Path,
+    binary_root: Path,
+    output_dir: Path,
+    version: str,
+    build_id: str,
+) -> tuple[Path, Path]:
+    output_dir = assert_outside_repository(output_dir, repository_root=ROOT)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    package_dir = output_dir / f"{PACKAGE_STEM}-{version}"
+    if package_dir.exists():
+        raise FileExistsError(f"Bootstrap directory already exists: {package_dir}")
+    package_dir.mkdir()
+
+    copy_package_files(
+        package_dir,
+        launcher_config_path=launcher_config_path,
+        version=version,
+        build_id=build_id,
+        source_root=source_root,
+        binary_root=binary_root,
+    )
+
+    archive_base = output_dir / f"{PACKAGE_STEM}-{version}"
+    bootstrap_zip = Path(
+        shutil.make_archive(
+            str(archive_base),
+            "zip",
+            root_dir=package_dir.parent,
+            base_dir=package_dir.name,
+        )
+    )
+    return package_dir, bootstrap_zip
+
+
+def create_production_installer(
+    *,
+    launcher_config_path: str | Path,
+    trust_profile_path: str | Path,
+    signing_provider,
+    authenticode_verifier=None,
+) -> tuple[Path, Path, Path]:
+    from scripts.sign_windows_artifacts import sign_and_verify_windows_artifacts
+    from wechat_cli.launcher.trust_profile import DeploymentTrustProfile
+    from wechat_cli.windows.authenticode import AuthenticodePolicy
+
+    package_dir, legacy_zip, update_zip = create_signed_package(
+        launcher_config_path=launcher_config_path,
+        trust_profile_path=trust_profile_path,
+        signing_provider=signing_provider,
+        authenticode_verifier=authenticode_verifier,
+    )
+    trust_profile = DeploymentTrustProfile.load(trust_profile_path)
+    publisher = trust_profile.windows_publisher_policy.strip()
+    if not publisher:
+        raise ValueError("production installer requires a publisher policy")
+    policy = AuthenticodePolicy(required=True, expected_subject=publisher)
+
+    source_metadata = json.loads(
+        (package_dir / "bootstrap-package.json").read_text(encoding="utf-8")
+    )
+    version = str(source_metadata.get("version", "")).strip()
+    if not version:
+        raise ValueError("bootstrap package metadata is missing version")
+
+    with tempfile.TemporaryDirectory(prefix="wechat-cli-installer-payload-") as tmp:
+        payload = Path(tmp) / "bootstrap_payload"
+        shutil.copytree(package_dir, payload)
+        metadata_path = payload / "bootstrap-package.json"
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        metadata["production_capable"] = True
+        metadata["distribution_tier"] = "production-installer"
+        metadata_path.write_text(
+            json.dumps(
+                metadata,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ),
+            encoding="utf-8",
+        )
+        build_binary(targets=["installer"], installer_payload_path=payload)
+
+    installer_source = _binary_path("wechat-cli-installer.exe")
+    sign_and_verify_windows_artifacts(
+        [installer_source],
+        provider=signing_provider,
+        policy=policy,
+        verifier=authenticode_verifier,
+    )
+    DIST_DIR.mkdir(parents=True, exist_ok=True)
+    final_installer = DIST_DIR / f"wechat-cli-installer-{version}-win-x64.exe"
+    if final_installer.exists():
+        raise FileExistsError(f"installer output already exists: {final_installer}")
+    shutil.copy2(installer_source, final_installer)
+    return final_installer, legacy_zip, update_zip
+
+
+def create_signed_package(
+    *,
+    launcher_config_path: str | Path,
+    trust_profile_path: str | Path,
+    signing_provider,
+    authenticode_verifier=None,
+) -> tuple[Path, Path, Path]:
+    from scripts.sign_windows_artifacts import sign_and_verify_windows_artifacts
+    from wechat_cli.launcher.trust_profile import DeploymentTrustProfile
+    from wechat_cli.windows.authenticode import AuthenticodePolicy
+
+    trust_profile = DeploymentTrustProfile.load(trust_profile_path)
+    publisher = trust_profile.windows_publisher_policy.strip()
+    if not publisher:
+        raise ValueError("signed Windows package requires a publisher policy")
+    policy = AuthenticodePolicy(required=True, expected_subject=publisher)
+
+    build_binary(trust_profile_path=trust_profile_path)
+    binaries = (
+        _binary_path("wechat-cli.exe"),
+        _binary_path("wechat-cli-launcher.exe"),
+    )
+    sign_and_verify_windows_artifacts(
+        binaries,
+        provider=signing_provider,
+        policy=policy,
+        verifier=authenticode_verifier,
+    )
+    return create_package(
+        launcher_config_path=launcher_config_path,
+        trust_profile_path=trust_profile_path,
+        skip_build=True,
+    )
+
+
 def create_package(
     *,
     launcher_config_path: str | Path,
+    trust_profile_path: str | Path | None = None,
     skip_build: bool = False,
 ) -> tuple[Path, Path, Path]:
     if not skip_build:
-        build_binary()
+        build_binary(trust_profile_path=trust_profile_path)
 
     version = read_version()
     package_dir = DIST_DIR / f"{PACKAGE_STEM}-{version}"
@@ -219,14 +441,71 @@ def main(argv: list[str] | None = None) -> None:
     )
     parser.add_argument(
         "--launcher-config",
-        required=True,
         type=Path,
-        help="Validated launcher-config.json containing API URL and public keys.",
+        help="Operational launcher-config.json (schema v2; non-trust fields only).",
     )
+    parser.add_argument(
+        "--launcher-trust-profile",
+        type=Path,
+        help="Explicit deployment trust profile embedded into a freshly built Launcher.",
+    )
+    parser.add_argument(
+        "--update-only",
+        action="store_true",
+        help="Build/package only the application update ZIP; do not create bootstrap assets.",
+    )
+    parser.add_argument(
+        "--bootstrap-only",
+        action="store_true",
+        help="Package only a bootstrap from explicit source/binary roots into external output.",
+    )
+    parser.add_argument("--output-dir", type=Path)
+    parser.add_argument("--source-root", type=Path)
+    parser.add_argument("--binary-root", type=Path)
+    parser.add_argument("--version")
+    parser.add_argument("--build-id")
     args = parser.parse_args(argv)
+
+    if args.update_only and args.bootstrap_only:
+        parser.error("--update-only and --bootstrap-only are mutually exclusive")
+
+    if args.update_only:
+        update_zip = create_update_only_package(skip_build=args.skip_build)
+        print(f"[+] Update archive: {update_zip}")
+        return
+
+    if args.bootstrap_only:
+        required = {
+            "--launcher-config": args.launcher_config,
+            "--source-root": args.source_root,
+            "--binary-root": args.binary_root,
+            "--output-dir": args.output_dir,
+            "--version": args.version,
+            "--build-id": args.build_id,
+        }
+        missing = [flag for flag, value in required.items() if value is None]
+        if missing:
+            parser.error(f"--bootstrap-only requires {' '.join(missing)}")
+        package_dir, bootstrap_zip = create_bootstrap_package(
+            launcher_config_path=args.launcher_config,
+            source_root=args.source_root,
+            binary_root=args.binary_root,
+            output_dir=args.output_dir,
+            version=args.version,
+            build_id=args.build_id,
+        )
+        print(f"[+] Bootstrap directory: {package_dir}")
+        print(f"[+] Bootstrap archive: {bootstrap_zip}")
+        return
+
+    if args.launcher_config is None:
+        parser.error("--launcher-config is required unless --update-only is used")
+    if not args.skip_build and args.launcher_trust_profile is None:
+        parser.error("--launcher-trust-profile is required when building the Launcher")
 
     package_dir, bootstrap_zip, update_zip = create_package(
         launcher_config_path=args.launcher_config,
+        trust_profile_path=args.launcher_trust_profile,
         skip_build=args.skip_build,
     )
     print(f"[+] Bootstrap directory: {package_dir}")

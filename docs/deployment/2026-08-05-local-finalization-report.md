@@ -1,5 +1,7 @@
 # WeChat CLI Web 0.5.0 本地最终收尾报告
 
+> **Historical snapshot:** This report records the local-finalization state on 2026-08-05. For the current repository state, read [`docs/PROJECT_STATE.md`](../PROJECT_STATE.md); for the later licensing and update program state, read [`authorized-update-roadmap.md`](authorized-update-roadmap.md).
+
 日期：2026-08-05
 阶段：板块 1——本地最终收尾
 结论：**已完成，可进入板块 2：建立两个私有 GitHub 仓库**
@@ -95,7 +97,8 @@
 
 ### 3.1 Python
 
-- 全量测试：**465 项通过**；
+- 共收集并运行：**465 项**；
+- 通过：**463 项**；
 - 平台条件跳过：**2 项**；
 - Python 源码编译检查通过；
 - Python Wheel 构建通过；
@@ -185,6 +188,8 @@ Launcher 归档确认包含：
 
 根目录仍存在一个 152 字节的未跟踪文件 `NUL`，内容仅为 Git 换行警告。它不影响构建或测试，但会干扰部分 Windows 命令行工具，应在能够可靠执行 Windows 特殊文件名删除的环境中清除，并确认 Git 状态不再显示它。
 
+**后续状态：** 当前工作树已不再显示该 `NUL` 文件；本段保留为报告日期当时的历史记录。
+
 ### 5.2 未签名 EXE
 
 `wechat-cli.exe` 和 `wechat-cli-launcher.exe` 当前均为 `NotSigned`。这是 Demo 阶段的预期状态；正式发布前必须完成 Windows 代码签名。
@@ -192,6 +197,8 @@ Launcher 归档确认包含：
 ### 5.3 云端尚未验收
 
 本阶段只完成本地 Worker 和模拟私有发布验收。真实 Cloudflare staging、私有 GitHub Release、跨网络下载和真实更新回滚将在后续阶段执行。
+
+**后续状态：** 后续路线图记录板块 2 和板块 3 已完成，并记录了 0.5.0 私有 Draft Release 和 staging Worker 发布登记。该结论属于后续人工验收记录，不改变本报告在 2026-08-05 本地收尾时点的范围。
 
 ### 5.4 未提交工作树
 
@@ -201,6 +208,8 @@ Launcher 归档确认包含：
 - `tests/test_invite_stats.py`
 
 后续整理 Git 提交时必须继续将它们与自动更新变更分开处理。
+
+**后续状态：** 自动更新实现和邀请统计修复后来已拆分提交；当前状态以项目状态页和 Git 历史为准。
 
 ## 6. 阶段结论
 

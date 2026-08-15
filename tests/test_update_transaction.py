@@ -136,6 +136,35 @@ class UpdateTransactionTests(unittest.TestCase):
             self.assertEqual(TransactionState.COMMITTED, recovered.state)
             self.assertEqual("0.5.0", layout.load_current().current_version)
 
+    def test_failed_registry_serializes_exact_release_identities(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            layout = self.make_layout(Path(tmp))
+            registry = UpdateTransactionEngine(layout).failed_versions
+            registry.mark_failed(
+                version="0.5.1",
+                manifest_sha256="BB" * 32,
+                failed_at="2026-08-04T14:50:00Z",
+                reason="second_failure",
+            )
+            registry.mark_failed(
+                version="0.5.0",
+                manifest_sha256="AA" * 32,
+                failed_at="2026-08-04T14:40:00Z",
+                reason="first_failure",
+            )
+
+            self.assertTrue(
+                callable(getattr(registry, "failed_releases", None)),
+                "FailedVersionRegistry must expose failed_releases()",
+            )
+            self.assertEqual(
+                [
+                    {"version": "0.5.0", "manifest_sha256": "aa" * 32},
+                    {"version": "0.5.1", "manifest_sha256": "bb" * 32},
+                ],
+                registry.failed_releases(),
+            )
+
     def test_begin_rejects_known_failed_version_with_same_manifest(self):
         with tempfile.TemporaryDirectory() as tmp:
             layout = self.make_layout(Path(tmp))

@@ -1,6 +1,6 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "wechat-cli-license-update",
+  "name": "wechat-cli-license-update-local",
   "main": "src/index.ts",
   "compatibility_date": "2026-08-04",
   "compatibility_flags": ["nodejs_compat"],
@@ -15,7 +15,21 @@
     "ENVIRONMENT": "local",
     "LEASE_SIGNING_KEY_ID": "lease-key-local-01",
     "CONTACT_ENCRYPTION_KEY_VERSION": "1",
-    "MAX_DIAGNOSTIC_BYTES": "20971520"
+    "MAX_DIAGNOSTIC_BYTES": "20971520",
+    "LICENSE_KEY_PEPPER_CURRENT_VERSION": "1",
+    "LICENSE_KEY_PEPPER_READABLE_VERSIONS": "1",
+    "DEVICE_TOKEN_PEPPER_CURRENT_VERSION": "1",
+    "DEVICE_TOKEN_PEPPER_READABLE_VERSIONS": "1",
+    "ADMIN_SESSION_PEPPER_CURRENT_VERSION": "1",
+    "ADMIN_SESSION_PEPPER_READABLE_VERSIONS": "1",
+    "CONTACT_LOOKUP_PEPPER_CURRENT_VERSION": "1",
+    "CONTACT_LOOKUP_PEPPER_READABLE_VERSIONS": "1",
+    "DOWNLOAD_TICKET_SECRET_CURRENT_VERSION": "1",
+    "DOWNLOAD_TICKET_SECRET_READABLE_VERSIONS": "1",
+    "DIAGNOSTIC_UPLOAD_SECRET_CURRENT_VERSION": "1",
+    "DIAGNOSTIC_UPLOAD_SECRET_READABLE_VERSIONS": "1",
+    "RATE_LIMIT_PEPPER_CURRENT_VERSION": "1",
+    "RATE_LIMIT_PEPPER_READABLE_VERSIONS": "1"
   },
   "d1_databases": [
     {
@@ -29,16 +43,46 @@
     {
       "binding": "DIAGNOSTICS",
       "bucket_name": "wechat-cli-diagnostics-local"
+    },
+    {
+      "binding": "RELEASES",
+      "bucket_name": "wechat-cli-releases-local"
     }
   ],
   "env": {
     "staging": {
       "name": "wechat-cli-license-update-staging",
+      "routes": [
+        {
+          "pattern": "wechat-cli-admin-staging.aurevior-devspace.com",
+          "custom_domain": true
+        }
+      ],
       "vars": {
         "ENVIRONMENT": "staging",
+        "ACCESS_JWT_ISSUER": "https://floral-glitter-1ede.cloudflareaccess.com",
+        "ACCESS_JWKS_URL": "https://floral-glitter-1ede.cloudflareaccess.com/cdn-cgi/access/certs",
+        "ACCESS_AUDIENCES": "12ce8ebd33213a9c532ba90144d8bf0dc5df851c289071be5484d9cc751eb6fb",
+        "ACCESS_IDENTITY_CLAIM": "email",
+        "PUBLIC_API_ORIGIN": "https://wechat-cli-license-update-staging.aurevior-ai.workers.dev",
+        "ACCESS_ADMIN_ORIGIN": "https://wechat-cli-admin-staging.aurevior-devspace.com",
         "LEASE_SIGNING_KEY_ID": "lease-key-staging-01",
-        "CONTACT_ENCRYPTION_KEY_VERSION": "1",
-        "MAX_DIAGNOSTIC_BYTES": "20971520"
+        "CONTACT_ENCRYPTION_KEY_VERSION": "2",
+        "MAX_DIAGNOSTIC_BYTES": "20971520",
+        "LICENSE_KEY_PEPPER_CURRENT_VERSION": "1",
+        "LICENSE_KEY_PEPPER_READABLE_VERSIONS": "1",
+        "DEVICE_TOKEN_PEPPER_CURRENT_VERSION": "1",
+        "DEVICE_TOKEN_PEPPER_READABLE_VERSIONS": "1",
+        "ADMIN_SESSION_PEPPER_CURRENT_VERSION": "2",
+        "ADMIN_SESSION_PEPPER_READABLE_VERSIONS": "1,2",
+        "CONTACT_LOOKUP_PEPPER_CURRENT_VERSION": "1",
+        "CONTACT_LOOKUP_PEPPER_READABLE_VERSIONS": "1",
+        "DOWNLOAD_TICKET_SECRET_CURRENT_VERSION": "2",
+        "DOWNLOAD_TICKET_SECRET_READABLE_VERSIONS": "1,2",
+        "DIAGNOSTIC_UPLOAD_SECRET_CURRENT_VERSION": "1",
+        "DIAGNOSTIC_UPLOAD_SECRET_READABLE_VERSIONS": "1",
+        "RATE_LIMIT_PEPPER_CURRENT_VERSION": "1",
+        "RATE_LIMIT_PEPPER_READABLE_VERSIONS": "1"
       },
       "d1_databases": [
         {
@@ -52,16 +96,45 @@
         {
           "binding": "DIAGNOSTICS",
           "bucket_name": "wechat-cli-diagnostics-staging"
+        },
+        {
+          "binding": "RELEASES",
+          "bucket_name": "wechat-cli-releases-staging"
         }
       ]
     },
     "production": {
       "name": "wechat-cli-license-update",
+      "workers_dev": false,
+      "routes": [],
       "vars": {
         "ENVIRONMENT": "production",
+        "PUBLIC_API_ORIGIN": "REPLACE_WITH_PRODUCTION_API_ORIGIN",
+        "ACCESS_ADMIN_ORIGIN": "REPLACE_WITH_PRODUCTION_ADMIN_ORIGIN",
+        "ACCESS_JWT_ISSUER": "REPLACE_WITH_PRODUCTION_ACCESS_ISSUER",
+        "ACCESS_JWKS_URL": "REPLACE_WITH_PRODUCTION_ACCESS_JWKS_URL",
+        "ACCESS_HUMAN_AUDIENCES": "REPLACE_WITH_PRODUCTION_HUMAN_ACCESS_AUDIENCE",
+        "ACCESS_HUMAN_IDENTITY_CLAIM": "email",
+        "ACCESS_AUTOMATION_AUDIENCES": "REPLACE_WITH_PRODUCTION_AUTOMATION_ACCESS_AUDIENCE",
+        "ACCESS_AUTOMATION_IDENTITY_CLAIM": "common_name",
+        "ACCESS_AUTOMATION_IDENTITIES": "REPLACE_WITH_PRODUCTION_AUTOMATION_IDENTITY",
         "LEASE_SIGNING_KEY_ID": "lease-key-production-01",
         "CONTACT_ENCRYPTION_KEY_VERSION": "1",
-        "MAX_DIAGNOSTIC_BYTES": "20971520"
+        "MAX_DIAGNOSTIC_BYTES": "20971520",
+        "LICENSE_KEY_PEPPER_CURRENT_VERSION": "1",
+        "LICENSE_KEY_PEPPER_READABLE_VERSIONS": "1",
+        "DEVICE_TOKEN_PEPPER_CURRENT_VERSION": "1",
+        "DEVICE_TOKEN_PEPPER_READABLE_VERSIONS": "1",
+        "ADMIN_SESSION_PEPPER_CURRENT_VERSION": "1",
+        "ADMIN_SESSION_PEPPER_READABLE_VERSIONS": "1",
+        "CONTACT_LOOKUP_PEPPER_CURRENT_VERSION": "1",
+        "CONTACT_LOOKUP_PEPPER_READABLE_VERSIONS": "1",
+        "DOWNLOAD_TICKET_SECRET_CURRENT_VERSION": "1",
+        "DOWNLOAD_TICKET_SECRET_READABLE_VERSIONS": "1",
+        "DIAGNOSTIC_UPLOAD_SECRET_CURRENT_VERSION": "1",
+        "DIAGNOSTIC_UPLOAD_SECRET_READABLE_VERSIONS": "1",
+        "RATE_LIMIT_PEPPER_CURRENT_VERSION": "1",
+        "RATE_LIMIT_PEPPER_READABLE_VERSIONS": "1"
       },
       "d1_databases": [
         {
@@ -75,6 +148,10 @@
         {
           "binding": "DIAGNOSTICS",
           "bucket_name": "wechat-cli-diagnostics-production"
+        },
+        {
+          "binding": "RELEASES",
+          "bucket_name": "wechat-cli-releases-production"
         }
       ]
     }

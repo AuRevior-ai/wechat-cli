@@ -1,5 +1,14 @@
 # WeChat CLI Auto-Update and Licensing Implementation Plan
 
+> **Historical construction plan:** This file records the intended implementation steps at the time. Its unchecked boxes are not the current project progress. Read [`docs/PROJECT_STATE.md`](../../PROJECT_STATE.md) and the relevant specialist roadmap for current status.
+
+## Final result
+
+- Commits: `036cec5`, `0802e55`, `370a9d9`, `ef9e0e9`, and `e36ab47`.
+- Delivered the 0.5.0 licensing system, Launcher, signed update and rollback flow, Cloudflare Worker, administrator/release CLIs, Windows packaging, and staging configuration.
+- Local acceptance is recorded in [`docs/deployment/2026-08-05-local-finalization-report.md`](../../deployment/2026-08-05-local-finalization-report.md).
+- Later cloud and private-release progress belongs to [`docs/deployment/authorized-update-roadmap.md`](../../deployment/authorized-update-roadmap.md) and the active board-4 plan. The unchecked implementation boxes below are historical construction steps, not a current completion measure.
+
 > **Execution mode:** The user approved the written design and authorized autonomous local implementation. Work task-by-task, preserve unrelated local changes, and do not create external cloud resources until the local implementation and staging prerequisites are ready.
 
 **Goal:** Deliver a Windows x86-64 Demo with permanent licenses, up to three devices, seven-day offline leases, a WebView2 launcher, signed background updates, versioned installs, health checks, automatic rollback, administrator/release CLIs, and a real staging path for Cloudflare plus private GitHub Releases.

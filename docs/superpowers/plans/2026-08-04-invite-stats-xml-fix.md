@@ -1,5 +1,13 @@
 # Invite Stats XML Compatibility Fix Implementation Plan
 
+> **Historical construction plan:** This file records the intended implementation steps at the time. Its unchecked boxes are not the current project progress. Read [`docs/PROJECT_STATE.md`](../../PROJECT_STATE.md) and the relevant specialist roadmap for current status.
+
+## Final result
+
+- Commits: `8431984`, `8d46801`, `2bce874`, and `6b93b9b`.
+- Delivered batch and self-QR invitation parsing, direct-local-account attribution, and release preparation.
+- Verification is covered by `tests/test_invite_stats.py` and the full regression suite.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Correct batch self-invite counts and attribute WeChat 4.1 `你分享的二维码` join notices to the local account in CLI and Web.

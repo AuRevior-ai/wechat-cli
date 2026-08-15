@@ -1,3 +1,4 @@
+import inspect
 import tempfile
 import unittest
 from pathlib import Path
@@ -13,6 +14,41 @@ class AdminConfigTests(unittest.TestCase):
             b"admin-config-tests",
             allow_insecure_test_use=True,
         )
+
+    def test_v2_config_contract_supports_short_lived_session_without_promoting_legacy(self):
+        parameters = inspect.signature(AdminConfig).parameters
+        for name in (
+            "environment",
+            "session_token",
+            "session_expires_at",
+            "legacy_admin_token",
+        ):
+            self.assertIn(name, parameters)
+
+        session = AdminConfig(
+            api_base_url="https://api.example.test",
+            environment="production",
+            session_token="wcas_adms_identifier123456.secret_value_abcdefghijklmnopqrstuvwxyz123456",
+            session_expires_at="2099-01-01T00:30:00Z",
+        )
+        self.assertTrue(session.api_credential().startswith("wcas_"))
+        self.assertNotIn("secret_value", repr(session))
+        mapping = session.to_mapping()
+        self.assertEqual(2, mapping["schema_version"])
+        self.assertNotIn("admin_token", mapping)
+
+        legacy = AdminConfig.from_mapping(
+            {
+                "schema_version": 1,
+                "api_base_url": "https://api.example.test",
+                "admin_token": "wcadmin_adm_identifier123.secret_value_abcdefghijklmnopqrstuvwxyz",
+                "allow_insecure_loopback": False,
+            }
+        )
+        self.assertIsNone(legacy.session_token)
+        self.assertTrue(legacy.legacy_admin_token.startswith("wcadmin_"))
+        with self.assertRaises(ValueError):
+            legacy.api_credential()
 
     def test_validates_https_and_admin_token_format(self):
         config = AdminConfig(

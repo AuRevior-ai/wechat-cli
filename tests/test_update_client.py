@@ -1,4 +1,5 @@
 import base64
+import inspect
 import json
 import unittest
 
@@ -48,6 +49,7 @@ class UpdateApiClientTests(unittest.TestCase):
     def test_check_sends_device_token_and_target_metadata(self):
         transport = FakeTransport((200, signed_response()))
         client = UpdateApiClient(transport, trusted_keys=self.keys)
+        self.assertIn("failed_releases", inspect.signature(client.check).parameters)
 
         result = client.check(
             device_token="wcdt_token.secret",
@@ -58,7 +60,10 @@ class UpdateApiClientTests(unittest.TestCase):
             architecture="x86_64",
             product="wechat-cli-web",
             device_id="dev_01",
-            failed_versions=["0.4.9"],
+            failed_releases=[
+                {"version": "0.4.9", "manifest_sha256": "AB" * 32},
+            ],
+            failed_versions=[],
         )
 
         method, path, headers, payload = transport.calls[0]
@@ -67,11 +72,38 @@ class UpdateApiClientTests(unittest.TestCase):
         self.assertNotIn("wcdt_token.secret", path)
         self.assertEqual("0.4.2", payload["current_version"])
         self.assertEqual("wechat-cli-web", payload["product"])
-        self.assertEqual(["0.4.9"], payload["failed_versions"])
+        self.assertEqual([], payload["failed_versions"])
+        self.assertEqual(
+            [{"version": "0.4.9", "manifest_sha256": "ab" * 32}],
+            payload["failed_releases"],
+        )
         self.assertTrue(result.update_available)
         self.assertEqual("0.5.0", str(result.manifest.version))
         self.assertEqual("dlt_ticket_secret", result.download_ticket)
         self.assertNotIn("dlt_ticket_secret", repr(result))
+
+    def test_check_rejects_invalid_failed_release_identity_before_transport(self):
+        transport = FakeTransport((200, {"update_available": False}))
+        client = UpdateApiClient(transport, trusted_keys=self.keys)
+        self.assertIn("failed_releases", inspect.signature(client.check).parameters)
+
+        with self.assertRaises(ValueError):
+            client.check(
+                device_token="token",
+                current_version="0.4.2",
+                launcher_version="0.1.0",
+                channel="stable",
+                platform="windows",
+                architecture="x86_64",
+                product="wechat-cli-web",
+                device_id="dev_01",
+                failed_releases=[
+                    {"version": "0.4.9", "manifest_sha256": "not-a-sha"},
+                ],
+                failed_versions=[],
+            )
+
+        self.assertEqual([], transport.calls)
 
     def test_no_update_response_has_no_download_secret(self):
         transport = FakeTransport(
@@ -140,6 +172,36 @@ class UpdateApiClientTests(unittest.TestCase):
             )
 
         self.assertEqual(ErrorCode.UPDATE_PLATFORM_MISMATCH, caught.exception.code)
+
+    def test_channel_mismatch_preserves_exact_non_retryable_error_code(self):
+        transport = FakeTransport(
+            (
+                409,
+                {
+                    "error": {
+                        "code": "UPDATE_CHANNEL_MISMATCH",
+                        "message": "许可证发布通道与请求通道不一致",
+                        "retryable": False,
+                    }
+                },
+            )
+        )
+
+        with self.assertRaises(UpdateError) as caught:
+            UpdateApiClient(transport, trusted_keys=self.keys).check(
+                device_token="token",
+                current_version="0.5.1",
+                launcher_version="0.1.0",
+                channel="beta",
+                platform="windows",
+                architecture="x86_64",
+                product="wechat-cli-web",
+                device_id="dev_01",
+                failed_versions=[],
+            )
+
+        self.assertEqual(ErrorCode.UPDATE_CHANNEL_MISMATCH, caught.exception.code)
+        self.assertFalse(caught.exception.retryable)
 
     def test_server_error_is_stable_update_error(self):
         transport = FakeTransport(
