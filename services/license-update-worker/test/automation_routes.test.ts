@@ -147,12 +147,38 @@ describe("release automation routes", () => {
       release_id: "rel_prod_060",
       enabled: false,
       paused: true,
+      rollout_percentage: 0,
     });
     expect(authenticateAutomation).toHaveBeenCalledWith(
       expect.anything(),
       "signed-automation-assertion",
       "releases:register",
     );
+  });
+
+  it("rejects machine-supplied rollout fields during registration", async () => {
+    const { app } = appFor();
+    const payload = await registrationPayload();
+    const response = await app.request(
+      "https://local.example.test/v1/automation/releases",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Cf-Access-Jwt-Assertion": "signed-automation-assertion",
+        },
+        body: JSON.stringify({
+          ...payload,
+          rollout_percentage: 25,
+          rollout_seed: "machine-chosen-seed",
+        }),
+      },
+      env(),
+    );
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: "AUTOMATION_RELEASE_STATE_FORBIDDEN" },
+    });
   });
 
   it("has no machine route for release state mutation", async () => {

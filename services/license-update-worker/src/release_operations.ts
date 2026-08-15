@@ -213,11 +213,26 @@ export async function registerDisabledReleaseOperation(
       retryable: false,
     });
   }
+  if (
+    actor.actorType === "automation" &&
+    (value.rollout_percentage !== undefined || value.rollout_seed !== undefined)
+  ) {
+    throw new ApiError(
+      "AUTOMATION_RELEASE_STATE_FORBIDDEN",
+      "自动化发布注册不能指定 rollout 状态或分桶种子。",
+      { status: 400, retryable: false },
+    );
+  }
   const rolloutPercentage =
-    value.rollout_percentage === undefined
-      ? 100
-      : requiredInteger(value, "rollout_percentage", { minimum: 0, maximum: 100 });
-  const rolloutSeed = optionalString(value, "rollout_seed", 256) ?? randomId("rollout_", 18);
+    actor.actorType === "automation"
+      ? 0
+      : value.rollout_percentage === undefined
+        ? 100
+        : requiredInteger(value, "rollout_percentage", { minimum: 0, maximum: 100 });
+  const rolloutSeed =
+    actor.actorType === "automation"
+      ? randomId("rollout_", 18)
+      : (optionalString(value, "rollout_seed", 256) ?? randomId("rollout_", 18));
   const nonce = requiredString(value, "operation_nonce", { minimum: 8, maximum: 256 });
   const response = await runIdempotent(env, {
     scope: idempotencyScope(actor, "create"),
