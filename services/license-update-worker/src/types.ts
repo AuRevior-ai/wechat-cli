@@ -35,6 +35,11 @@ export interface Env {
   ACCESS_JWKS_URL?: string;
   ACCESS_AUDIENCES?: string;
   ACCESS_IDENTITY_CLAIM?: string;
+  ACCESS_HUMAN_AUDIENCES?: string;
+  ACCESS_HUMAN_IDENTITY_CLAIM?: string;
+  ACCESS_AUTOMATION_AUDIENCES?: string;
+  ACCESS_AUTOMATION_IDENTITY_CLAIM?: string;
+  ACCESS_AUTOMATION_IDENTITIES?: string;
   PUBLIC_API_ORIGIN?: string;
   ACCESS_ADMIN_ORIGIN?: string;
   CONTACT_LOOKUP_PEPPER_CURRENT_VERSION?: string;
@@ -126,6 +131,14 @@ export interface AuthenticatedAdmin {
   id: string;
   scopes: Set<string>;
   authMode: "session" | "legacy_local" | "legacy_staging" | "legacy_break_glass";
+  authenticatedAt: string;
+}
+
+export interface AuthenticatedAutomation {
+  id: string;
+  identity: string;
+  scopes: Set<string>;
+  authMode: "access_service";
   authenticatedAt: string;
 }
 

@@ -38,7 +38,7 @@ export function stableJson(value: unknown): string {
 export async function writeAudit(
   env: Env,
   options: {
-    actorType: "admin" | "license" | "device" | "system";
+    actorType: "admin" | "automation" | "license" | "device" | "system";
     actorId?: string;
     action: string;
     targetType?: string;

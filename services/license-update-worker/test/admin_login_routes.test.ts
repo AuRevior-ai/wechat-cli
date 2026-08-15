@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { createApp } from "../src/index";
+import { adminIdentityVerifierFromEnv } from "../src/admin_login";
 import { sha256Hex } from "../src/crypto";
 import type { Env } from "../src/types";
 
@@ -114,6 +115,19 @@ async function challenge(verifier: string): Promise<string> {
 }
 
 describe("administrator browser login routes", () => {
+  it("requires production-specific human Access audience configuration", () => {
+    const env = {
+      ENVIRONMENT: "production",
+      ACCESS_JWT_ISSUER: "https://team.example.cloudflareaccess.com",
+      ACCESS_JWKS_URL: "https://team.example.cloudflareaccess.com/cdn-cgi/access/certs",
+      ACCESS_AUDIENCES: "legacy-staging-audience",
+      ACCESS_IDENTITY_CLAIM: "email",
+    } as unknown as Env;
+    expect(() => adminIdentityVerifierFromEnv(env)).toThrowError(
+      expect.objectContaining({ code: "ADMIN_LOGIN_CONFIG_INVALID", status: 503 }),
+    );
+  });
+
   it("requires verified Access identity and redirects only to exact loopback callback", async () => {
     const { env, codes } = routeEnv();
     const verify = vi.fn(async (assertion: string) => {
