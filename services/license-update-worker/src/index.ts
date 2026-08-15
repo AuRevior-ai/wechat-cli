@@ -10,6 +10,7 @@ import {
   registerDiagnosticRoutes,
 } from "./diagnostics";
 import { ApiError, apiErrorResponse, requestId } from "./http";
+import { assertWorkerHostPathAllowed } from "./ingress_policy";
 import { registerLicenseRoutes } from "./licenses";
 import { assertWorkerOriginAllowed } from "./security_policy";
 import { isoNow } from "./service";
@@ -37,6 +38,7 @@ export function createApp(options: AdminLoginRouteOptions = {}): Hono<{
   });
 
   app.use("/v1/*", async (c, next) => {
+    assertWorkerHostPathAllowed(c.req.raw, c.env);
     assertWorkerOriginAllowed(c.req.raw, c.env);
     await next();
   });
