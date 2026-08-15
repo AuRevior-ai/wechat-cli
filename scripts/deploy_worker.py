@@ -61,7 +61,7 @@ def _load_policy(path: str | Path) -> Mapping[str, object]:
         policy = _load_config(path)
     except ValueError as exc:
         raise ValueError("deployment policy is unreadable") from exc
-    if policy.get("schema_version") != 1:
+    if policy.get("schema_version") != 2:
         raise ValueError("deployment policy schema is invalid")
     environments = _mapping(policy.get("environments"), "deployment policy environments")
     for environment in _ALLOWED_ENVIRONMENTS:
@@ -92,6 +92,28 @@ def _load_policy(path: str | Path) -> Mapping[str, object]:
             isinstance(item, str) and item.strip() for item in value
         ):
             raise ValueError(f"deployment policy {field} is invalid")
+    production_contract = _mapping(
+        policy.get("production_contract"),
+        "deployment policy production contract",
+    )
+    required_contract_fields = (
+        "public_api_origin_var",
+        "admin_origin_var",
+        "access_issuer_var",
+        "access_jwks_var",
+        "human_audiences_var",
+        "human_identity_claim_var",
+        "human_identity_claim",
+        "automation_audiences_var",
+        "automation_identity_claim_var",
+        "automation_identities_var",
+    )
+    for field in required_contract_fields:
+        value = production_contract.get(field)
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError(f"deployment policy production contract {field} is invalid")
+    if production_contract.get("required_custom_domain_count") != 2:
+        raise ValueError("deployment policy production custom-domain count is invalid")
     return policy
 
 
@@ -218,6 +240,119 @@ def _validate_production_ingress(config: Mapping[str, object]) -> None:
     routes = config.get("routes")
     if not isinstance(routes, list) or not routes:
         raise ValueError("production custom route is required")
+
+
+def _exact_https_origin(value: object, label: str) -> tuple[str, str]:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{label} is missing")
+    raw = value.strip()
+    if _contains_placeholder(raw):
+        raise ValueError(f"{label} contains a placeholder")
+    parsed = urlparse(raw)
+    if (
+        parsed.scheme != "https"
+        or not parsed.hostname
+        or parsed.username
+        or parsed.password
+        or parsed.path not in {"", "/"}
+        or parsed.query
+        or parsed.fragment
+        or parsed.hostname.lower().endswith(".workers.dev")
+    ):
+        raise ValueError(f"{label} is invalid")
+    return raw.rstrip("/"), parsed.hostname.lower()
+
+
+def _csv_values(value: object, label: str, *, maximum: int) -> tuple[str, ...]:
+    if not isinstance(value, str):
+        raise ValueError(f"{label} is missing")
+    values = tuple(item.strip() for item in value.split(",") if item.strip())
+    if (
+        not values
+        or len(values) > maximum
+        or len(set(values)) != len(values)
+        or any(_contains_placeholder(item) for item in values)
+    ):
+        raise ValueError(f"{label} is invalid")
+    return values
+
+
+def _validate_production_access_boundary(
+    config: Mapping[str, object],
+    policy: Mapping[str, object],
+) -> None:
+    vars_value = _mapping(config.get("vars"), "production vars")
+    contract = _mapping(policy.get("production_contract"), "production contract")
+
+    def variable(field: str) -> tuple[str, object]:
+        name = str(contract[field])
+        return name, vars_value.get(name)
+
+    api_name, api_raw = variable("public_api_origin_var")
+    admin_name, admin_raw = variable("admin_origin_var")
+    api_origin, api_host = _exact_https_origin(api_raw, api_name)
+    admin_origin, admin_host = _exact_https_origin(admin_raw, admin_name)
+    if api_origin == admin_origin or api_host == admin_host:
+        raise ValueError("production API and Admin origins must be distinct")
+    if "staging" in api_host or "staging" in admin_host:
+        raise ValueError("production configuration contains a staging hostname")
+
+    issuer_name, issuer_raw = variable("access_issuer_var")
+    jwks_name, jwks_raw = variable("access_jwks_var")
+    issuer_origin, issuer_host = _exact_https_origin(issuer_raw, issuer_name)
+    if not issuer_host.endswith(".cloudflareaccess.com"):
+        raise ValueError("production Access issuer is invalid")
+    if not isinstance(jwks_raw, str) or not jwks_raw.strip():
+        raise ValueError(f"{jwks_name} is missing")
+    jwks = urlparse(jwks_raw.strip())
+    if (
+        jwks.scheme != "https"
+        or jwks.username
+        or jwks.password
+        or jwks.netloc.lower() != urlparse(issuer_origin).netloc.lower()
+        or jwks.path != "/cdn-cgi/access/certs"
+        or jwks.query
+        or jwks.fragment
+    ):
+        raise ValueError("production Access JWKS configuration is invalid")
+
+    human_aud_name, human_aud_raw = variable("human_audiences_var")
+    automation_aud_name, automation_aud_raw = variable("automation_audiences_var")
+    human_audiences = set(_csv_values(human_aud_raw, human_aud_name, maximum=8))
+    automation_audiences = set(
+        _csv_values(automation_aud_raw, automation_aud_name, maximum=8)
+    )
+    if human_audiences & automation_audiences:
+        raise ValueError("production human and automation Access audiences must be distinct")
+
+    human_claim_name, human_claim_raw = variable("human_identity_claim_var")
+    if human_claim_raw != contract.get("human_identity_claim"):
+        raise ValueError(f"production {human_claim_name} is invalid")
+    automation_claim_name, automation_claim_raw = variable("automation_identity_claim_var")
+    if (
+        not isinstance(automation_claim_raw, str)
+        or not automation_claim_raw.strip()
+        or _contains_placeholder(automation_claim_raw)
+        or automation_claim_raw == human_claim_raw
+    ):
+        raise ValueError(f"production {automation_claim_name} is invalid")
+    identities_name, identities_raw = variable("automation_identities_var")
+    _csv_values(identities_raw, identities_name, maximum=32)
+
+    routes = config.get("routes")
+    if not isinstance(routes, list):
+        raise ValueError("production custom-domain routes are missing")
+    exact_hosts: list[str] = []
+    for route in routes:
+        if not isinstance(route, Mapping) or route.get("custom_domain") is not True:
+            raise ValueError("production routes must use exact custom domains")
+        pattern = route.get("pattern")
+        if not isinstance(pattern, str) or not pattern.strip():
+            raise ValueError("production custom-domain route is invalid")
+        exact_hosts.append(pattern.strip().lower())
+    required_count = int(contract["required_custom_domain_count"])
+    if len(exact_hosts) != required_count or set(exact_hosts) != {api_host, admin_host}:
+        raise ValueError("production custom-domain route set must match API and Admin origins")
 
 
 def _validate_staging_access_boundary(config: Mapping[str, object]) -> None:
@@ -414,8 +549,14 @@ def preflight_worker_deployment(
         _validate_staging_access_boundary(config)
     if environment == "production":
         _validate_production_ingress(config)
+        _validate_production_access_boundary(config, policy)
     _validate_trust_profile(environment, trust_profile_path, api_origin)
     if environment == "production":
+        configured_api_origin = str(
+            _mapping(config.get("vars"), "production vars").get("PUBLIC_API_ORIGIN", "")
+        ).rstrip("/")
+        if configured_api_origin != str(api_origin).strip().rstrip("/"):
+            raise ValueError("production API origin does not match PUBLIC_API_ORIGIN")
         _validate_production_route_origin(config, str(api_origin))
     required_secrets = _required_secret_names(environment, config, policy)
     declared = {

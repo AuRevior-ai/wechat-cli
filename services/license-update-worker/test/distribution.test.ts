@@ -306,6 +306,26 @@ describe("release distribution backend", () => {
     );
   });
 
+  it("fails closed if a legacy non-production GitHub row is invoked without its compatibility token", async () => {
+    const module = await loadDistributionModule();
+    expect(module.fetchReleasePackage).toBeTypeOf("function");
+    const outbound = vi.fn();
+    await expect(
+      module.fetchReleasePackage!(
+        { ENVIRONMENT: "staging" } as Env,
+        {
+          backend: "github",
+          githubRepository: "org/repo",
+          githubAssetId: "123",
+          expectedSha256: "a".repeat(64),
+          expectedSize: 3,
+        },
+        outbound as typeof fetch,
+      ),
+    ).rejects.toMatchObject({ code: "SERVICE_CONFIGURATION_INVALID" } satisfies Partial<ApiError>);
+    expect(outbound).not.toHaveBeenCalled();
+  });
+
   it("rejects the legacy GitHub runtime backend in production", async () => {
     const module = await loadDistributionModule();
     expect(module.fetchReleasePackage).toBeTypeOf("function");

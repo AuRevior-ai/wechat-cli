@@ -342,6 +342,16 @@ export async function fetchReleasePackage(
   }
   validSha256(request.expectedSha256);
   validExpectedSize(request.expectedSize);
+  if (
+    typeof env.GITHUB_RELEASE_READ_TOKEN !== "string" ||
+    !env.GITHUB_RELEASE_READ_TOKEN
+  ) {
+    throw new ApiError(
+      "SERVICE_CONFIGURATION_INVALID",
+      "GitHub compatibility release credential is not configured.",
+      { status: 500, retryable: false },
+    );
+  }
   const headers = new Headers({
     Accept: "application/octet-stream",
     Authorization: `Bearer ${env.GITHUB_RELEASE_READ_TOKEN}`,

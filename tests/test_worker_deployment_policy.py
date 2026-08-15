@@ -14,7 +14,7 @@ class WorkerDeploymentPolicyTests(unittest.TestCase):
 
     def test_policy_declares_environment_names_bindings_and_secret_names_only(self):
         policy = json.loads(POLICY.read_text(encoding="utf-8"))
-        self.assertEqual(1, policy.get("schema_version"))
+        self.assertEqual(2, policy.get("schema_version"))
         environments = policy.get("environments")
         self.assertIsInstance(environments, dict)
         self.assertEqual(
@@ -36,6 +36,15 @@ class WorkerDeploymentPolicyTests(unittest.TestCase):
             ["DIAGNOSTICS", "RELEASES"],
             policy["required_bindings"]["r2"],
         )
+        contract = policy["production_contract"]
+        self.assertEqual("PUBLIC_API_ORIGIN", contract["public_api_origin_var"])
+        self.assertEqual("ACCESS_ADMIN_ORIGIN", contract["admin_origin_var"])
+        self.assertEqual("ACCESS_HUMAN_AUDIENCES", contract["human_audiences_var"])
+        self.assertEqual(
+            "ACCESS_AUTOMATION_AUDIENCES",
+            contract["automation_audiences_var"],
+        )
+        self.assertEqual(2, contract["required_custom_domain_count"])
         serialized = json.dumps(policy, sort_keys=True).lower()
         self.assertNotIn("github_pat_", serialized)
         self.assertNotIn("private key-----", serialized)

@@ -353,6 +353,12 @@ async function authenticateLegacyAdmin(
       retryable: false,
     });
   }
+  if (typeof c.env.ADMIN_TOKEN_PEPPER !== "string" || !c.env.ADMIN_TOKEN_PEPPER) {
+    throw new ApiError("ADMIN_LEGACY_AUTH_DISABLED", "长期管理员令牌密钥未配置。", {
+      status: 401,
+      retryable: false,
+    });
+  }
   const digest = await hmacSha256Hex(c.env.ADMIN_TOKEN_PEPPER, token.tokenSecret);
   if (!constantTimeEqual(digest, String(row.token_digest ?? ""))) {
     throw new ApiError("ADMIN_TOKEN_INVALID", "管理员令牌无效。", { status: 401 });

@@ -74,8 +74,23 @@ class WorkerDeploymentPreflightTests(unittest.TestCase):
                 "production": {
                     "name": "wechat-cli-license-update",
                     "workers_dev": False,
-                    "routes": ["api.example.test/*"],
-                    "vars": {"ENVIRONMENT": "production", **selectors},
+                    "routes": [
+                        {"pattern": "api.example.test", "custom_domain": True},
+                        {"pattern": "admin.example.test", "custom_domain": True},
+                    ],
+                    "vars": {
+                        "ENVIRONMENT": "production",
+                        "PUBLIC_API_ORIGIN": "https://api.example.test",
+                        "ACCESS_ADMIN_ORIGIN": "https://admin.example.test",
+                        "ACCESS_JWT_ISSUER": "https://team.cloudflareaccess.com",
+                        "ACCESS_JWKS_URL": "https://team.cloudflareaccess.com/cdn-cgi/access/certs",
+                        "ACCESS_HUMAN_AUDIENCES": "human-production-audience",
+                        "ACCESS_HUMAN_IDENTITY_CLAIM": "email",
+                        "ACCESS_AUTOMATION_AUDIENCES": "automation-production-audience",
+                        "ACCESS_AUTOMATION_IDENTITY_CLAIM": "common_name",
+                        "ACCESS_AUTOMATION_IDENTITIES": "release-automation-client",
+                        **selectors,
+                    },
                     "d1_databases": [
                         {"binding": "DB", "database_name": "db-production", "database_id": "db-production-id"}
                     ],
@@ -432,7 +447,17 @@ class WorkerDeploymentPreflightTests(unittest.TestCase):
     def test_preflight_rejects_production_workers_dev_and_missing_route(self):
         from scripts.deploy_worker import preflight_worker_deployment
 
-        cases = [(True, ["api.example.test/*"], "workers_dev"), (False, [], "route")]
+        cases = [
+            (
+                True,
+                [
+                    {"pattern": "api.example.test", "custom_domain": True},
+                    {"pattern": "admin.example.test", "custom_domain": True},
+                ],
+                "workers_dev",
+            ),
+            (False, [], "route"),
+        ]
         for workers_dev, routes, expected in cases:
             with self.subTest(expected=expected), tempfile.TemporaryDirectory() as tmp:
                 root = Path(tmp)
@@ -448,6 +473,115 @@ class WorkerDeploymentPreflightTests(unittest.TestCase):
                     self.assertIn(expected, str(exc).lower())
                 else:
                     self.fail("unsafe production ingress must fail closed")
+
+    def test_preflight_rejects_incomplete_or_confused_production_access_contract(self):
+        from scripts.deploy_worker import preflight_worker_deployment
+
+        cases = [
+            (
+                "missing public API origin",
+                lambda production: production["vars"].pop("PUBLIC_API_ORIGIN"),
+                "PUBLIC_API_ORIGIN",
+            ),
+            (
+                "admin route missing",
+                lambda production: production.update(
+                    routes=[{"pattern": "api.example.test", "custom_domain": True}]
+                ),
+                "route",
+            ),
+            (
+                "same api and admin origin",
+                lambda production: production["vars"].update(
+                    ACCESS_ADMIN_ORIGIN="https://api.example.test"
+                ),
+                "distinct",
+            ),
+            (
+                "same human and machine audience",
+                lambda production: production["vars"].update(
+                    ACCESS_AUTOMATION_AUDIENCES="human-production-audience"
+                ),
+                "audience",
+            ),
+            (
+                "legacy audience only",
+                lambda production: (
+                    production["vars"].pop("ACCESS_HUMAN_AUDIENCES"),
+                    production["vars"].update(ACCESS_AUDIENCES="human-production-audience"),
+                ),
+                "ACCESS_HUMAN_AUDIENCES",
+            ),
+            (
+                "issuer jwks origin mismatch",
+                lambda production: production["vars"].update(
+                    ACCESS_JWKS_URL="https://other.cloudflareaccess.com/cdn-cgi/access/certs"
+                ),
+                "JWKS",
+            ),
+            (
+                "staging hostname in production",
+                lambda production: production["vars"].update(
+                    ACCESS_ADMIN_ORIGIN="https://wechat-cli-admin-staging.aurevior-devspace.com"
+                ),
+                "staging",
+            ),
+        ]
+        for label, mutate, expected in cases:
+            with self.subTest(label=label), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                config = self._config()
+                mutate(config["env"]["production"])
+                config_path = self._write_config(root, config)
+                profile_path = self._write_profile(root)
+                with self.assertRaises(ValueError) as caught:
+                    preflight_worker_deployment(
+                        config_path,
+                        environment="production",
+                        trust_profile_path=profile_path,
+                        api_origin="https://api.example.test",
+                        declared_secret_names=self._production_secret_names(),
+                    )
+                self.assertIn(expected.lower(), str(caught.exception).lower())
+
+    def test_preflight_rejects_unresolved_production_origin_symbol_before_deploy(self):
+        from scripts.deploy_worker import preflight_worker_deployment
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config = self._config()
+            config["env"]["production"]["vars"]["PUBLIC_API_ORIGIN"] = (
+                "REPLACE_WITH_PRODUCTION_API_ORIGIN"
+            )
+            config_path = self._write_config(root, config)
+            profile_path = self._write_profile(root)
+            with self.assertRaisesRegex(ValueError, "placeholder"):
+                preflight_worker_deployment(
+                    config_path,
+                    environment="production",
+                    trust_profile_path=profile_path,
+                    api_origin="https://api.example.test",
+                    declared_secret_names=self._production_secret_names(),
+                )
+
+    def test_production_secret_inventory_excludes_runtime_github_and_legacy_admin(self):
+        from scripts.deploy_worker import preflight_worker_deployment
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config_path = self._write_config(root, self._config())
+            profile_path = self._write_profile(root)
+            result = preflight_worker_deployment(
+                config_path,
+                environment="production",
+                trust_profile_path=profile_path,
+                api_origin="https://api.example.test",
+                declared_secret_names=self._production_secret_names(),
+            )
+        required = set(result.required_secret_names)
+        self.assertEqual(self._production_secret_names(), required)
+        self.assertNotIn("GITHUB_RELEASE_READ_TOKEN", required)
+        self.assertNotIn("ADMIN_TOKEN_PEPPER", required)
 
     def test_preflight_rejects_staging_production_resource_collisions(self):
         from scripts.deploy_worker import preflight_worker_deployment

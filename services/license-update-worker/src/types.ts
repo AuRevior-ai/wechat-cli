@@ -24,7 +24,7 @@ export interface Env {
   RATE_LIMIT_PEPPER_READABLE_VERSIONS?: string;
   RATE_LIMIT_PEPPER_V1?: string;
   RATE_LIMIT_PEPPER_V2?: string;
-  ADMIN_TOKEN_PEPPER: string;
+  ADMIN_TOKEN_PEPPER?: string;
   ADMIN_SESSION_PEPPER_CURRENT_VERSION?: string;
   ADMIN_SESSION_PEPPER_READABLE_VERSIONS?: string;
   ADMIN_SESSION_PEPPER_V1?: string;
@@ -56,7 +56,7 @@ export interface Env {
   DIAGNOSTIC_UPLOAD_SECRET_READABLE_VERSIONS?: string;
   DIAGNOSTIC_UPLOAD_SECRET_V1?: string;
   DIAGNOSTIC_UPLOAD_SECRET_V2?: string;
-  GITHUB_RELEASE_READ_TOKEN: string;
+  GITHUB_RELEASE_READ_TOKEN?: string;
 }
 
 export type LicenseStatus = "active" | "suspended" | "revoked";
