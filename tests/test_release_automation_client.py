@@ -66,13 +66,22 @@ class ReleaseAutomationClientTests(unittest.TestCase):
                 package_sha256=digest,
                 operation_nonce="nonce_upload_01",
             )
-        client.register_release({"release_id": "rel_060"})
+        client.register_release(
+            {
+                "release_id": "rel_060",
+                "rollout_percentage": 100,
+                "rollout_seed": "caller-controlled-seed",
+            }
+        )
         self.assertEqual([], client.list_releases())
 
         self.assertEqual("/v1/automation/releases/rel_060/package", calls[0][1])
         self.assertEqual("/v1/automation/releases", calls[1][2])
         self.assertEqual("/v1/automation/releases", calls[2][2])
         self.assertEqual("safe-client-id", calls[0][2]["Cf-Access-Client-Id"])
+        registration_payload = calls[1][4]
+        self.assertNotIn("rollout_percentage", registration_payload)
+        self.assertNotIn("rollout_seed", registration_payload)
 
 
 if __name__ == "__main__":

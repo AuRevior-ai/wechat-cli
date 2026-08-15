@@ -43,7 +43,7 @@ def sign_command(args: argparse.Namespace) -> dict[str, object]:
         signing_key_id=args.signing_key_id,
         release_summary=args.summary,
         release_notes_url=args.notes_url,
-        rollout_percentage=args.rollout_percentage,
+        rollout_percentage=0,
     )
     return sign_release_for_workflow(
         package_path=args.package,
@@ -86,7 +86,6 @@ def _build_parser() -> argparse.ArgumentParser:
     sign.add_argument("--signing-key-id", default="release-key-production-01")
     sign.add_argument("--summary", default="")
     sign.add_argument("--notes-url")
-    sign.add_argument("--rollout-percentage", type=int, default=100)
 
     publish = subcommands.add_parser(
         "publish",
@@ -104,7 +103,6 @@ def _build_parser() -> argparse.ArgumentParser:
     publish.add_argument("--provenance-target-sha", required=True)
     publish.add_argument("--release-name", required=True)
     publish.add_argument("--release-body", default="")
-    publish.add_argument("--rollout-percentage", type=int, default=100)
     return parser
 
 

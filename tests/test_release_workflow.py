@@ -31,6 +31,18 @@ class ReleaseWorkflowTests(unittest.TestCase):
                 )
                 self.assertEqual(0, result.returncode, result.stderr)
 
+    def test_production_sign_cli_does_not_expose_rollout_control(self):
+        root = Path(__file__).resolve().parents[1]
+        result = subprocess.run(
+            [sys.executable, str(root / "scripts" / "production_release.py"), "sign", "--help"],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertNotIn("--rollout-percentage", result.stdout)
+
     def make_package(self, root: Path) -> Path:
         package = root / "wechat-cli-app-0.6.0-win-x64.zip"
         with zipfile.ZipFile(package, "w", compression=zipfile.ZIP_DEFLATED) as archive:

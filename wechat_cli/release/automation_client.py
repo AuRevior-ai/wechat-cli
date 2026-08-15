@@ -272,4 +272,7 @@ class ReleaseAutomationClient:
         )
 
     def register_release(self, payload: Mapping[str, Any]) -> Mapping[str, Any]:
-        return self._request("POST", "/v1/automation/releases", payload)
+        safe_payload = dict(payload)
+        safe_payload.pop("rollout_percentage", None)
+        safe_payload.pop("rollout_seed", None)
+        return self._request("POST", "/v1/automation/releases", safe_payload)
