@@ -1,6 +1,6 @@
 # Board 6 B6-G7 Staging Key Rotation Drill Preflight
 
-> **READ-ONLY PREFLIGHT COMPLETE — exact staging mutation matrix pending explicit approval.**
+> **B6-G7 ACCEPTED COMPLETE — G7-M0 through G7-M5 executed, cleanup complete, final staging reconciliation passed; B6-G8 is not entered.**
 >
 > Date: 2026-08-14
 >
@@ -14,7 +14,7 @@
 
 The user approved entry into **B6-G7 Staging Key Rotation Drill Gate** for staging only. The approved Board 6 design adds an additional fail-closed rule: every staging Secret/key add, switch, rollback, re-switch, and retire must be listed by exact key class/version before mutation.
 
-Therefore this checkpoint performs only read-only discovery and local verification. No staging mutation has occurred yet.
+The initial checkpoint performed only read-only discovery and local verification. The user subsequently approved the exact G7-M0 through G7-M5 staging mutation matrix. Execution remains bounded to that matrix: no V1 retirement, no production, no push/merge, and no B6-G8 entry are authorized.
 
 Hard exclusions remain:
 
@@ -165,6 +165,17 @@ Retirement:
 
 - **do not delete `ADMIN_SESSION_PEPPER_V1` in B6-G7**.
 
+Execution evidence (2026-08-15): **PASS**.
+
+- G7-M0 temporarily restored `admin_board6_g5_primary` to `active`, cleared `revoked_at`, and added only `contacts:rotate`; exact pre-G7 restoration remains deferred to G7 cleanup.
+- Disposable stable G7 license `lic_2nMbqQVARoMtRRw2ycszoHBy` (`CZ7T`, maximum devices 1) was created; no JD25, Board 5, or retained G5 license was mutated.
+- `ADMIN_SESSION_PEPPER_V2` was provisioned staging-only without exposing the Secret value.
+- A V1 G7 session remained accepted after the writer switched to `ADMIN_SESSION_PEPPER_CURRENT_VERSION=2` with readable versions `1,2`.
+- A new G7 session was then issued with D1 `token_secret_version=2`; V1 and V2 sessions both successfully executed administrator reads while the writer was on V2.
+- Rollback deployment `8e46b22f-7716-4fad-bd8b-2eb8e27beb8d` set the writer back to current `1` while keeping readable `1,2`; the already-issued V2 session remained accepted.
+- Re-switch deployment `b48b137a-81be-42d7-a39a-e2e827f5393c` restored the final staging state to current `2`, readable `1,2`; both V1 and V2 G7 sessions remained accepted.
+- `ADMIN_SESSION_PEPPER_V1` was not deleted or removed from readable versions. Production was not deployed or mutated.
+
 ### G7-M2 — download-ticket symmetric secret overlap
 
 Secret add:
@@ -190,6 +201,16 @@ Retirement:
 
 - **do not delete `DOWNLOAD_TICKET_SECRET_V1` in B6-G7**; V1 ticket validity is time-bounded and retirement can be considered only after the accepted ticket lifetime has elapsed or all V1 tickets are proven expired.
 
+Execution evidence (2026-08-15): **PASS**.
+
+- `DOWNLOAD_TICKET_SECRET_V2` was provisioned staging-only without exposing its value.
+- Overlap deployment `11f93bca-119e-4018-9eeb-c80199c9447c` established current `1`, readable `1,2`.
+- The disposable G7 device for license `lic_2nMbqQVARoMtRRw2ycszoHBy` received a V1 ticket for `rel_staging_051`; after switch deployment `1f8b37a9-ffd8-470e-9f3e-8f488d30e824` set current `2`, readable `1,2`, that same V1 ticket still authorized a one-byte HTTP 206 range read with `Content-Range: bytes 0-0/14268929`.
+- A new ticket issued on V2 was independently recorded in D1 with `secret_version=2` and also passed the same one-byte bounded read; the preceding ticket row remained `secret_version=1` for the same G7 device and release.
+- Rollback deployment `7410a853-f44f-472b-816d-a2ae7e630f8a` restored current `1`, readable `1,2`; the already-issued V2 ticket still authorized the bounded read.
+- Re-switch deployment `cefce80d-8693-4035-a75e-c76138725c98` restored the final M2 state to current `2`, readable `1,2`.
+- `DOWNLOAD_TICKET_SECRET_V1` was not deleted or removed from readable versions; production was not deployed or mutated.
+
 ### G7-M3 — contact encryption V1/V2 migration and rollback
 
 Secret add:
@@ -214,6 +235,16 @@ Acceptance:
 Retirement:
 
 - **do not delete `CONTACT_ENCRYPTION_KEY_V1` in B6-G7**. The drill proves reversible migration first; physical removal is a distinct destructive credential action.
+
+Execution evidence (2026-08-15): **PASS, including a staging-only compatibility repair discovered by the drill**.
+
+- `CONTACT_ENCRYPTION_KEY_V2` was provisioned staging-only and a dedicated synthetic, non-PII contact license `lic_uOvB_-XclaPAr_exrvt3dW7M` was created under V1 with no device activation.
+- The initial V2 deployment `561ccb5c-d124-4f41-91fc-2c121a78a8ee` exposed a real staging defect: D1 correctly stored `ciphertext` and `iv` as BLOBs, but D1 returned BLOB query values to the Worker as ordinary JavaScript byte arrays while `databaseBytes()` accepted only `ArrayBuffer`/typed-array views. The rotate route failed closed with `CONTACT_ENCRYPTION_STATE_INVALID`; no contact row was partially rewritten.
+- TDD reproduced the exact failure with a D1-style `number[]` BLOB value. The minimal repair accepts only integer arrays whose elements are all in `0..255`, preserving fail-closed behavior for malformed values. Focused Worker tests passed 8/8, TypeScript typecheck passed, and the full Worker suite passed 14 files / 93 tests.
+- Repair deployment `c49a144a-0e15-4b99-b548-b6e451deed4b` then rotated the single synthetic row from encryption V1 to V2 successfully; independent D1 readback showed `encryption_key_version=2`, `lookup_secret_version=1`, and unchanged BLOB lengths 166/12.
+- Rollback deployment `26307a75-36e6-47b2-8130-b92b78a05113` restored `CONTACT_ENCRYPTION_KEY_VERSION=1`; after fresh recent-auth the same row rotated back to `1/1`, independently confirmed in D1 with unchanged BLOB lengths.
+- Final re-switch deployment `f736276a-e560-41ad-956b-c95531700792` restored `CONTACT_ENCRYPTION_KEY_VERSION=2`; the same row rotated again to `2/1`, independently confirmed in D1. Contact lookup pepper stayed V1 for the entire drill.
+- `CONTACT_ENCRYPTION_KEY_V1` was not deleted. Production was not deployed or mutated.
 
 ### G7-M4 — lease signing trust overlap and rollback
 
@@ -248,6 +279,17 @@ Retirement:
 
 - key-01 public trust/private recovery material is **not retired**. Maximum offline lease duration is seven days, and the gate must not fake elapsed time.
 
+Execution evidence (2026-08-15): **PASS**.
+
+- Repo-external `.dev.vars` recovery material for `LEASE_SIGNING_PRIVATE_KEY` was independently parsed in memory and its derived Ed25519 public key matched the accepted `lease-key-staging-01` registry entry exactly before any live switch.
+- Fresh repo-external `lease-key-staging-02` private material and G7-only overlap registry/profile were generated without overwriting accepted key-01 trust files; independent validation showed the private key matched the key-02 public entry while key-01 remained unchanged in overlap trust.
+- A pre-switch disposable-device lease was captured from live key-01 and verified with `key_id=lease-key-staging-01`, status active, and exact duration 604800 seconds.
+- The deployment wrapper was extended by TDD to accept only a repo-external, non-symlink `--secrets-file` path without reading or printing Secret contents; repository-local secrets files fail closed before Wrangler invocation. Deployment-focused verification passed 26/26 tests.
+- Atomic key-02 deployment `cd2cef96-713b-47c5-8763-4e1e427d6cb8` applied `LEASE_SIGNING_PRIVATE_KEY` key-02 material and `LEASE_SIGNING_KEY_ID=lease-key-staging-02` in the same Wrangler deploy. A fresh live lease then verified as key-02, while the exact captured key-01 lease simultaneously remained valid under the overlap registry; both leases were active with 604800-second duration.
+- Atomic rollback deployment `633945cb-0103-4fb0-9ccf-7a9c797e6de5` restored the original key-01 private material and `LEASE_SIGNING_KEY_ID=lease-key-staging-01` in the same deploy. Independent live readback confirmed key-01 active with the final M1/M2/M3 selector states unchanged.
+- A post-rollback fresh live lease verified under the accepted key-01-only registry with `key_id=lease-key-staging-01`, status active, duration 604800 seconds, proving exact rollback success.
+- No lease key retirement, production mutation, release publication, push, or merge occurred. Key-02 remains repo-external staged evidence only.
+
 ### G7-M5 — release signing trust overlap and rollback
 
 New staging-only key identity:
@@ -276,6 +318,15 @@ Retirement:
 
 - `release-key-staging-01` trust is **not retired** because immutable existing staging release manifests use key-01 and accepted clients currently trust only key-01.
 
+Execution evidence (2026-08-15): **PASS**.
+
+- The retained repo-external `release-signing-key.pem` was independently confirmed to be an Ed25519 private key whose derived public key exactly matches accepted `release-key-staging-01` trust.
+- Existing immutable `rel_staging_051` manifest verification under key-01 passed before the probe.
+- A unique frozen B6-G5 package was selected by exact accepted manifest size/hash match: 14268501 bytes and SHA-256 `afffc22fe2f5ba478ae680aa60de20006095c0cb71a26b3b157f48c00ea3f6b9`.
+- Fresh repo-external `release-key-staging-02` and a G7-only overlap registry/profile containing key-01 + key-02 were generated without modifying accepted trust files.
+- Local-only key-02 probe `rel_board6_g7_m5_key02_probe` produced a 64-byte Ed25519 signature and verified under overlap trust; a second local-only key-01 rollback probe also produced a 64-byte signature and verified under the same overlap trust.
+- The retained key-01 publisher file and accepted key-01-only registry were byte/logically unchanged after the probes. No GitHub, R2, Worker release row, enablement, production, push, or merge mutation occurred.
+
 ## 7. Safe deployment discipline
 
 Any selector/key-ID change must use the existing staging-only fail-closed deployment path. Each deployment must be preceded by:
@@ -298,10 +349,27 @@ The drill will document but will **not execute** destructive emergency retiremen
 
 This distinction is important: server-side signing-key compromise response and already-installed client trust revocation are related but not identical operations.
 
-## 9. Preflight conclusion
+## 9. Gate closure
 
-B6-G7 local/read-only preflight is complete and the code paths are ready for a bounded staging drill. No staging mutation occurred during this preflight.
+B6-G7 is **accepted complete**. The exact approved G7-M0 through G7-M5 staging mutation matrix was executed and then reconciled back to the intended terminal state.
 
-The next required authorization is the exact mutation subgate above:
+Final live Worker Version ID is `633945cb-0103-4fb0-9ccf-7a9c797e6de5`. Independent Worker-version readback confirms:
 
-> **Approve B6-G7 exact staging mutation matrix G7-M0 through G7-M5, including only the named V2 additions, selector/key-ID switch/rollback/re-switch actions, temporary `admin_board6_g5_primary` restoration with exact final-state restoration, disposable G7 test data, and lease/release key-02 repo-external generation. No V1 Secret/public-trust retirement, no production, no push/merge, and no G8 are authorized.**
+- `ADMIN_SESSION_PEPPER_CURRENT_VERSION=2`, readable `1,2`;
+- `DOWNLOAD_TICKET_SECRET_CURRENT_VERSION=2`, readable `1,2`;
+- `CONTACT_ENCRYPTION_KEY_VERSION=2`;
+- `CONTACT_LOOKUP_PEPPER_CURRENT_VERSION=1`, readable `1`;
+- `LEASE_SIGNING_KEY_ID=lease-key-staging-01`;
+- V1 and V2 Secret names required by the selected drills remain provisioned; no V1 retirement occurred.
+
+Final D1 cleanup/reconciliation confirms:
+
+- disposable G7 device `dev_b6g7_fb0f0be6e4a23583c0cd062c5cf6010c` is `unbound`;
+- both disposable G7 licenses are `revoked` at revision 2;
+- all nine sessions for `admin_board6_g5_primary` are `revoked` (the two historical G5 sessions plus all seven G7-created sessions); there are zero active sessions for that principal;
+- `admin_board6_g5_primary` is restored exactly to the pre-G7 terminal state: `status=revoked`, original nine scopes without `contacts:rotate`, and `revoked_at=2026-08-14 11:18:29`;
+- the synthetic contact row remains encrypted at version 2 with lookup secret version 1, while its disposable parent license is revoked.
+
+Fresh closure verification passed Python 648 tests with 2 expected skips and zero failures; Worker TypeScript typecheck passed; Worker Vitest passed 14 files / 93 tests; deployment-preflight tests passed 26/26. The drill also produced two narrowly scoped TDD repairs: D1 BLOB `number[]` normalization for contact rotation, and staging-only atomic repo-external `--secrets-file` support in the fail-closed deployment wrapper.
+
+No production mutation, commercial signing action, release publication/registration/enablement, V1 credential/public-trust retirement, push, merge, or B6-G8 action occurred. The next possible Board 6 step is B6-G8 and requires separate authorization.

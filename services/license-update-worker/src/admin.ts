@@ -79,7 +79,7 @@ export async function assertReleaseVersionImmutable(
   }
 }
 
-function databaseBytes(value: unknown, name: string): Uint8Array<ArrayBuffer> {
+export function databaseBytes(value: unknown, name: string): Uint8Array<ArrayBuffer> {
   if (value instanceof ArrayBuffer) {
     return new Uint8Array(value);
   }
@@ -92,6 +92,18 @@ function databaseBytes(value: unknown, name: string): Uint8Array<ArrayBuffer> {
     const copy: Uint8Array<ArrayBuffer> = new Uint8Array(source.byteLength);
     copy.set(source);
     return copy;
+  }
+  if (
+    Array.isArray(value) &&
+    value.every(
+      (item) =>
+        typeof item === "number" &&
+        Number.isInteger(item) &&
+        item >= 0 &&
+        item <= 255,
+    )
+  ) {
+    return Uint8Array.from(value);
   }
   throw new ApiError(
     "CONTACT_ENCRYPTION_STATE_INVALID",

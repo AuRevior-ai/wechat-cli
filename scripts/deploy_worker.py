@@ -436,6 +436,18 @@ def preflight_worker_deployment(
     )
 
 
+def _validated_external_secrets_file(path: str | Path) -> Path:
+    source = Path(path)
+    if source.is_symlink() or not source.is_file():
+        raise ValueError("deployment secrets file must be an existing non-symlink regular file")
+    resolved = source.resolve()
+    try:
+        resolved.relative_to(_ROOT.resolve())
+    except ValueError:
+        return resolved
+    raise ValueError("deployment secrets file must remain outside the repository")
+
+
 def deploy_staging_worker(
     config_path: str | Path,
     *,
@@ -444,6 +456,7 @@ def deploy_staging_worker(
     trust_profile_path: str | Path | None = None,
     api_origin: str | None = None,
     declared_secret_names: Collection[str] = (),
+    secrets_file: str | Path | None = None,
     runner: Callable[..., object] = subprocess.run,
     emit: Callable[[str], object] = print,
 ) -> DeploymentPreflightResult:
@@ -462,16 +475,21 @@ def deploy_staging_worker(
     npx = shutil.which("npx")
     if npx is None:
         raise RuntimeError("npx executable is unavailable")
+    command = [
+        npx,
+        "wrangler",
+        "deploy",
+        "--env",
+        "staging",
+        "--config",
+        str(source),
+    ]
+    if secrets_file is not None:
+        command.extend(
+            ["--secrets-file", str(_validated_external_secrets_file(secrets_file))]
+        )
     runner(
-        [
-            npx,
-            "wrangler",
-            "deploy",
-            "--env",
-            "staging",
-            "--config",
-            str(source),
-        ],
+        command,
         cwd=source.parent,
         check=True,
     )
@@ -535,6 +553,14 @@ def main(argv: list[str] | None = None) -> int:
         help="Deploy only the staging Worker after a successful preflight.",
     )
     _add_target_arguments(deploy, environment_choices=("staging",))
+    deploy.add_argument(
+        "--secrets-file",
+        type=Path,
+        help=(
+            "Optional repo-external Wrangler secrets file for an atomic staging deploy. "
+            "The wrapper validates only the path and never reads or prints Secret values."
+        ),
+    )
     args = parser.parse_args(argv)
     try:
         if args.action == "deploy":
@@ -544,6 +570,7 @@ def main(argv: list[str] | None = None) -> int:
                 trust_profile_path=args.trust_profile,
                 api_origin=args.api_origin,
                 declared_secret_names=args.secret_name,
+                secrets_file=args.secrets_file,
             )
             return 0
         result = preflight_worker_deployment(

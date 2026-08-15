@@ -198,6 +198,70 @@ class WorkerDeploymentPreflightTests(unittest.TestCase):
         self.assertEqual(root, kwargs["cwd"])
         self.assertIs(kwargs["check"], True)
 
+    def test_staging_deploy_accepts_external_secrets_file_without_reading_it(self):
+        from scripts import deploy_worker
+
+        deploy_staging_worker = getattr(deploy_worker, "deploy_staging_worker", None)
+        self.assertTrue(callable(deploy_staging_worker), "deploy_staging_worker contract missing")
+        with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as secrets_tmp:
+            root = Path(tmp)
+            config_path = self._write_config(root, self._config())
+            profile_path = self._write_profile(root, environment="staging")
+            secrets_file = Path(secrets_tmp) / "lease.env"
+            secrets_file.write_text("LEASE_SIGNING_PRIVATE_KEY=not-read-by-wrapper", encoding="utf-8")
+            secret_names = self._production_secret_names() | {
+                "ADMIN_TOKEN_PEPPER",
+                "GITHUB_RELEASE_READ_TOKEN",
+            }
+            calls = []
+
+            def runner(command, **kwargs):
+                calls.append((command, kwargs))
+                return subprocess.CompletedProcess(command, 0)
+
+            deploy_staging_worker(
+                config_path,
+                environment="staging",
+                policy_path=POLICY,
+                trust_profile_path=profile_path,
+                api_origin="https://staging-api.example.test",
+                declared_secret_names=secret_names,
+                secrets_file=secrets_file,
+                runner=runner,
+            )
+
+        command, _kwargs = calls[0]
+        self.assertEqual("--secrets-file", command[-2])
+        self.assertEqual(str(secrets_file.resolve()), command[-1])
+        self.assertNotIn("not-read-by-wrapper", repr(calls))
+
+    def test_staging_deploy_rejects_repository_secrets_file_before_runner(self):
+        from scripts import deploy_worker
+
+        deploy_staging_worker = getattr(deploy_worker, "deploy_staging_worker", None)
+        self.assertTrue(callable(deploy_staging_worker), "deploy_staging_worker contract missing")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config_path = self._write_config(root, self._config())
+            profile_path = self._write_profile(root, environment="staging")
+            secret_names = self._production_secret_names() | {
+                "ADMIN_TOKEN_PEPPER",
+                "GITHUB_RELEASE_READ_TOKEN",
+            }
+            calls = []
+            with self.assertRaisesRegex(ValueError, "outside the repository"):
+                deploy_staging_worker(
+                    config_path,
+                    environment="staging",
+                    policy_path=POLICY,
+                    trust_profile_path=profile_path,
+                    api_origin="https://staging-api.example.test",
+                    declared_secret_names=secret_names,
+                    secrets_file=WRANGLER,
+                    runner=lambda *args, **kwargs: calls.append((args, kwargs)),
+                )
+        self.assertEqual([], calls)
+
     def test_preflight_accepts_explicit_deployment_policy_source(self):
         from scripts.deploy_worker import preflight_worker_deployment
 

@@ -261,6 +261,20 @@ describe("license key secret versions", () => {
 });
 
 describe("contact lookup secret rotation", () => {
+  it("accepts the number-array representation D1 returns for BLOB columns", () => {
+    const normalize = (
+      adminModule as unknown as {
+        databaseBytes?: (value: unknown, name: string) => Uint8Array;
+      }
+    ).databaseBytes;
+    expect(normalize).toBeTypeOf("function");
+    expect(Array.from(normalize!([0, 127, 255], "ciphertext"))).toEqual([
+      0,
+      127,
+      255,
+    ]);
+  });
+
   it("selects records when either encryption or lookup secret version is stale", () => {
     const query = (
       adminModule as unknown as {
