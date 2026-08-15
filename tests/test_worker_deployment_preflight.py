@@ -795,16 +795,19 @@ class WorkerDeploymentPreflightTests(unittest.TestCase):
 
         self.assertEqual("staging", result.environment)
 
-    def test_current_production_source_is_intentionally_not_ready(self):
+    def test_current_production_source_remains_fail_closed_while_identity_placeholders_exist(self):
         from scripts.deploy_worker import preflight_worker_deployment
 
-        try:
+        config = json.loads(WRANGLER.read_text(encoding="utf-8"))
+        production_vars = config["env"]["production"]["vars"]
+        unresolved = {
+            name: value
+            for name, value in production_vars.items()
+            if isinstance(value, str) and "REPLACE_WITH_PRODUCTION" in value
+        }
+        self.assertTrue(unresolved, "G3/G4 source must name unresolved identity placeholders explicitly")
+        with self.assertRaises(ValueError):
             preflight_worker_deployment(WRANGLER, environment="production")
-        except Exception as exc:
-            self.assertIsInstance(exc, ValueError)
-            self.assertIn("placeholder", str(exc).lower())
-        else:
-            self.fail("current production source must remain fail-closed")
 
     def test_cli_help_exposes_explicit_staging_and_guarded_production_deploy_action(self):
         root_help = subprocess.run(
@@ -890,12 +893,23 @@ class WorkerDeploymentPreflightTests(unittest.TestCase):
             config["env"]["production"]["name"],
         }))
 
-    def test_production_source_disables_workers_dev_and_leaves_route_unconfigured(self):
+    def test_production_source_disables_workers_dev_and_freezes_exact_custom_domains(self):
         config = json.loads(WRANGLER.read_text(encoding="utf-8"))
         production = config["env"]["production"]
         self.assertIs(production.get("workers_dev"), False)
-        self.assertIn("routes", production)
-        self.assertEqual([], production.get("routes"))
+        self.assertEqual(
+            [
+                {
+                    "pattern": "wechat-cli-api.aurevior-devspace.com",
+                    "custom_domain": True,
+                },
+                {
+                    "pattern": "wechat-cli-admin.aurevior-devspace.com",
+                    "custom_domain": True,
+                },
+            ],
+            production.get("routes"),
+        )
 
 
 if __name__ == "__main__":
