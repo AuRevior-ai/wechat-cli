@@ -104,6 +104,23 @@ This interpretation preserves the higher-priority design invariant that machine 
 
 A bounded helper `scripts/board7_access_bootstrap.py` is prepared under TDD for the G3 control-plane write. Its G3 mode can create only the two exact applications and the one human policy; it has no G3 service-token or automation-policy write path and never prints the API token or human email.
 
+## Access application creation readback
+
+The human operator completed the two exact Cloudflare Access application creations through the Zero Trust dashboard after the existing Wrangler OAuth proved read-only for Access writes.
+
+Observed safe state:
+
+- human application `wechat-cli-production-human-admin` exists on `wechat-cli-admin.aurevior-devspace.com/v1/admin/*`;
+- human policy `wechat-cli-production-human-admin-allow` is attached;
+- human Access audience is `1d08e2b8812cea900d34b49b2468aecd7b7f7b3d5bfb181bd83ea51b5b8f230c`;
+- automation application `wechat-cli-production-release-automation` exists on `wechat-cli-admin.aurevior-devspace.com/v1/automation/*`;
+- the automation application has no policy in G3 and is therefore intentionally deny-by-default;
+- automation Access audience is `d7289641a209be81948f80e4b8a255bc5948b3e90c7318a1e7cd12c279c4e47b`;
+- the two audiences are distinct;
+- no Service Token exists yet; `ACCESS_AUTOMATION_IDENTITIES` therefore remains an explicit G4 placeholder.
+
+Both safe audience values are now bound into production source configuration. Full production deployment preflight must continue to fail closed until B7-G4 creates the exact automation Service Token identity.
+
 ## Isolation requirements for the next mutations
 
 B7-G3 may now create only the approved D1/R2 resources and the exact Access application/policy identities. It must not:
