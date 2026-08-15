@@ -75,7 +75,11 @@ def publish_prepared_release(
             "CF-Access-Client-Secret": access_client_secret,
         },
     )
-    provenance_body = f"Source commit: {source}\n\n{release_body}"
+    provenance_body = (
+        f"Source commit: {source}\n"
+        f"Release provenance commit: {provenance_target}\n\n"
+        f"{release_body}"
+    )
     published = publish_signed_release(
         signed,
         github_client=github,
@@ -87,7 +91,7 @@ def publish_prepared_release(
         operation_nonce="op_register_" + uuid.uuid4().hex,
         upload_operation_nonce="op_upload_" + uuid.uuid4().hex,
         enable=False,
-        rollout_percentage=100,
+        rollout_percentage=0,
     )
     if published.enabled or not published.paused:
         raise RuntimeError("production automation registration did not remain disabled and paused")

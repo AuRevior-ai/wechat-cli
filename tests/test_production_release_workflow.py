@@ -113,6 +113,11 @@ class ProductionReleaseWorkflowScriptTests(unittest.TestCase):
         publish.assert_called_once()
         self.assertEqual("b" * 40, publish.call_args.kwargs["target_commitish"])
         self.assertIn("Source commit: " + "a" * 40, publish.call_args.kwargs["release_body"])
+        self.assertIn(
+            "Release provenance commit: " + "b" * 40,
+            publish.call_args.kwargs["release_body"],
+        )
+        self.assertEqual(0, publish.call_args.kwargs["rollout_percentage"])
         self.assertIn("Private production baseline", publish.call_args.kwargs["release_body"])
         self.assertEqual("a" * 40, result["source_sha"])
         self.assertEqual("b" * 40, result["provenance_target_sha"])
