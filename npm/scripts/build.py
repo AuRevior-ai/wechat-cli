@@ -54,7 +54,12 @@ def _validate_launcher_trust_profile(path: str | Path) -> Path:
     try:
         namespace = runpy.run_path(str(ROOT / "wechat_cli" / "launcher" / "trust_profile.py"))
         profile_type = namespace["DeploymentTrustProfile"]
-        profile_type.load(source)
+        profile = profile_type.load(source)
+        if (
+            profile.environment == "production"
+            and profile.distribution_profile == "private_controlled"
+        ):
+            profile.assert_private_production_contract()
     except Exception as exc:
         raise ValueError("launcher deployment trust profile is invalid") from exc
     return source

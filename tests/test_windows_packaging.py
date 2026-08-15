@@ -113,6 +113,36 @@ class WindowsPackagingTests(unittest.TestCase):
                     trust_profile_path=profile,
                 )
 
+    def test_launcher_pyinstaller_command_rejects_invalid_private_production_trust_identity(self):
+        build = load_module(
+            "npm_build_launcher_private_prod_profile",
+            ROOT / "npm" / "scripts" / "build.py",
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = Path(tmp) / "deployment-trust-profile.json"
+            profile.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 2,
+                        "distribution_profile": "private_controlled",
+                        "environment": "production",
+                        "api_base_url": "https://api.example.test",
+                        "expected_channel": "stable",
+                        "fingerprint_salt": "fresh-production-fingerprint-salt",
+                        "release_public_keys": {"release-key-staging-01": "release-key"},
+                        "lease_public_keys": {"lease-key-production-01": "lease-key"},
+                        "windows_publisher_policy": "",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ValueError, "trust profile"):
+                build.make_pyinstaller_command(
+                    "win32-x64",
+                    "launcher",
+                    trust_profile_path=profile,
+                )
+
     def test_launcher_pyinstaller_command_bundles_local_ui_and_webview(self):
         build = load_module("npm_build_launcher", ROOT / "npm" / "scripts" / "build.py")
 
