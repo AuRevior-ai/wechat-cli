@@ -217,11 +217,11 @@ class WorkerDeploymentPreflightTests(unittest.TestCase):
                 "--env",
                 "staging",
                 "--config",
-                str(config_path),
+                str(config_path.resolve()),
             ],
             command,
         )
-        self.assertEqual(root, kwargs["cwd"])
+        self.assertEqual(config_path.resolve().parent, kwargs["cwd"])
         self.assertIs(kwargs["check"], True)
 
     def test_staging_deploy_accepts_external_secrets_file_without_reading_it(self):
