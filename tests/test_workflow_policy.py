@@ -70,6 +70,14 @@ class WorkflowPolicyTests(unittest.TestCase):
         ):
             self.assertNotIn(forbidden, text)
 
+    def test_ci_checks_out_exact_source_head_for_push_and_pull_request(self):
+        text = (WORKFLOWS / "ci.yml").read_text(encoding="utf-8")
+        self.assertIn(
+            "ref: ${{ github.event.pull_request.head.sha || github.sha }}",
+            text,
+        )
+        self.assertIn("run: git diff --check HEAD^", text)
+
     def test_privileged_workflows_are_manual_concurrent_and_canonical_main_only(self):
         for filename, group in (
             ("deploy-production-worker.yml", "production-worker"),
