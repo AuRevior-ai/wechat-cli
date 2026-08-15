@@ -6,6 +6,10 @@ import {
   type AdminLoginRouteOptions,
 } from "./admin_login";
 import {
+  registerAutomationRoutes,
+  type AutomationRouteOptions,
+} from "./automation";
+import {
   cleanupExpiredDiagnostics,
   registerDiagnosticRoutes,
 } from "./diagnostics";
@@ -21,7 +25,9 @@ interface WorkerVariables {
   requestId: string;
 }
 
-export function createApp(options: AdminLoginRouteOptions = {}): Hono<{
+export function createApp(
+  options: AdminLoginRouteOptions & AutomationRouteOptions = {},
+): Hono<{
   Bindings: Env;
   Variables: WorkerVariables;
 }> {
@@ -56,6 +62,7 @@ export function createApp(options: AdminLoginRouteOptions = {}): Hono<{
   registerUpdateRoutes(app);
   registerDiagnosticRoutes(app);
   registerAdminLoginRoutes(app, options);
+  registerAutomationRoutes(app, options);
   registerAdminRoutes(app);
 
   app.notFound((c) => {

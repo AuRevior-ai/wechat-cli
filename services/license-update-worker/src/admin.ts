@@ -1,7 +1,6 @@
 import type { Hono } from "hono";
 
 import {
-  base64ToBytes,
   decryptContacts,
   deriveLicenseKey,
   deriveOpaqueId,
@@ -10,12 +9,7 @@ import {
   licenseKeyHint,
   normalizeLicenseKey,
   randomId,
-  sha256Hex,
 } from "./crypto";
-import {
-  assertR2ReleaseReady,
-  prepareR2ReleasePackage,
-} from "./distribution";
 import {
   ApiError,
   optionalString,
@@ -23,7 +17,14 @@ import {
   requiredInteger,
   requiredString,
 } from "./http";
-import { parseSemanticVersion } from "./semver";
+import {
+  assertHumanReleaseStateAuthority,
+  listReleaseMetadataOperation,
+  prepareReleasePackageOperation,
+  registerDisabledReleaseOperation,
+  updateReleaseStateOperation,
+} from "./release_operations";
+export { assertReleaseVersionImmutable } from "./release_operations";
 import { authenticateAdminForRoute } from "./security_policy";
 import {
   readableHmacDigests,
@@ -43,41 +44,6 @@ interface WorkerVariables {
 }
 
 type WorkerApp = Hono<{ Bindings: Env; Variables: WorkerVariables }>;
-
-function parseBoolean(value: unknown, name: string): boolean | undefined {
-  if (value === undefined) return undefined;
-  if (typeof value !== "boolean") {
-    throw new ApiError("INVALID_REQUEST", `${name} 必须是布尔值。`, { status: 400 });
-  }
-  return value;
-}
-
-export async function assertReleaseVersionImmutable(
-  env: Env,
-  channel: "stable" | "beta",
-  version: string,
-  manifestSha256: string,
-): Promise<void> {
-  const existing = await env.DB.prepare(
-    `SELECT id, manifest_sha256
-       FROM releases
-      WHERE channel = ? AND version = ?
-      ORDER BY created_at ASC
-      LIMIT 1`,
-  )
-    .bind(channel, version)
-    .first<Record<string, unknown>>();
-  if (
-    existing !== null &&
-    String(existing.manifest_sha256).toLowerCase() !== manifestSha256.toLowerCase()
-  ) {
-    throw new ApiError(
-      "RELEASE_VERSION_IMMUTABLE",
-      "同一发布通道与版本不能替换为不同清单。",
-      { status: 409, retryable: false },
-    );
-  }
-}
 
 export function databaseBytes(value: unknown, name: string): Uint8Array<ArrayBuffer> {
   if (value instanceof ArrayBuffer) {
@@ -826,388 +792,48 @@ export function registerAdminRoutes(app: WorkerApp): void {
 
   app.put("/v1/admin/releases/:releaseId/package", async (c) => {
     const admin = await authenticateAdminForRoute(c, "releases:upload", "write");
-    const releaseId = c.req.param("releaseId");
-    if (!/^[A-Za-z0-9._-]{1,128}$/u.test(releaseId)) {
-      throw new ApiError("INVALID_REQUEST", "发布标识无效。", { status: 400 });
-    }
-    const channel = c.req.header("X-Release-Channel");
-    if (channel !== "stable" && channel !== "beta") {
-      throw new ApiError("INVALID_REQUEST", "发布通道无效。", { status: 400 });
-    }
-    const packageSha256 = c.req.header("X-Package-Sha256")?.toLowerCase();
-    if (packageSha256 === undefined || !/^[0-9a-f]{64}$/u.test(packageSha256)) {
-      throw new ApiError("INVALID_REQUEST", "发布包摘要无效。", { status: 400 });
-    }
-    const nonce = c.req.header("X-Operation-Nonce");
-    if (nonce === undefined || nonce.length < 8 || nonce.length > 256) {
-      throw new ApiError("INVALID_IDEMPOTENCY_KEY", "幂等操作编号格式无效。", {
-        status: 400,
-      });
-    }
-    const contentLength = Number(c.req.header("Content-Length") ?? "");
-    const maximumBytes = 64 * 1024 * 1024;
-    if (
-      !Number.isSafeInteger(contentLength) ||
-      contentLength <= 0 ||
-      contentLength > maximumBytes
-    ) {
-      throw new ApiError("INVALID_REQUEST", "发布包大小无效或超过当前上传上限。", {
-        status: 400,
-      });
-    }
-    const response = await runIdempotent(c.env, {
-      scope: `admin-release-upload:${admin.id}`,
-      key: nonce,
-      request: { releaseId, channel, packageSha256, contentLength },
-      operation: async () => {
-        const body = await c.req.raw.arrayBuffer();
-        if (body.byteLength !== contentLength) {
-          throw new ApiError("INVALID_REQUEST", "发布包实际大小与 Content-Length 不一致。", {
-            status: 400,
-          });
-        }
-        const prepared = await prepareR2ReleasePackage(c.env, {
-          channel,
-          releaseId,
-          packageSha256,
-          bytes: body,
-        });
-        await writeAudit(c.env, {
-          actorType: "admin",
-          actorId: admin.id,
-          action: "release.package_ready",
-          targetType: "release",
-          targetId: releaseId,
-          result: "success",
-          requestId: c.get("requestId"),
-          metadata: {
-            channel,
-            distribution_backend: "r2",
-            package_sha256: packageSha256,
-            package_size: contentLength,
-          },
-        });
-        return {
-          body: {
-            release_id: releaseId,
-            distribution_backend: "r2",
-            distribution_object_key: prepared.distribution_object_key,
-            package_sha256: prepared.package_sha256,
-            package_size: prepared.package_size,
-            ready: prepared.ready,
-          },
-        };
+    const result = await prepareReleasePackageOperation(
+      c.env,
+      c.req.raw,
+      c.req.param("releaseId"),
+      {
+        actorType: "admin",
+        actorId: admin.id,
+        requestId: c.get("requestId"),
       },
-    });
-    return c.json(response.body, response.status as 200);
+    );
+    return c.json(result.body, result.status as 200);
   });
 
   app.post("/v1/admin/releases", async (c) => {
-    const admin = await authenticateAdminForRoute(c, "releases:write", "high-risk");
-    const request = await readJsonObject(c.req.raw, { maximumBytes: 2 * 1024 * 1024 });
-    const releaseId = requiredString(request, "release_id", { maximum: 128 });
-    const version = requiredString(request, "version", { maximum: 64 });
-    try {
-      parseSemanticVersion(version);
-    } catch (error) {
-      throw new ApiError("INVALID_REQUEST", "发布版本无效。", { status: 400, cause: error });
-    }
-    const channel = requiredString(request, "channel", { maximum: 16 });
-    if (channel !== "stable" && channel !== "beta") {
-      throw new ApiError("INVALID_REQUEST", "发布通道无效。", { status: 400 });
-    }
-    const manifestContent = base64ToBytes(
-      requiredString(request, "manifest_content_base64", { maximum: 1_500_000 }),
-    );
-    const manifestSignature = base64ToBytes(
-      requiredString(request, "manifest_signature_base64", { maximum: 4096 }),
-      64,
-    );
-    const manifestSha256 = requiredString(request, "manifest_sha256", {
-      minimum: 64,
-      maximum: 64,
-      pattern: /^[0-9a-f]{64}$/iu,
-    }).toLowerCase();
-    if ((await sha256Hex(manifestContent)) !== manifestSha256) {
-      throw new ApiError("UPDATE_HASH_MISMATCH", "清单摘要与原始字节不一致。", {
-        status: 409,
-      });
-    }
-    const packageSha256 = requiredString(request, "package_sha256", {
-      minimum: 64,
-      maximum: 64,
-      pattern: /^[0-9a-f]{64}$/iu,
-    }).toLowerCase();
-    const packageSize = requiredInteger(request, "package_size", {
-      minimum: 1,
-      maximum: 8 * 1024 * 1024 * 1024,
+    const admin = await authenticateAdminForRoute(c, "releases:register", "high-risk");
+    const result = await registerDisabledReleaseOperation(c.env, c.req.raw, {
+      actorType: "admin",
+      actorId: admin.id,
+      requestId: c.get("requestId"),
     });
-    const repository = requiredString(request, "github_repository", {
-      maximum: 256,
-      pattern: /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/u,
-    });
-    const githubReleaseId = requiredString(request, "github_release_id", {
-      maximum: 64,
-      pattern: /^\d+$/u,
-    });
-    const githubAssetId = requiredString(request, "github_asset_id", {
-      maximum: 64,
-      pattern: /^\d+$/u,
-    });
-    const assetName = requiredString(request, "github_asset_name", { maximum: 256 });
-    const distributionBackend =
-      request.distribution_backend === undefined
-        ? "github"
-        : requiredString(request, "distribution_backend", { maximum: 16 });
-    if (distributionBackend !== "github" && distributionBackend !== "r2") {
-      throw new ApiError("INVALID_REQUEST", "发布分发后端无效。", { status: 400 });
-    }
-    const distributionObjectKey =
-      distributionBackend === "r2"
-        ? requiredString(request, "distribution_object_key", { maximum: 512 })
-        : null;
-    if (distributionBackend === "r2") {
-      await assertR2ReleaseReady(
-        c.env,
-        distributionObjectKey as string,
-        packageSha256,
-        packageSize,
-      );
-    }
-    if (distributionBackend === "github" && c.env.ENVIRONMENT === "production") {
-      throw new ApiError("RELEASE_STATE_INVALID", "生产环境禁止 GitHub runtime 分发后端。", {
-        status: 409,
-        retryable: false,
-      });
-    }
-    const rolloutPercentage =
-      request.rollout_percentage === undefined
-        ? 100
-        : requiredInteger(request, "rollout_percentage", { minimum: 0, maximum: 100 });
-    const rolloutSeed = optionalString(request, "rollout_seed", 256) ?? randomId("rollout_", 18);
-    const nonce = requiredString(request, "operation_nonce", { minimum: 8, maximum: 256 });
-    const response = await runIdempotent(c.env, {
-      scope: `admin-release-create:${admin.id}`,
-      key: nonce,
-      request: {
-        releaseId,
-        version,
-        channel,
-        manifestSha256,
-        packageSha256,
-        packageSize,
-        repository,
-        githubReleaseId,
-        githubAssetId,
-        assetName,
-        distributionBackend,
-        distributionObjectKey,
-        rolloutPercentage,
-      },
-      operation: async () => {
-        await assertReleaseVersionImmutable(
-          c.env,
-          channel,
-          version,
-          manifestSha256,
-        );
-        const now = isoNow();
-        await c.env.DB.prepare(
-          `INSERT INTO releases (
-             id, version, channel, manifest_content, manifest_signature,
-             manifest_sha256, package_sha256, package_size,
-             github_repository, github_release_id, github_asset_id,
-             github_asset_name, distribution_backend, distribution_object_key,
-             rollout_percentage, rollout_seed,
-             paused, enabled, published_at, created_at
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?)`,
-        )
-          .bind(
-            releaseId,
-            version,
-            channel,
-            manifestContent,
-            manifestSignature,
-            manifestSha256,
-            packageSha256,
-            packageSize,
-            repository,
-            githubReleaseId,
-            githubAssetId,
-            assetName,
-            distributionBackend,
-            distributionObjectKey,
-            rolloutPercentage,
-            rolloutSeed,
-            now,
-            now,
-          )
-          .run();
-        await writeAudit(c.env, {
-          actorType: "admin",
-          actorId: admin.id,
-          action: "release.register",
-          targetType: "release",
-          targetId: releaseId,
-          result: "success",
-          requestId: c.get("requestId"),
-          metadata: {
-            version,
-            channel,
-            distribution_backend: distributionBackend,
-            enabled: false,
-            paused: true,
-          },
-        });
-        return {
-          status: 201,
-          body: {
-            release_id: releaseId,
-            version,
-            channel,
-            enabled: false,
-            paused: true,
-            distribution_backend: distributionBackend,
-            distribution_object_key: distributionObjectKey,
-            rollout_percentage: rolloutPercentage,
-            created_at: now,
-          },
-        };
-      },
-    });
-    return c.json(response.body, response.status as 201);
+    return c.json(result.body, result.status as 201);
   });
 
   app.get("/v1/admin/releases", async (c) => {
     await authenticateAdminForRoute(c, "releases:read", "read");
-    const rows = await c.env.DB.prepare(
-      `SELECT id, version, channel, manifest_sha256, package_sha256,
-              package_size, github_repository, github_release_id,
-              github_asset_id, github_asset_name, distribution_backend,
-              distribution_object_key, rollout_percentage,
-              paused, enabled, published_at, created_at
-         FROM releases ORDER BY published_at DESC LIMIT 200`,
-    ).all<Record<string, unknown>>();
-    return c.json({
-      releases: rows.results.map((row) => ({
-        release_id: String(row.id),
-        version: String(row.version),
-        channel: String(row.channel),
-        manifest_sha256: String(row.manifest_sha256),
-        package_sha256: String(row.package_sha256),
-        package_size: Number(row.package_size),
-        github_repository: String(row.github_repository),
-        github_release_id: String(row.github_release_id),
-        github_asset_id: String(row.github_asset_id),
-        github_asset_name: String(row.github_asset_name),
-        distribution_backend: String(row.distribution_backend ?? "github"),
-        distribution_object_key:
-          row.distribution_object_key === null || row.distribution_object_key === undefined
-            ? null
-            : String(row.distribution_object_key),
-        rollout_percentage: Number(row.rollout_percentage),
-        paused: Number(row.paused) === 1,
-        enabled: Number(row.enabled) === 1,
-        published_at: String(row.published_at),
-        created_at: String(row.created_at),
-      })),
-    });
+    return c.json({ releases: await listReleaseMetadataOperation(c.env) });
   });
 
   app.patch("/v1/admin/releases/:releaseId", async (c) => {
-    const admin = await authenticateAdminForRoute(c, "releases:write", "high-risk");
-    const releaseId = c.req.param("releaseId");
-    const request = await readJsonObject(c.req.raw);
-    const enabled = parseBoolean(request.enabled, "enabled");
-    const paused = parseBoolean(request.paused, "paused");
-    const rolloutPercentage =
-      request.rollout_percentage === undefined
-        ? undefined
-        : requiredInteger(request, "rollout_percentage", { minimum: 0, maximum: 100 });
-    if (enabled === undefined && paused === undefined && rolloutPercentage === undefined) {
-      throw new ApiError("INVALID_REQUEST", "至少需要一个发布状态字段。", { status: 400 });
-    }
-    const nonce = requiredString(request, "operation_nonce", { minimum: 8, maximum: 256 });
-    const response = await runIdempotent(c.env, {
-      scope: `admin-release-update:${admin.id}`,
-      key: nonce,
-      request: { releaseId, enabled, paused, rolloutPercentage },
-      operation: async () => {
-        if (enabled === true) {
-          const release = await c.env.DB.prepare(
-            `SELECT distribution_backend, distribution_object_key,
-                    package_sha256, package_size
-               FROM releases
-              WHERE id = ?
-              LIMIT 1`,
-          )
-            .bind(releaseId)
-            .first<Record<string, unknown>>();
-          if (release === null) {
-            throw new ApiError("RELEASE_NOT_FOUND", "发布不存在。", { status: 404 });
-          }
-          const backend = String(release.distribution_backend ?? "github");
-          if (backend === "r2") {
-            if (release.distribution_object_key === null) {
-              throw new ApiError("RELEASE_STATE_INVALID", "R2 发布对象标识缺失。", {
-                status: 409,
-                retryable: false,
-              });
-            }
-            await assertR2ReleaseReady(
-              c.env,
-              String(release.distribution_object_key),
-              String(release.package_sha256),
-              Number(release.package_size),
-            );
-          } else if (backend === "github" && c.env.ENVIRONMENT === "production") {
-            throw new ApiError("RELEASE_STATE_INVALID", "生产环境禁止 GitHub runtime 分发后端。", {
-              status: 409,
-              retryable: false,
-            });
-          }
-        }
-        const updated = await c.env.DB.prepare(
-          `UPDATE releases
-              SET enabled = COALESCE(?, enabled),
-                  paused = COALESCE(?, paused),
-                  rollout_percentage = COALESCE(?, rollout_percentage)
-            WHERE id = ?`,
-        )
-          .bind(
-            enabled === undefined ? null : enabled ? 1 : 0,
-            paused === undefined ? null : paused ? 1 : 0,
-            rolloutPercentage ?? null,
-            releaseId,
-          )
-          .run();
-        if (Number(updated.meta.changes ?? 0) !== 1) {
-          throw new ApiError("RELEASE_NOT_FOUND", "发布不存在。", { status: 404 });
-        }
-        await writeAudit(c.env, {
-          actorType: "admin",
-          actorId: admin.id,
-          action: "release.update",
-          targetType: "release",
-          targetId: releaseId,
-          result: "success",
-          requestId: c.get("requestId"),
-          metadata: { enabled, paused, rollout_percentage: rolloutPercentage },
-        });
-        return {
-          body: {
-            ok: true,
-            release_id: releaseId,
-            ...(enabled === undefined ? {} : { enabled }),
-            ...(paused === undefined ? {} : { paused }),
-            ...(rolloutPercentage === undefined
-              ? {}
-              : { rollout_percentage: rolloutPercentage }),
-          },
-        };
+    const admin = await authenticateAdminForRoute(c, "releases:state", "high-risk");
+    assertHumanReleaseStateAuthority(admin);
+    const result = await updateReleaseStateOperation(
+      c.env,
+      c.req.raw,
+      c.req.param("releaseId"),
+      {
+        actorType: "admin",
+        actorId: admin.id,
+        requestId: c.get("requestId"),
       },
-    });
-    return c.json(response.body, response.status as 200);
+    );
+    return c.json(result.body, result.status as 200);
   });
 
   app.get("/v1/admin/diagnostics", async (c) => {

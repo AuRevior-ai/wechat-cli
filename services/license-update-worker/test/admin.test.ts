@@ -46,6 +46,7 @@ function releaseLookupEnv(existingManifestSha256: string | null): {
 
 async function adminRouteEnv(options?: {
   releaseRow?: Record<string, unknown> | null;
+  adminScopes?: string[];
 }): Promise<{
   env: Env;
   token: string;
@@ -77,7 +78,14 @@ async function adminRouteEnv(options?: {
             return {
               id: "admin_test",
               token_digest: tokenDigest,
-              scopes_json: JSON.stringify(["releases:upload", "releases:write"]),
+              scopes_json: JSON.stringify(
+                options?.adminScopes ?? [
+                  "releases:upload",
+                  "releases:read",
+                  "releases:register",
+                  "releases:state",
+                ],
+              ),
               status: "active",
             } as T;
           }
@@ -155,6 +163,26 @@ function immutabilityAssertion(): (
 }
 
 describe("R2 release administration", () => {
+  it("does not let the legacy releases:write scope register releases", async () => {
+    const { env, token } = await adminRouteEnv({ adminScopes: ["releases:write"] });
+    const response = await createApp().request(
+      "/v1/admin/releases",
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Admin ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: "{}",
+      },
+      env,
+    );
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: "ADMIN_SCOPE_DENIED" },
+    });
+  });
+
   it("uploads exact package bytes under a server-generated R2 key", async () => {
     const { env, token, r2Put } = await adminRouteEnv();
     const bytes = Uint8Array.from([1, 2, 3]);

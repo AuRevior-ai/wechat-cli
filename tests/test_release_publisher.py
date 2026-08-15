@@ -123,12 +123,6 @@ class FakeAdmin:
             "paused": True,
         }
 
-    def update_release(self, release_id, **kwargs):
-        self.events.append(
-            ("admin.update_release", {"release_id": release_id, **kwargs})
-        )
-        return {"ok": True, "release_id": release_id, **kwargs}
-
 
 class ReleasePublisherTests(unittest.TestCase):
     def make_signed(self, root: Path):

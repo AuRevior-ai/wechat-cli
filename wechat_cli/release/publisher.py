@@ -7,7 +7,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
-from ..admin.client import AdminApiClient
 from .builder import SignedRelease
 from .github import GitHubAsset, GitHubReleaseClient
 
@@ -24,16 +23,6 @@ class ReleaseAdminClient(Protocol):
     ): ...
 
     def register_release(self, payload): ...
-
-    def update_release(
-        self,
-        release_id: str,
-        *,
-        enabled: bool | None = None,
-        paused: bool | None = None,
-        rollout_percentage: int | None = None,
-        operation_nonce: str,
-    ): ...
 
 
 @dataclass(frozen=True)
@@ -69,7 +58,7 @@ def publish_signed_release(
     signed: SignedRelease,
     *,
     github_client: GitHubReleaseClient,
-    admin_client: ReleaseAdminClient | AdminApiClient,
+    admin_client: ReleaseAdminClient,
     repository: str,
     target_commitish: str,
     release_name: str,
