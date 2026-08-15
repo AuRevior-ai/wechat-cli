@@ -106,13 +106,22 @@
     "production": {
       "name": "wechat-cli-license-update",
       "workers_dev": false,
-      "routes": [],
+      "routes": [
+        {
+          "pattern": "wechat-cli-api.aurevior-devspace.com",
+          "custom_domain": true
+        },
+        {
+          "pattern": "wechat-cli-admin.aurevior-devspace.com",
+          "custom_domain": true
+        }
+      ],
       "vars": {
         "ENVIRONMENT": "production",
-        "PUBLIC_API_ORIGIN": "REPLACE_WITH_PRODUCTION_API_ORIGIN",
-        "ACCESS_ADMIN_ORIGIN": "REPLACE_WITH_PRODUCTION_ADMIN_ORIGIN",
-        "ACCESS_JWT_ISSUER": "REPLACE_WITH_PRODUCTION_ACCESS_ISSUER",
-        "ACCESS_JWKS_URL": "REPLACE_WITH_PRODUCTION_ACCESS_JWKS_URL",
+        "PUBLIC_API_ORIGIN": "https://wechat-cli-api.aurevior-devspace.com",
+        "ACCESS_ADMIN_ORIGIN": "https://wechat-cli-admin.aurevior-devspace.com",
+        "ACCESS_JWT_ISSUER": "https://floral-glitter-1ede.cloudflareaccess.com",
+        "ACCESS_JWKS_URL": "https://floral-glitter-1ede.cloudflareaccess.com/cdn-cgi/access/certs",
         "ACCESS_HUMAN_AUDIENCES": "REPLACE_WITH_PRODUCTION_HUMAN_ACCESS_AUDIENCE",
         "ACCESS_HUMAN_IDENTITY_CLAIM": "email",
         "ACCESS_AUTOMATION_AUDIENCES": "REPLACE_WITH_PRODUCTION_AUTOMATION_ACCESS_AUDIENCE",
@@ -140,7 +149,7 @@
         {
           "binding": "DB",
           "database_name": "wechat-cli-license-production",
-          "database_id": "REPLACE_WITH_PRODUCTION_D1_ID",
+          "database_id": "011b3c26-bbe6-4bb7-8af7-39f1e6d46932",
           "migrations_dir": "migrations"
         }
       ],
