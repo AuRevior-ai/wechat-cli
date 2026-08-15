@@ -11,9 +11,12 @@ import sys
 from pathlib import Path
 from typing import Mapping
 
+ROOT = Path(__file__).resolve().parent.parent.parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
 from wechat_cli.version import production_build_id
 
-ROOT = Path(__file__).resolve().parent.parent.parent
 NPM_DIR = ROOT / "npm"
 PLATFORMS_DIR = NPM_DIR / "platforms"
 

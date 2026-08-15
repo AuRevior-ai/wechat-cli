@@ -1,6 +1,8 @@
 import importlib.util
 import os
 import runpy
+import subprocess
+import sys
 import tomllib
 import unittest
 from pathlib import Path
@@ -97,6 +99,17 @@ class VersionMetadataTests(unittest.TestCase):
         build = load_build_script()
         with self.assertRaises(ValueError):
             build.production_build_environment("feature-branch")
+
+    def test_build_script_direct_execution_uses_current_worktree_imports(self):
+        result = subprocess.run(
+            [sys.executable, str(ROOT / "npm" / "scripts" / "build.py"), "--help"],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertIn("--source-sha", result.stdout)
 
     def test_product_and_schema_contract_are_stable(self):
         self.assertEqual("wechat-cli-web", PRODUCT)
