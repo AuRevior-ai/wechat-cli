@@ -1091,17 +1091,18 @@ This gate may include a specifically approved production provenance/disabled-reg
 
 Use a no-op or same-source exact-main deployment only if explicitly approved as a production mutation; otherwise limit this subtask to workflow validation until a later necessary Worker change. Record the chosen evidence without creating an unnecessary production version merely to satisfy a checklist.
 
-## Task 30: Real release-preparation automation acceptance
+## Task 30: Prepare the first stable production `0.6.0` release through automation
 
-If the gate authorizes an acceptance release:
+This is the selected B7-G6 release-preparation acceptance target. It is a real production provenance/R2/registration mutation and therefore must be explicitly named in the B7-G6 authorization matrix. B7-G6 still does **not** authorize release enablement.
 
-- [ ] Prepare exact test/canary-designated package from canonical main.
-- [ ] Sign manifest with production release key in the isolated signing job.
-- [ ] Upload exact package to production R2 via `/v1/automation/.../package`.
-- [ ] Prove R2 readiness.
-- [ ] Publish private immutable GitHub provenance with `make_latest=false` using the GitHub App installation token.
-- [ ] Register via `/v1/automation/releases` and prove final `enabled=false`, `paused=true`.
-- [ ] Reconcile hashes/provenance/object key.
+- [ ] Build the exact stable `0.6.0` update package from the approved canonical main SHA; record the full source SHA and deterministic production Build ID.
+- [ ] Sign its manifest with `release-key-production-01` in the isolated signing job.
+- [ ] Upload the exact package to production R2 via `/v1/automation/.../package`.
+- [ ] Prove exact R2 hash/size/transport readiness while the candidate is non-selectable.
+- [ ] Publish private immutable GitHub provenance/tag with `make_latest=false` using the GitHub App installation token.
+- [ ] Register via `/v1/automation/releases` as the stable `0.6.0` release and prove the persisted terminal state is exactly `enabled=false`, `paused=true`.
+- [ ] Reconcile manifest/package hashes, key ID, GitHub provenance IDs, R2 object identity, channel `stable`, version `0.6.0`, and full source SHA.
+- [ ] Prove no machine call changed `enabled`, `paused`, or `rollout_percentage` after registration.
 
 ## Task 31: Prove machine cannot change release state
 
@@ -1137,12 +1138,24 @@ Only internal canary production data is allowed. No real Private user issuance.
 After its own explicit license-creation approval:
 
 ```text
-channel=stable for 0.6.0 baseline
+channel=beta
 maximum_devices=1
 purpose=internal production canary
 ```
 
-No real-user license is created.
+The license is beta from creation and is never channel-mutated. Board 7 does not add a license-channel mutation API for acceptance. The controlled `0.6.0` installer is the baseline delivery mechanism, so this beta license does not need to select the stable `0.6.0` release row. The same license will later select `0.6.1-canary.1` when that beta candidate is human-enabled.
+
+No second canary license and no real-user license is created.
+
+## Task 33A: Human-enable the already registered stable `0.6.0` release
+
+After a separate **B7-G7 stable-0.6.0 release-state authorization**:
+
+- [ ] Fresh human Access login and satisfy recent-auth.
+- [ ] Re-read the exact B7-G6 stable `0.6.0` release and require it is still `enabled=false`, `paused=true` with unchanged hashes/provenance/R2 identity.
+- [ ] Human session changes only that named release to the explicitly approved enabled/unpaused state; machine identity is not used.
+- [ ] Read back the exact state and audit evidence.
+- [ ] Prove there are still zero stable real-user licenses, so enabling this first stable release creates no real-user exposure.
 
 ## Task 34: Initial production install/activation/offline/diagnostics acceptance
 
@@ -1389,6 +1402,8 @@ Present final Board 7 evidence. Do not activate Public / Formal Distribution, bu
 | Private production trust profile | 8, 23, 32 |
 | Private first-install trade-off | 32 |
 | R2 runtime + GitHub provenance | 4, 30, 35 |
+| First stable 0.6.0 automation register + human enable | 30, 33A |
+| Single beta canary license without channel mutation | 33–38 |
 | Internal 0.6.1-canary.1 update | 35–38 |
 | Controlled rollout | 39 |
 | Worker rollback by LKG main redeploy | 40 |

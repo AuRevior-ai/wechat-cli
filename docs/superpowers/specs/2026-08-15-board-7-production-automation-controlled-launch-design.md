@@ -717,11 +717,23 @@ The first production installation baseline is `0.6.0`. A meaningful update test 
 0.6.0 -> 0.6.1-canary.1
 ```
 
-Production begins with exactly one internal canary license:
+Before any canary license exists, B7-G6 uses the production release automation path to publish/register the exact canonical-main **stable `0.6.0` release** and must leave it in the automated terminal state:
 
 ```text
+enabled=false
+paused=true
+```
+
+B7-G7 then creates exactly one internal canary license with:
+
+```text
+release_channel=beta
 maximum_devices=1
 ```
+
+The canary license is deliberately beta from creation and is never channel-mutated. The current product has no normal license-channel mutation API, and Board 7 does not add one merely for acceptance. The `0.6.0` baseline reaches the canary machine through the controlled private installer, not through release selection, so the beta entitlement does not need to select the stable `0.6.0` row. After the canary license exists, a fresh human Access session separately enables the named stable `0.6.0` release; no stable real-user license exists yet, so this proves human-only first-release state control without exposing the release to a real-user population.
+
+The same beta canary license can then select the internal-only beta `0.6.1-canary.1` candidate without changing entitlement or creating a second canary license. Real Private user licenses are created later as stable licenses only after canary/recovery acceptance.
 
 No real Private user license is created before canary acceptance.
 
@@ -907,11 +919,11 @@ Production source config has exact resolved resource/domain values on canonical 
 
 ### B7-G6 — CI/CD Automation Acceptance Gate
 
-Real CI/deploy/release-preparation automation acceptance, including proof that machine identity can upload/read/register but cannot change release state. Any real provenance publication/disabled registration used for acceptance is explicitly enumerated as a release-specific mutation.
+Real CI/deploy/release-preparation automation acceptance, including proof that machine identity can upload/read/register but cannot change release state. The selected first release-preparation acceptance target is the exact canonical-main stable `0.6.0` production release, which must finish `enabled=false` / `paused=true`. Its immutable provenance/R2/registration mutations are explicitly enumerated in the B7-G6 authorization matrix; B7-G6 does not enable it.
 
 ### B7-G7 — Production Canary E2E Gate
 
-One internal production license/device; `0.6.0` installer baseline; `0.6.1-canary.1` internal beta update/fault/rollback/diagnostics acceptance. No real Private user issuance.
+Create exactly one internal **beta** production license/device (`maximum_devices=1`), then separately use a fresh human Access session to enable the already registered stable `0.6.0` release while there are still no stable real-user licenses. Install the controlled `0.6.0` baseline directly, then use the same beta canary license for `0.6.1-canary.1` internal beta update/fault/rollback/diagnostics acceptance. Do not add a license-channel mutation path and do not create a second canary license. No real Private user issuance.
 
 ### B7-G8 — First Controlled Release & Recovery Gate
 
@@ -968,6 +980,8 @@ Board 7 cannot close unless all are proven with fresh evidence:
 ### Consistency
 
 - App `0.6.0`;
+- first stable production `0.6.0` release is automation-published/registered disabled+paused and only later human-enabled;
+- the sole internal canary license is beta from creation and is never channel-mutated;
 - Launcher `0.2.0`;
 - `distribution_profile=private_controlled`;
 - empty `windows_publisher_policy`;
