@@ -88,6 +88,22 @@ Fresh public JWKS readback at `https://floral-glitter-1ede.cloudflareaccess.com/
 
 An attempted create of the first production Access application through the existing Wrangler OAuth authority was rejected by Cloudflare with HTTP 403 / Access API code `1010`. No Access application or policy was created by that failed request. Current Wrangler OAuth remains sufficient for Workers/D1/R2 operations but does not provide the required Access application/policy write authority. This is the only unresolved B7-G3 infrastructure authority blocker at this checkpoint.
 
+## G3/G4 automation-identity sequencing clarification
+
+The approved design states that the exact external automation identity stored in `ACCESS_AUTOMATION_IDENTITIES` is the Cloudflare Access Service Token client identity and does not exist until B7-G4 creates that token. Therefore G3 must not invent or predeclare a fake client identity merely to make the full production preflight pass.
+
+The safe sequencing is:
+
+1. B7-G3 creates the human Access application plus its single-email Allow policy.
+2. B7-G3 creates the distinct automation Access application and records its distinct audience, but attaches no machine Allow/Service Auth policy yet. Cloudflare Access applications are deny-by-default, so this application remains closed.
+3. B7-G3 source configuration may replace the human/automation audience placeholders with the exact created audiences while leaving only `ACCESS_AUTOMATION_IDENTITIES` unresolved.
+4. B7-G4 creates the exact `wechat-cli-release-automation-production` Service Token. Its safe `client_id` becomes `ACCESS_AUTOMATION_IDENTITIES`, and the secret is retained only in the approved secret domain.
+5. B7-G4 then attaches an exact Service Auth policy referencing only that token and runs the first fully passing production preflight before B7-G5 deployment.
+
+This interpretation preserves the higher-priority design invariant that machine identity is exact and separately provisioned. It does not use Cloudflare's broader `any valid service token` selector and does not weaken fail-closed behavior. The implementation-plan sentence requiring a fully passing production preflight during G3 is therefore interpreted as a staging/config validation checkpoint; full identity-complete production preflight occurs in G4 after the designed client identity exists.
+
+A bounded helper `scripts/board7_access_bootstrap.py` is prepared under TDD for the G3 control-plane write. Its G3 mode can create only the two exact applications and the one human policy; it has no G3 service-token or automation-policy write path and never prints the API token or human email.
+
 ## Isolation requirements for the next mutations
 
 B7-G3 may now create only the approved D1/R2 resources and the exact Access application/policy identities. It must not:
