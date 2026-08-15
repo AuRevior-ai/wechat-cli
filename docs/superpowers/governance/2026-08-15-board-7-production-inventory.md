@@ -2,7 +2,7 @@
 
 Date: 2026-08-15
 Gate: B7-G3 Production Infrastructure Provision
-Status: PRE-PROVISION PREFLIGHT PASSED; production resource creation not yet recorded in this document
+Status: B7-G3 PARTIALLY PROVISIONED; clean-room D1/R2 complete, Access application creation blocked by current OAuth write permission
 
 ## Canonical source boundary
 
@@ -56,6 +56,20 @@ Fresh Wrangler readback before any B7-G3 production creation showed:
 
 No exact target-name collision was found.
 
+## Clean-room storage provisioning evidence
+
+The Strong Authorization envelope then created only the approved clean-room storage resources:
+
+- production D1 `wechat-cli-license-production` -> ID `011b3c26-bbe6-4bb7-8af7-39f1e6d46932`;
+- production R2 releases bucket `wechat-cli-releases-production`;
+- production R2 diagnostics bucket `wechat-cli-diagnostics-production`.
+
+Fresh post-create list readback showed the production objects alongside, and distinct from, the retained staging D1/R2 objects. No existing object was adopted, overwritten, or deleted.
+
+Production D1 migrations `0001_initial.sql` through `0008_automation_identity.sql` were applied in repository order. A fresh migration-list readback returned `No migrations to apply`.
+
+Fresh remote scalar-count queries proved all production business, authorization, release, diagnostics, audit, idempotency, and rate-limit tables are empty. Representative counts include `licenses=0`, `devices=0`, `releases=0`, `diagnostic_submissions=0`, `admin_principals=0`, `admin_sessions=0`, `automation_principals=0`, and `audit_events=0`; both count queries reported `rows_written=0`. No staging import/export-to-production operation occurred.
+
 ## Cloudflare identity/access evidence
 
 Wrangler is authenticated through its existing OAuth session to the same Cloudflare account above. No Cloudflare token value is recorded here.
@@ -69,6 +83,10 @@ Read-only Access API evidence:
 - the staging principal is revoked as expected from Board 6 cleanup; only the identity mapping is reused as the production human identity reference. No staging session, principal row, credential, token, or Secret is copied into production.
 
 The exact human identity value is intentionally not repeated in this document.
+
+Fresh public JWKS readback at `https://floral-glitter-1ede.cloudflareaccess.com/cdn-cgi/access/certs` returned HTTP 200 with two keys, so the retained team issuer/JWKS identity is still live. The production source configuration now safely fixes the exact API/Admin origins, this issuer/JWKS pair, and the new production D1 ID. Human/automation Access audience fields intentionally remain fail-closed placeholders until their exact applications exist.
+
+An attempted create of the first production Access application through the existing Wrangler OAuth authority was rejected by Cloudflare with HTTP 403 / Access API code `1010`. No Access application or policy was created by that failed request. Current Wrangler OAuth remains sufficient for Workers/D1/R2 operations but does not provide the required Access application/policy write authority. This is the only unresolved B7-G3 infrastructure authority blocker at this checkpoint.
 
 ## Isolation requirements for the next mutations
 
