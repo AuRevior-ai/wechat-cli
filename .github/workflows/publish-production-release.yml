@@ -1,0 +1,203 @@
+name: Publish production release preparation
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Exact accepted canonical main commit (40 lowercase hex characters)
+        required: true
+        type: string
+      version:
+        description: Exact SemVer release version
+        required: true
+        type: string
+      channel:
+        description: Release channel
+        required: true
+        type: choice
+        options:
+          - stable
+          - beta
+      release_notes:
+        description: Private release notes
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-release
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    runs-on: windows-latest
+    environment: production
+    steps:
+      - name: Checkout exact requested source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ inputs.source_sha }}
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: "3.12"
+      - name: Set up Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: services/license-update-worker/package-lock.json
+      - name: Install Python package
+        shell: pwsh
+        run: python -m pip install -e .
+      - name: Install Worker dependencies
+        shell: pwsh
+        working-directory: services/license-update-worker
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Prove exact canonical main identity
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          $checked = (git rev-parse HEAD).Trim()
+          $headers = @{
+            Authorization = "Bearer $env:GITHUB_TOKEN"
+            Accept = "application/vnd.github+json"
+            'X-GitHub-Api-Version' = '2026-03-10'
+          }
+          $branch = Invoke-RestMethod -Uri '${{ github.api_url }}/repos/${{ github.repository }}/branches/main' -Headers $headers
+          python scripts/verify_canonical_main.py --requested-sha '${{ inputs.source_sha }}' --checked-out-sha $checked --observed-main-sha $branch.commit.sha
+      - name: Fresh Python verification
+        shell: pwsh
+        run: python -m unittest discover -s tests
+      - name: Fresh Worker verification
+        shell: pwsh
+        working-directory: services/license-update-worker
+        run: npm run typecheck; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; npm test -- --run
+      - name: Build exact application bytes
+        shell: pwsh
+        run: python npm/scripts/build.py win32-x64 --target app --source-sha '${{ inputs.source_sha }}'
+      - name: Package exact update bytes outside repository
+        shell: pwsh
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          $buildId = "prod-060-$($env:SOURCE_SHA.Substring(0, 12))"
+          $releaseRoot = Join-Path $env:RUNNER_TEMP 'production-release'
+          New-Item -ItemType Directory -Path $releaseRoot -Force | Out-Null
+          python scripts/package_windows_app.py --skip-build --update-only --output-dir $releaseRoot --version $env:RELEASE_VERSION --build-id $buildId
+      - name: Verify exact source version and packaged application bytes
+        shell: pwsh
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          python -c "from wechat_cli.version import APP_VERSION; import sys; expected=sys.argv[1]; raise SystemExit(0 if APP_VERSION == expected else f'workflow version {expected} does not match source APP_VERSION {APP_VERSION}')" $env:RELEASE_VERSION
+          $releaseRoot = Join-Path $env:RUNNER_TEMP 'production-release'
+          $package = Join-Path $releaseRoot "wechat-cli-app-$env:RELEASE_VERSION-win-x64.zip"
+          python scripts/verify_local_update_artifacts.py --update-only --update-zip $package
+      - name: Materialize public production trust profile
+        shell: pwsh
+        env:
+          PRODUCTION_TRUST_PROFILE_JSON: ${{ vars.PRODUCTION_TRUST_PROFILE_JSON }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:PRODUCTION_TRUST_PROFILE_JSON)) { throw 'production trust profile is unavailable' }
+          $path = Join-Path $env:RUNNER_TEMP 'deployment-trust-profile.json'
+          [IO.File]::WriteAllText($path, $env:PRODUCTION_TRUST_PROFILE_JSON, (New-Object Text.UTF8Encoding($false)))
+      - name: Create short-lived release-repository GitHub App token
+        id: release-app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+        with:
+          app-id: ${{ vars.RELEASE_PUBLISHER_APP_ID }}
+          private-key: ${{ secrets.RELEASE_PUBLISHER_APP_PRIVATE_KEY }}
+          owner: ${{ vars.RELEASE_PROVENANCE_OWNER }}
+          repositories: ${{ vars.RELEASE_PROVENANCE_REPOSITORY_NAME }}
+      - name: Resolve exact release-repository provenance target
+        shell: pwsh
+        env:
+          WECHAT_CLI_GITHUB_APP_TOKEN: ${{ steps.release-app-token.outputs.token }}
+        run: |
+          $headers = @{
+            Authorization = "Bearer $env:WECHAT_CLI_GITHUB_APP_TOKEN"
+            Accept = "application/vnd.github+json"
+            'X-GitHub-Api-Version' = '2026-03-10'
+          }
+          $reference = Invoke-RestMethod -Uri '${{ github.api_url }}/repos/${{ vars.RELEASE_PROVENANCE_REPOSITORY }}/git/ref/heads/main' -Headers $headers
+          if ($reference.object.type -ne 'commit' -or $reference.object.sha -notmatch '^[0-9a-f]{40}$') { throw 'release provenance target is invalid' }
+          "PROVENANCE_TARGET_SHA=$($reference.object.sha)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+      - name: Sign public release assets only
+        shell: pwsh
+        env:
+          SIGNING_KEY_MATERIAL: ${{ secrets.PRODUCTION_RELEASE_SIGNING_PRIVATE_KEY }}
+          RELEASE_VERSION: ${{ inputs.version }}
+          RELEASE_CHANNEL: ${{ inputs.channel }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $releaseRoot = Join-Path $env:RUNNER_TEMP 'production-release'
+          $package = Join-Path $releaseRoot "wechat-cli-app-$env:RELEASE_VERSION-win-x64.zip"
+          $prepared = Join-Path $releaseRoot 'prepared'
+          $keyPath = Join-Path $env:RUNNER_TEMP 'release-key-production-01.pem'
+          $releaseId = 'rel_prod_' + ($env:RELEASE_VERSION -replace '[^A-Za-z0-9]+', '_')
+          $publishedAt = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+          try {
+            if ([string]::IsNullOrWhiteSpace($env:SIGNING_KEY_MATERIAL)) { throw 'release signing key is unavailable' }
+            [IO.File]::WriteAllText($keyPath, $env:SIGNING_KEY_MATERIAL, (New-Object Text.UTF8Encoding($false)))
+            python scripts/production_release.py sign --package $package --signing-key $keyPath --output-dir $prepared --release-id $releaseId --channel $env:RELEASE_CHANNEL --published-at $publishedAt --minimum-app-version 0.6.0 --minimum-launcher-version 0.2.0 --summary "Production $env:RELEASE_VERSION"
+          }
+          finally {
+            Remove-Item -LiteralPath $keyPath -Force -ErrorAction SilentlyContinue
+            Remove-Item Env:SIGNING_KEY_MATERIAL -ErrorAction SilentlyContinue
+          }
+      - name: Publish with R2 readiness, immutable GitHub provenance, and disabled registration
+        shell: pwsh
+        env:
+          WECHAT_CLI_GITHUB_APP_TOKEN: ${{ steps.release-app-token.outputs.token }}
+          WECHAT_CLI_ACCESS_CLIENT_ID: ${{ secrets.PRODUCTION_ACCESS_CLIENT_ID }}
+          WECHAT_CLI_ACCESS_CLIENT_SECRET: ${{ secrets.PRODUCTION_ACCESS_CLIENT_SECRET }}
+          RELEASE_VERSION: ${{ inputs.version }}
+          RELEASE_BODY: ${{ inputs.release_notes }}
+        run: |
+          $releaseRoot = Join-Path $env:RUNNER_TEMP 'production-release'
+          $prepared = Join-Path $releaseRoot 'prepared'
+          $package = Join-Path $releaseRoot "wechat-cli-app-$env:RELEASE_VERSION-win-x64.zip"
+          $profile = Join-Path $env:RUNNER_TEMP 'deployment-trust-profile.json'
+          python scripts/production_release.py publish --package $package --manifest (Join-Path $prepared "wechat-cli-update-manifest-$env:RELEASE_VERSION.json") --signature (Join-Path $prepared "wechat-cli-update-manifest-$env:RELEASE_VERSION.sig") --metadata (Join-Path $prepared 'prepared-release.json') --trust-profile $profile --api-origin '${{ vars.PRODUCTION_API_ORIGIN }}' --admin-origin '${{ vars.PRODUCTION_ADMIN_ORIGIN }}' --github-repository '${{ vars.RELEASE_PROVENANCE_REPOSITORY }}' --source-sha '${{ inputs.source_sha }}' --provenance-target-sha $env:PROVENANCE_TARGET_SHA --release-name "WeChat CLI $env:RELEASE_VERSION" --release-body $env:RELEASE_BODY
+      - name: Read-only reconcile immutable provenance and disabled registration
+        shell: pwsh
+        env:
+          GITHUB_APP_TOKEN: ${{ steps.release-app-token.outputs.token }}
+          ACCESS_CLIENT_ID: ${{ secrets.PRODUCTION_ACCESS_CLIENT_ID }}
+          ACCESS_CLIENT_SECRET: ${{ secrets.PRODUCTION_ACCESS_CLIENT_SECRET }}
+          RELEASE_VERSION: ${{ inputs.version }}
+          RELEASE_CHANNEL: ${{ inputs.channel }}
+        run: |
+          $githubHeaders = @{
+            Authorization = "Bearer $env:GITHUB_APP_TOKEN"
+            Accept = 'application/vnd.github+json'
+            'X-GitHub-Api-Version' = '2026-03-10'
+          }
+          $release = Invoke-RestMethod -Uri '${{ github.api_url }}/repos/${{ vars.RELEASE_PROVENANCE_REPOSITORY }}/releases/tags/v${{ inputs.version }}' -Headers $githubHeaders
+          if ($release.draft -ne $false) { throw 'GitHub provenance release is not published' }
+          if ($release.target_commitish -ne $env:PROVENANCE_TARGET_SHA) { throw 'GitHub provenance target drifted' }
+          if ($release.body -notlike "*Source commit: ${{ inputs.source_sha }}*") { throw 'full production source SHA is absent from GitHub provenance' }
+          $automationHeaders = @{
+            'CF-Access-Client-Id' = $env:ACCESS_CLIENT_ID
+            'CF-Access-Client-Secret' = $env:ACCESS_CLIENT_SECRET
+          }
+          $rows = Invoke-RestMethod -Uri '${{ vars.PRODUCTION_ADMIN_ORIGIN }}/v1/automation/releases' -Headers $automationHeaders
+          $releaseId = 'rel_prod_' + ($env:RELEASE_VERSION -replace '[^A-Za-z0-9]+', '_')
+          $match = @($rows.releases | Where-Object { $_.release_id -eq $releaseId -and $_.channel -eq $env:RELEASE_CHANNEL })
+          if ($match.Count -ne 1) { throw 'exact production release row was not found' }
+          if ($match[0].enabled -ne $false -or $match[0].paused -ne $true) { throw 'automation registration escaped disabled/paused state' }
+          if ($match[0].distribution_backend -ne 'r2') { throw 'production release runtime backend is not R2' }
+          if ([string]$match[0].github_release_id -ne [string]$release.id) { throw 'Worker/GitHub provenance identity mismatch' }
+      - name: Remove temporary public trust profile and prepared local assets
+        if: always()
+        shell: pwsh
+        run: |
+          Remove-Item -LiteralPath (Join-Path $env:RUNNER_TEMP 'deployment-trust-profile.json') -Force -ErrorAction SilentlyContinue
+          Remove-Item -LiteralPath (Join-Path $env:RUNNER_TEMP 'production-release') -Recurse -Force -ErrorAction SilentlyContinue

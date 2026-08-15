@@ -738,7 +738,7 @@ def _add_target_arguments(
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Fail-closed Worker deployment preflight and staging-only deployment."
+        description="Fail-closed Worker deployment preflight and explicitly gated deployment."
     )
     subcommands = parser.add_subparsers(dest="action", required=True)
     preflight = subcommands.add_parser(
@@ -751,9 +751,13 @@ def main(argv: list[str] | None = None) -> int:
     )
     deploy = subcommands.add_parser(
         "deploy",
-        help="Deploy only the staging Worker after a successful preflight.",
+        help="Deploy an explicitly selected staging or production Worker after preflight.",
     )
-    _add_target_arguments(deploy, environment_choices=("staging",))
+    _add_target_arguments(deploy, environment_choices=("staging", "production"))
+    deploy.add_argument(
+        "--source-sha",
+        help="Required full canonical-main SHA for production deployment; forbidden for staging.",
+    )
     deploy.add_argument(
         "--secrets-file",
         type=Path,
@@ -765,14 +769,29 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         if args.action == "deploy":
-            deploy_staging_worker(
-                args.config,
-                environment=args.environment,
-                trust_profile_path=args.trust_profile,
-                api_origin=args.api_origin,
-                declared_secret_names=args.secret_name,
-                secrets_file=args.secrets_file,
-            )
+            if args.environment == "production":
+                if args.source_sha is None:
+                    raise ValueError("production deployment requires --source-sha")
+                deploy_production_worker(
+                    args.config,
+                    environment="production",
+                    source_sha=args.source_sha,
+                    trust_profile_path=args.trust_profile,
+                    api_origin=args.api_origin,
+                    declared_secret_names=args.secret_name,
+                    secrets_file=args.secrets_file,
+                )
+            else:
+                if args.source_sha is not None:
+                    raise ValueError("staging deployment does not accept --source-sha")
+                deploy_staging_worker(
+                    args.config,
+                    environment="staging",
+                    trust_profile_path=args.trust_profile,
+                    api_origin=args.api_origin,
+                    declared_secret_names=args.secret_name,
+                    secrets_file=args.secrets_file,
+                )
             return 0
         result = preflight_worker_deployment(
             args.config,

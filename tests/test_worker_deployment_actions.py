@@ -4,6 +4,7 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from scripts.deploy_worker import deploy_production_worker
 from tests import test_worker_deployment_preflight as _preflight_module
@@ -14,6 +15,38 @@ POLICY = _preflight_module.POLICY
 class WorkerDeploymentActionTests(unittest.TestCase):
     def helper(self):
         return _preflight_module.WorkerDeploymentPreflightTests()
+
+    def test_cli_routes_explicit_production_deploy_with_required_source_sha(self):
+        from scripts import deploy_worker
+
+        with patch.object(deploy_worker, "deploy_production_worker") as production, patch.object(
+            deploy_worker, "deploy_staging_worker"
+        ) as staging:
+            result = deploy_worker.main(
+                [
+                    "deploy",
+                    "--environment",
+                    "production",
+                    "--source-sha",
+                    "a" * 40,
+                    "--api-origin",
+                    "https://api.example.test",
+                ]
+            )
+
+        self.assertEqual(0, result)
+        production.assert_called_once()
+        self.assertEqual("production", production.call_args.kwargs["environment"])
+        self.assertEqual("a" * 40, production.call_args.kwargs["source_sha"])
+        staging.assert_not_called()
+
+    def test_cli_refuses_production_deploy_without_source_sha(self):
+        from scripts import deploy_worker
+
+        with patch.object(deploy_worker, "deploy_production_worker") as production:
+            with self.assertRaises(SystemExit):
+                deploy_worker.main(["deploy", "--environment", "production"])
+        production.assert_not_called()
 
     def test_production_action_refuses_wrong_environment_and_bad_source_sha_before_runner(self):
         calls = []

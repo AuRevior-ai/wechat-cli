@@ -3,10 +3,26 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from wechat_cli.release.automation_client import ReleaseAutomationClient
+from wechat_cli.release.automation_client import (
+    ReleaseAutomationClient,
+    UrllibReleaseAutomationTransport,
+)
 
 
 class ReleaseAutomationClientTests(unittest.TestCase):
+    def test_https_transport_is_restricted_to_custom_automation_origin_and_paths(self):
+        for invalid in (
+            "http://admin.example.test",
+            "https://worker.workers.dev",
+            "https://admin.example.test/path",
+        ):
+            with self.subTest(invalid=invalid), self.assertRaises(ValueError):
+                UrllibReleaseAutomationTransport(invalid)
+        transport = UrllibReleaseAutomationTransport("https://admin.example.test")
+        self.assertIn("admin.example.test", repr(transport))
+        with self.assertRaisesRegex(ValueError, "/v1/automation"):
+            transport.json_request("GET", "/v1/admin/releases", {}, None)
+
     def test_client_exposes_prepare_read_register_only(self):
         client = ReleaseAutomationClient(
             json_transport=lambda method, path, headers, payload: (200, {"releases": []}),

@@ -806,7 +806,7 @@ class WorkerDeploymentPreflightTests(unittest.TestCase):
         else:
             self.fail("current production source must remain fail-closed")
 
-    def test_cli_help_exposes_staging_only_deploy_action(self):
+    def test_cli_help_exposes_explicit_staging_and_guarded_production_deploy_action(self):
         root_help = subprocess.run(
             [sys.executable, str(ROOT / "scripts" / "deploy_worker.py"), "--help"],
             cwd=ROOT,
@@ -832,7 +832,8 @@ class WorkerDeploymentPreflightTests(unittest.TestCase):
         self.assertEqual(0, root_help.returncode, root_help.stderr)
         self.assertIn("deploy", root_help.stdout.lower())
         self.assertEqual(0, deploy_help.returncode, deploy_help.stderr)
-        self.assertIn("--environment {staging}", deploy_help.stdout)
+        self.assertIn("--environment {staging,production}", deploy_help.stdout)
+        self.assertIn("--source-sha", deploy_help.stdout)
         self.assertIn("--trust-profile", deploy_help.stdout)
         self.assertIn("--secret-name", deploy_help.stdout)
 

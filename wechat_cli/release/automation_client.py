@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from pathlib import Path
 from typing import Any, Callable, Mapping, Protocol
+from urllib.error import HTTPError, URLError
+from urllib.parse import urlparse
+from urllib.request import Request, urlopen
 
 from ..admin.client import AdminApiError
 
@@ -30,6 +34,144 @@ class AutomationUploadTransport(Protocol):
 
 
 HeaderProvider = Callable[[], Mapping[str, str]]
+
+
+class UrllibReleaseAutomationTransport:
+    """HTTPS transport restricted to the privileged automation route surface."""
+
+    def __init__(self, base_url: str, *, timeout_seconds: float = 60.0) -> None:
+        parsed = urlparse(base_url)
+        if (
+            parsed.scheme != "https"
+            or not parsed.hostname
+            or parsed.username
+            or parsed.password
+            or parsed.path not in {"", "/"}
+            or parsed.query
+            or parsed.fragment
+            or parsed.hostname.lower().endswith(".workers.dev")
+        ):
+            raise ValueError("automation base URL must be an exact HTTPS custom origin")
+        if timeout_seconds <= 0:
+            raise ValueError("timeout_seconds must be positive")
+        self.base_url = base_url.rstrip("/")
+        self.timeout_seconds = timeout_seconds
+
+    def __repr__(self) -> str:
+        return f"UrllibReleaseAutomationTransport(base_url={self.base_url!r})"
+
+    def _url(self, path: str) -> str:
+        if not isinstance(path, str) or not path.startswith("/v1/automation/"):
+            raise ValueError("automation transport path is outside /v1/automation/*")
+        return f"{self.base_url}{path}"
+
+    def _read_response(self, response: Any) -> tuple[int, Mapping[str, Any]]:
+        with response:
+            raw = response.read(4 * 1024 * 1024 + 1)
+            status = int(response.status)
+        if len(raw) > 4 * 1024 * 1024:
+            raise AdminApiError(
+                "AUTOMATION_RESPONSE_TOO_LARGE",
+                "release automation response was too large",
+                retryable=True,
+                status=status,
+            )
+        if not raw:
+            return status, {}
+        try:
+            value = json.loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise AdminApiError(
+                "AUTOMATION_INVALID_RESPONSE",
+                "release automation response was invalid",
+                retryable=status >= 500,
+                status=status,
+            ) from exc
+        if not isinstance(value, Mapping):
+            raise AdminApiError(
+                "AUTOMATION_INVALID_RESPONSE",
+                "release automation response must be an object",
+                retryable=status >= 500,
+                status=status,
+            )
+        return status, dict(value)
+
+    def _send(self, request: Request) -> tuple[int, Mapping[str, Any]]:
+        try:
+            response = urlopen(request, timeout=self.timeout_seconds)
+        except HTTPError as exc:
+            response = exc
+        except (URLError, OSError, TimeoutError) as exc:
+            raise AdminApiError(
+                "AUTOMATION_SERVICE_UNAVAILABLE",
+                "release automation service is unavailable",
+                retryable=True,
+            ) from exc
+        return self._read_response(response)
+
+    def json_request(
+        self,
+        method: str,
+        path: str,
+        headers: Mapping[str, str],
+        payload: Mapping[str, Any] | None,
+    ) -> tuple[int, Mapping[str, Any]]:
+        body = None if payload is None else json.dumps(
+            payload,
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        request_headers = dict(headers)
+        request_headers["Accept"] = "application/json"
+        if body is not None:
+            request_headers["Content-Type"] = "application/json"
+        return self._send(
+            Request(
+                self._url(path),
+                data=body,
+                headers=request_headers,
+                method=method,
+            )
+        )
+
+    def upload(
+        self,
+        path: str,
+        headers: Mapping[str, str],
+        source: str | Path,
+        metadata_headers: Mapping[str, str],
+    ) -> Mapping[str, Any]:
+        package = Path(source)
+        if package.is_symlink() or not package.is_file():
+            raise ValueError("release package must be a regular file")
+        request_headers = dict(headers)
+        request_headers.update(metadata_headers)
+        request_headers["Accept"] = "application/json"
+        request_headers["Content-Type"] = "application/zip"
+        status, response = self._send(
+            Request(
+                self._url(path),
+                data=package.read_bytes(),
+                headers=request_headers,
+                method="PUT",
+            )
+        )
+        if 200 <= status < 300:
+            return response
+        error = response.get("error")
+        if isinstance(error, Mapping):
+            raise AdminApiError(
+                str(error.get("code") or "AUTOMATION_REQUEST_FAILED"),
+                str(error.get("message") or "release automation upload failed"),
+                bool(error.get("retryable", False)),
+                str(error.get("request_id")) if error.get("request_id") else None,
+                status,
+            )
+        raise AdminApiError(
+            "AUTOMATION_REQUEST_FAILED",
+            "release automation upload failed",
+            status=status,
+        )
 
 
 class ReleaseAutomationClient:
