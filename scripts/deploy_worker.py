@@ -637,6 +637,62 @@ def deploy_staging_worker(
     return result
 
 
+def deploy_production_worker(
+    config_path: str | Path,
+    *,
+    environment: str,
+    source_sha: str,
+    policy_path: str | Path = _DEFAULT_POLICY_PATH,
+    trust_profile_path: str | Path | None = None,
+    api_origin: str | None = None,
+    declared_secret_names: Collection[str] = (),
+    secrets_file: str | Path | None = None,
+    runner: Callable[..., object] = subprocess.run,
+    emit: Callable[[str], object] = print,
+) -> DeploymentPreflightResult:
+    if environment != "production":
+        raise ValueError("production deployment action requires environment=production")
+    if (
+        not isinstance(source_sha, str)
+        or len(source_sha) != 40
+        or any(character not in "0123456789abcdef" for character in source_sha)
+    ):
+        raise ValueError("production deployment source SHA must be 40 lowercase hex characters")
+    result = preflight_worker_deployment(
+        config_path,
+        environment=environment,
+        policy_path=policy_path,
+        trust_profile_path=trust_profile_path,
+        api_origin=api_origin,
+        declared_secret_names=declared_secret_names,
+    )
+    validated_secrets_file = (
+        None
+        if secrets_file is None
+        else _validated_external_secrets_file(secrets_file)
+    )
+    safe = result.to_safe_mapping()
+    safe["source_sha"] = source_sha
+    emit(json.dumps(safe, sort_keys=True))
+    source = Path(config_path).resolve()
+    npx = shutil.which("npx")
+    if npx is None:
+        raise RuntimeError("npx executable is unavailable")
+    command = [
+        npx,
+        "wrangler",
+        "deploy",
+        "--env",
+        "production",
+        "--config",
+        str(source),
+    ]
+    if validated_secrets_file is not None:
+        command.extend(["--secrets-file", str(validated_secrets_file)])
+    runner(command, cwd=source.parent, check=True)
+    return result
+
+
 def _add_target_arguments(
     command: argparse.ArgumentParser,
     *,
