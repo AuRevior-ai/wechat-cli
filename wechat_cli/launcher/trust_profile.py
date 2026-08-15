@@ -102,6 +102,32 @@ class DeploymentTrustProfile:
             windows_publisher_policy=publisher_policy,
         )
 
+    def assert_private_production_contract(
+        self,
+        *,
+        expected_api_origin: str | None = None,
+    ) -> None:
+        if self.schema_version != 2:
+            raise ValueError("private production trust profile requires schema version 2")
+        if self.distribution_profile != "private_controlled":
+            raise ValueError("private production trust profile requires private_controlled")
+        if self.environment != "production":
+            raise ValueError("private production trust profile requires production environment")
+        if self.expected_channel != "stable":
+            raise ValueError("private production trust profile requires stable channel")
+        if self.windows_publisher_policy:
+            raise ValueError("private production trust profile requires empty publisher policy")
+        if set(self.release_public_keys) != {"release-key-production-01"}:
+            raise ValueError("private production trust profile release key identity is invalid")
+        if set(self.lease_public_keys) != {"lease-key-production-01"}:
+            raise ValueError("private production trust profile lease key identity is invalid")
+        if "replace" in self.fingerprint_salt.lower() or "<" in self.fingerprint_salt:
+            raise ValueError("private production trust profile fingerprint salt is unresolved")
+        if expected_api_origin is not None:
+            expected = str(expected_api_origin).strip().rstrip("/")
+            if not expected or expected != self.api_base_url:
+                raise ValueError("private production trust profile API origin mismatch")
+
     @classmethod
     def load(cls, path: str | Path) -> "DeploymentTrustProfile":
         source = Path(path)

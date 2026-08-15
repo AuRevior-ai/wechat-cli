@@ -136,6 +136,72 @@ class DeploymentTrustProfileTests(unittest.TestCase):
         self.assertEqual("private_controlled", profile.distribution_profile)
         self.assertEqual("", profile.windows_publisher_policy)
 
+    def test_private_production_contract_requires_exact_first_launch_trust_ids(self):
+        from wechat_cli.launcher.trust_profile import DeploymentTrustProfile
+
+        data = self.profile_mapping(
+            schema_version=2,
+            distribution_profile="private_controlled",
+            environment="production",
+            api_base_url="https://api.example.test",
+            expected_channel="stable",
+            fingerprint_salt="fresh-production-fingerprint-salt",
+            release_public_keys={"release-key-production-01": PUBLIC_KEY_B64},
+            lease_public_keys={"lease-key-production-01": PUBLIC_KEY_B64},
+            windows_publisher_policy="",
+        )
+        profile = DeploymentTrustProfile.from_mapping(data)
+        profile.assert_private_production_contract(
+            expected_api_origin="https://api.example.test"
+        )
+
+        cases = [
+            ("wrong release key", {"release_public_keys": {"release-key-staging-01": PUBLIC_KEY_B64}}),
+            ("extra release key", {"release_public_keys": {"release-key-production-01": PUBLIC_KEY_B64, "release-key-production-02": PUBLIC_KEY_B64}}),
+            ("wrong lease key", {"lease_public_keys": {"lease-key-staging-01": PUBLIC_KEY_B64}}),
+            ("placeholder fingerprint", {"fingerprint_salt": "REPLACE_WITH_PRODUCTION_FINGERPRINT"}),
+            ("publisher unexpectedly enabled", {"windows_publisher_policy": "CN=Unexpected"}),
+        ]
+        for label, override in cases:
+            with self.subTest(label=label):
+                invalid = dict(data)
+                invalid.update(override)
+                candidate = DeploymentTrustProfile.from_mapping(invalid)
+                with self.assertRaises(ValueError):
+                    candidate.assert_private_production_contract(
+                        expected_api_origin="https://api.example.test"
+                    )
+
+        with self.assertRaisesRegex(ValueError, "origin"):
+            profile.assert_private_production_contract(
+                expected_api_origin="https://other.example.test"
+            )
+
+    def test_private_production_profile_cannot_be_redirected_to_staging_by_mutable_config(self):
+        from wechat_cli.launcher.trust_profile import DeploymentTrustProfile
+
+        profile = DeploymentTrustProfile.from_mapping(
+            self.profile_mapping(
+                schema_version=2,
+                distribution_profile="private_controlled",
+                environment="production",
+                api_base_url="https://api.prod.example.test",
+                expected_channel="stable",
+                release_public_keys={"release-key-production-01": PUBLIC_KEY_B64},
+                lease_public_keys={"lease-key-production-01": PUBLIC_KEY_B64},
+                windows_publisher_policy="",
+            )
+        )
+        with self.assertRaisesRegex(ValueError, "api_base_url"):
+            LauncherConfig.from_mapping(
+                {
+                    "schema_version": 2,
+                    "port": 8787,
+                    "api_base_url": "https://wechat-cli-license-update-staging.example.test",
+                },
+                trust_profile=profile,
+            )
+
     def test_schema2_public_formal_requires_publisher(self):
         from wechat_cli.launcher.trust_profile import DeploymentTrustProfile
 

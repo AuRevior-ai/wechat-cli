@@ -522,6 +522,10 @@ def _validate_trust_profile(
     profile = profile_type.load(trust_profile_path)
     if profile.environment != environment:
         raise ValueError("deployment trust profile environment does not match target")
+    if environment == "production":
+        profile.assert_private_production_contract(
+            expected_api_origin=api_origin.strip().rstrip("/"),
+        )
     expected_origin = profile.api_base_url.rstrip("/")
     actual_origin = api_origin.strip().rstrip("/")
     if actual_origin != expected_origin:

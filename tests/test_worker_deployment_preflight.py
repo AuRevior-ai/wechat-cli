@@ -114,18 +114,29 @@ class WorkerDeploymentPreflightTests(unittest.TestCase):
                 "staging": "https://staging-api.example.test",
                 "production": "https://api.example.test",
             }[environment]
-        profile = {
-            "schema_version": 1,
-            "environment": environment,
-            "api_base_url": api_origin,
-            "expected_channel": "stable" if environment == "production" else "beta",
-            "fingerprint_salt": f"{environment}-fingerprint-salt",
-            "release_public_keys": {"release-test": "release-public-key"},
-            "lease_public_keys": {"lease-test": "lease-public-key"},
-            "windows_publisher_policy": (
-                "CN=Expected Publisher" if environment == "production" else "CN=Board6 Test"
-            ),
-        }
+        if environment == "production":
+            profile = {
+                "schema_version": 2,
+                "distribution_profile": "private_controlled",
+                "environment": "production",
+                "api_base_url": api_origin,
+                "expected_channel": "stable",
+                "fingerprint_salt": "fresh-production-fingerprint-salt",
+                "release_public_keys": {"release-key-production-01": "release-public-key"},
+                "lease_public_keys": {"lease-key-production-01": "lease-public-key"},
+                "windows_publisher_policy": "",
+            }
+        else:
+            profile = {
+                "schema_version": 1,
+                "environment": environment,
+                "api_base_url": api_origin,
+                "expected_channel": "beta",
+                "fingerprint_salt": f"{environment}-fingerprint-salt",
+                "release_public_keys": {"release-test": "release-public-key"},
+                "lease_public_keys": {"lease-test": "lease-public-key"},
+                "windows_publisher_policy": "CN=Board6 Test",
+            }
         path = root / "deployment-trust-profile.json"
         path.write_text(json.dumps(profile), encoding="utf-8")
         return path
@@ -623,6 +634,25 @@ class WorkerDeploymentPreflightTests(unittest.TestCase):
                     self.assertIsInstance(exc, ValueError)
                 else:
                     self.fail("missing deployment binding must fail closed")
+
+    def test_preflight_rejects_non_board7_private_production_trust_contract(self):
+        from scripts.deploy_worker import preflight_worker_deployment
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config_path = self._write_config(root, self._config())
+            profile_path = self._write_profile(root)
+            profile = json.loads(profile_path.read_text(encoding="utf-8"))
+            profile["release_public_keys"] = {"release-key-staging-01": "release-public-key"}
+            profile_path.write_text(json.dumps(profile), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "release key"):
+                preflight_worker_deployment(
+                    config_path,
+                    environment="production",
+                    trust_profile_path=profile_path,
+                    api_origin="https://api.example.test",
+                    declared_secret_names=self._production_secret_names(),
+                )
 
     def test_preflight_rejects_trust_profile_environment_and_origin_mismatch(self):
         from scripts.deploy_worker import preflight_worker_deployment
