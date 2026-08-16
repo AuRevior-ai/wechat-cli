@@ -71,6 +71,14 @@ jobs:
           if ([string]::IsNullOrWhiteSpace($env:PRODUCTION_TRUST_PROFILE_JSON)) { throw 'production trust profile is unavailable' }
           $path = Join-Path $env:RUNNER_TEMP 'deployment-trust-profile.json'
           [IO.File]::WriteAllText($path, $env:PRODUCTION_TRUST_PROFILE_JSON, (New-Object Text.UTF8Encoding($false)))
+      - name: Materialize production Worker Secret bundle in runner temp
+        shell: pwsh
+        env:
+          PRODUCTION_WORKER_SECRETS_JSON: ${{ secrets.PRODUCTION_WORKER_SECRETS_JSON }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:PRODUCTION_WORKER_SECRETS_JSON)) { throw 'production Worker Secret bundle is unavailable' }
+          $secretsFile = Join-Path $env:RUNNER_TEMP 'worker-secrets.production.json'
+          [IO.File]::WriteAllText($secretsFile, $env:PRODUCTION_WORKER_SECRETS_JSON, (New-Object Text.UTF8Encoding($false)))
       - name: Atomic production Worker deploy after fail-closed preflight
         shell: pwsh
         env:
@@ -78,12 +86,14 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           $profile = Join-Path $env:RUNNER_TEMP 'deployment-trust-profile.json'
+          $secretsFile = Join-Path $env:RUNNER_TEMP 'worker-secrets.production.json'
           python scripts/deploy_worker.py deploy `
             --environment production `
             --source-sha '${{ inputs.source_sha }}' `
             --config services/license-update-worker/wrangler.jsonc `
             --trust-profile $profile `
             --api-origin '${{ vars.PRODUCTION_API_ORIGIN }}' `
+            --secrets-file $secretsFile `
             --secret-name ADMIN_SESSION_PEPPER_V1 `
             --secret-name CONTACT_ENCRYPTION_KEY_V1 `
             --secret-name CONTACT_LOOKUP_PEPPER_V1 `
@@ -93,7 +103,11 @@ jobs:
             --secret-name LEASE_SIGNING_PRIVATE_KEY `
             --secret-name LICENSE_KEY_PEPPER_V1 `
             --secret-name RATE_LIMIT_PEPPER_V1
-      - name: Remove temporary trust profile
+      - name: Remove temporary deployment material
         if: always()
         shell: pwsh
-        run: Remove-Item -LiteralPath (Join-Path $env:RUNNER_TEMP 'deployment-trust-profile.json') -Force -ErrorAction SilentlyContinue
+        run: |
+          $profile = Join-Path $env:RUNNER_TEMP 'deployment-trust-profile.json'
+          $secretsFile = Join-Path $env:RUNNER_TEMP 'worker-secrets.production.json'
+          Remove-Item -LiteralPath $profile -Force -ErrorAction SilentlyContinue
+          Remove-Item -LiteralPath $secretsFile -Force -ErrorAction SilentlyContinue

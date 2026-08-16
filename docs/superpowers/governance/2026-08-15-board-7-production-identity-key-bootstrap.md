@@ -2,7 +2,7 @@
 
 Date: 2026-08-15
 Gate: B7-G4 Production Identity & Key Bootstrap
-Status: READY FOR SOURCE INTEGRATION
+Status: ACCEPTED COMPLETE
 
 ## Canonical entry boundary
 
@@ -184,4 +184,12 @@ Fresh local closure verification after identity/config finalization:
 
 No Worker application deployment, release publication, license creation, rollout, or Public / Formal Authenticode action occurred in B7-G4.
 
-B7-G4 becomes accepted complete only after this exact reviewed G4 head passes hosted branch/PR CI, is history-preserving merged into canonical `main`, and fresh remote-main readback matches the resulting merge commit. B7-G5 must deploy only from that post-G4 canonical main.
+## Source integration closure
+
+The reviewed G4 head `77812d4b064cb23e87fc8cb328f5804b399c7e70` passed both branch and PR hosted CI checks and was history-preserving merged through PR #5. The resulting canonical merge commit is:
+
+`13acc173b47355c0944d4c850b9e81384fd1bbc6`
+
+Fresh remote-main readback matched that exact SHA. Post-merge canonical-main CI run `31919733466` completed successfully, including Python full suite, Worker typecheck/Vitest, deployment/workflow policy, tracked sensitive-value scan, and Git whitespace verification.
+
+Therefore B7-G4 is accepted complete. B7-G5 may deploy only from this or a later history-preserving canonical-main descendant whose G5-only source repair has itself passed exact-head CI and canonical-main verification.
