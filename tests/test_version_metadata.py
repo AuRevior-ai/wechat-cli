@@ -38,13 +38,13 @@ def load_build_script():
 
 
 class VersionMetadataTests(unittest.TestCase):
-    def test_runtime_and_project_versions_match(self):
+    def test_internal_canary_runtime_and_python_distribution_versions_are_explicit(self):
         with (ROOT / "pyproject.toml").open("rb") as stream:
             project_version = tomllib.load(stream)["project"]["version"]
 
-        self.assertEqual("0.6.0", APP_VERSION)
-        self.assertEqual("0.6.0", project_version)
-        self.assertEqual(project_version, APP_VERSION)
+        self.assertEqual("0.6.1-canary.1", APP_VERSION)
+        self.assertEqual("0.6.1.dev1", project_version)
+        self.assertNotEqual(project_version, APP_VERSION)
         self.assertEqual("0.2.0", LAUNCHER_VERSION)
 
     def test_pywebview_is_pinned_to_board5_accepted_version(self):

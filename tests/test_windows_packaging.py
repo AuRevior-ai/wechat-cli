@@ -9,6 +9,8 @@ import zipfile
 from pathlib import Path
 from unittest.mock import patch
 
+from wechat_cli.version import APP_VERSION
+
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -76,7 +78,7 @@ class WindowsPackagingTests(unittest.TestCase):
             ROOT / "packaging" / "windows" / "README-APP.md"
         ).read_text(encoding="utf-8")
 
-        self.assertIn('version = "0.6.0"', pyproject)
+        self.assertIn('version = "0.6.1.dev1"', pyproject)
         self.assertIn('authors = [{ name = "Au Revior" }]', pyproject)
         self.assertIn("作者：Au Revior", guide)
         self.assertIn("关于与支持", guide)
@@ -573,7 +575,7 @@ class WindowsPackagingTests(unittest.TestCase):
             ) as binary_path:
                 update_zip = package.create_update_only_package(skip_build=True)
 
-            self.assertEqual("wechat-cli-app-0.6.0-win-x64.zip", update_zip.name)
+            self.assertEqual(f"wechat-cli-app-{APP_VERSION}-win-x64.zip", update_zip.name)
             binary_path.assert_called_once_with("wechat-cli.exe")
             self.assertEqual("keep", bootstrap_marker.read_text(encoding="utf-8"))
             self.assertEqual(b"keep-bootstrap", bootstrap_zip.read_bytes())
@@ -587,7 +589,7 @@ class WindowsPackagingTests(unittest.TestCase):
         self.assertEqual(
             {
                 "product": "wechat-cli-web",
-                "version": "0.6.0",
+                "version": APP_VERSION,
                 "platform": "windows",
                 "architecture": "x86_64",
                 "entrypoint": "wechat-cli.exe",
@@ -604,7 +606,7 @@ class WindowsPackagingTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             dist = Path(tmp)
-            target = dist / "wechat-cli-app-0.6.0-win-x64.zip"
+            target = dist / f"wechat-cli-app-{APP_VERSION}-win-x64.zip"
             target.write_bytes(b"existing")
             with patch.object(package, "DIST_DIR", dist), patch.object(
                 package, "_binary_path"

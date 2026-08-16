@@ -4,7 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "wechat-cli"
-version = "0.6.0"
+# PEP 440 companion for runtime SemVer 0.6.1-canary.1.
+version = "0.6.1.dev1"
 description = "WeChat data query CLI for LLMs"
 authors = [{ name = "Au Revior" }]
 requires-python = ">=3.10"
