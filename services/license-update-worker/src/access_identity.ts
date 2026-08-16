@@ -10,6 +10,7 @@ export interface AccessJwtVerifierOptions {
   jwksUrl: string;
   audiences: string[];
   identityClaim: string;
+  serviceTokenMode?: boolean;
   fetchJwks: (url: string) => Promise<{ keys: JsonWebKey[] }>;
   cacheTtlSeconds?: number;
   clockSkewSeconds?: number;
@@ -125,6 +126,7 @@ export class AccessJwtVerifier {
   private readonly jwksUrl: string;
   private readonly audiences: Set<string>;
   private readonly identityClaim: string;
+  private readonly serviceTokenMode: boolean;
   private readonly fetchJwks: AccessJwtVerifierOptions["fetchJwks"];
   private readonly cacheTtlMs: number;
   private readonly clockSkewSeconds: number;
@@ -151,11 +153,15 @@ export class AccessJwtVerifier {
     if (!/^[A-Za-z0-9_.-]{1,64}$/u.test(options.identityClaim)) {
       throw new TypeError("Access identity claim is invalid");
     }
+    if (options.serviceTokenMode === true && options.identityClaim !== "common_name") {
+      throw new TypeError("Access service-token identity claim must be common_name");
+    }
 
     this.issuer = options.issuer.replace(/\/$/u, "");
     this.jwksUrl = options.jwksUrl;
     this.audiences = new Set(options.audiences);
     this.identityClaim = options.identityClaim;
+    this.serviceTokenMode = options.serviceTokenMode === true;
     this.fetchJwks = options.fetchJwks;
     this.cacheTtlMs = Math.max(1, Math.min(options.cacheTtlSeconds ?? 300, 3600)) * 1000;
     this.clockSkewSeconds = Math.max(0, Math.min(options.clockSkewSeconds ?? 30, 120));
@@ -243,8 +249,11 @@ export class AccessJwtVerifier {
       throw invalidIdentity("管理员身份验证时钟无效。");
     }
     const exp = numericClaim(rawPayload, "exp");
-    const nbf = numericClaim(rawPayload, "nbf");
     const iat = numericClaim(rawPayload, "iat");
+    const nbf =
+      this.serviceTokenMode && rawPayload.nbf === undefined
+        ? iat
+        : numericClaim(rawPayload, "nbf");
     if (
       exp <= nowSeconds - this.clockSkewSeconds ||
       nbf > nowSeconds + this.clockSkewSeconds ||
@@ -262,12 +271,15 @@ export class AccessJwtVerifier {
     if (!audiences.some((audience) => this.audiences.has(audience))) {
       throw invalidIdentity();
     }
+    if (this.serviceTokenMode && rawPayload.type !== "app") {
+      throw invalidIdentity();
+    }
     const subject = rawPayload.sub;
     const identity = rawPayload[this.identityClaim];
     if (
       typeof subject !== "string" ||
-      !subject ||
       subject.length > 512 ||
+      (this.serviceTokenMode ? subject !== "" : !subject) ||
       typeof identity !== "string" ||
       !identity ||
       identity.length > 512
