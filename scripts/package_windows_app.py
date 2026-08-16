@@ -41,13 +41,21 @@ WINDOWS_PACKAGE_FILES = (
 )
 
 
+_PYTHON_DISTRIBUTION_VERSION_BY_APP_VERSION = {
+    "0.6.1-canary.1": "0.6.1.dev1",
+}
+
+
 def read_version() -> str:
     runtime = runpy.run_path(str(ROOT / "wechat_cli" / "version.py"))["APP_VERSION"]
     with open(ROOT / "pyproject.toml", "rb") as stream:
         project = tomllib.load(stream)["project"]["version"]
-    if runtime != project:
+    expected_project = _PYTHON_DISTRIBUTION_VERSION_BY_APP_VERSION.get(runtime, runtime)
+    if project != expected_project:
         raise RuntimeError(
-            f"Version mismatch: wechat_cli/version.py={runtime}, pyproject.toml={project}"
+            "Version mismatch: "
+            f"wechat_cli/version.py={runtime}, pyproject.toml={project}, "
+            f"expected_pyproject={expected_project}"
         )
     return str(runtime)
 

@@ -13,6 +13,7 @@ from wechat_cli.license.client import (
 from wechat_cli.license.lease import OfflineLease, TrustedTimeState
 from wechat_cli.license.models import ClientLicenseState, ValidationResult
 from wechat_cli.update.errors import ErrorCode
+from wechat_cli.version import APP_VERSION
 
 
 class FakeTransport:
@@ -43,7 +44,7 @@ class LicenseApiClientTests(unittest.TestCase):
         self.assertEqual(200, status)
         self.assertTrue(payload["ok"])
         request = mocked_urlopen.call_args.args[0]
-        self.assertEqual("WeChatCliLicense/0.6.0", request.get_header("User-agent"))
+        self.assertEqual(f"WeChatCliLicense/{APP_VERSION}", request.get_header("User-agent"))
 
     def test_activate_sends_permanent_key_only_in_json_body(self):
         transport = FakeTransport(
