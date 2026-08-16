@@ -25,7 +25,7 @@
 | 4 | 首次测试许可证与测试发布 | **已完成** | Task 1–7 全部完成；验收报告已生成，0.5.0/0.5.1 staging 资产与 Worker 状态已最终复核 |
 | 5 | Windows 真实端到端验收 | **已完成** | functional E2E、process-tree repair、fresh rollback、version-level suppression、fault disable、Cloud Cleanup Gate、fresh final verification 与 final acceptance report 均已完成 |
 | 6 | 安全与正式交付准备 | **已完成** | B6-G0..G8 accepted complete under Private / Controlled Distribution；final report=`docs/deployment/2026-08-12-board-6-security-delivery-preparation-report.md`；final staging Worker=`633945cb...`；commercial Authenticode deferred optional for future Public / Formal Distribution；production remained fail-closed and unmutated |
-| 7 | 自动化发布与正式上线 | **B7-G4 identity/key bootstrap 进行中** | B7-G0..G3 accepted complete；PR #4 merge=`8188384...` 且 canonical-main CI PASS；production clean-room D1/R2/Access identities 已 canonical，Worker 仍 undeployed；当前生成/封存 fresh V1 runtime material、production signing keys、principals 与 machine identity，remaining closed mutation matrix 按 Strong Authorization 自主执行 |
+| 7 | 自动化发布与正式上线 | **B7-G6 accepted；B7-G7 canary 进入** | B7-G0..G6 accepted；canonical main=`c8f404b4...`；production Worker live；stable `0.6.0` 已经 automation publish/register 且保持 `enabled=false` / `paused=true` / rollout 0；`v0.6.0` 为用户批准的唯一 G6 GitHub-native immutability exception，release repo 已启用 Immutable Releases 供后续发布；下一步只允许 exactly one internal beta canary license/device，无 real Private user issuance |
 
 ## 3. 板块 1：本地最终收尾
 
@@ -313,7 +313,7 @@ B6-G0 已选择性集成审核后的 Board 5 product lineage，未 wholesale mer
 
 ### 状态
 
-**已完成；B6-G0 through B6-G8 accepted complete。当前 closure profile=Private / Controlled Distribution；commercial Authenticode deferred optional。Board 7 已完成 B7-G0/B7-G1/B7-G2/B7-G3/B7-G4；current canonical remote `main=13acc173b47355c0944d4c850b9e81384fd1bbc6` 且 post-G4 CI run `31919733466` PASS；当前 B7-G5 Production Worker Deploy 处于 pre-deploy source repair，production application Worker 仍 undeployed。**
+**已完成；B6-G0 through B6-G8 accepted complete。当前 closure profile=Private / Controlled Distribution；commercial Authenticode deferred optional。Board 7 已完成并 accepted B7-G0 through B7-G6；current canonical remote `main=c8f404b4d9d627f6530890b2f7a6b2c4f4743645` 且 post-G6 User-Agent repair CI run `31929765569` PASS；production Worker live，stable `0.6.0` 已 publish/register 但仍 `enabled=false` / `paused=true` / rollout 0。当前进入 B7-G7 Production Canary E2E；无 real Private user issuance。**
 
 ## 9. 板块 7：自动化发布与正式上线
 
@@ -339,7 +339,7 @@ B6-G0 已选择性集成审核后的 Board 5 product lineage，未 wholesale mer
 
 ### 状态
 
-**B7-G0/B7-G1/B7-G2/B7-G3/B7-G4/B7-G5 accepted；canonical remote `main=f760355779d05f59d1bcc81bd3dec40d38872be2`，exact post-G5 repair CI PASS。** Primary integration=`f63eb76...`，whitespace repair PR #2=`a47bb215...`，Strong Authorization PR #3=`fd29a2a...`，production infrastructure PR #4=`8188384...`，production identity bootstrap PR #5=`13acc173...`，atomic Worker Secret-bundle wiring PR #6=`4608d8b...`，Service Token JWT compatibility repair PR #7=`f760355...`。B7-G5 governance=`docs/superpowers/governance/2026-08-16-board-7-production-worker-deployment-acceptance.md`；current production Worker Version=`ceedf5c8-111c-41e8-83f2-72733225352c`，API health/ingress/workers.dev boundaries accepted，human Access 30-minute `wcas` accepted，real automation Service Token read accepted，production D1 remains zero licenses/devices/releases。当前下一 gate 为 B7-G6 CI/CD Automation Acceptance；首个允许的 production release-preparation target 仍是 stable `0.6.0` 且必须 terminally `enabled=false` / `paused=true`，B7-G6 不授权 enable。历史 frozen main=`a579a25cb7f16e6fdf88d618252b4a5cbffef53d` 与本地 retained main checkout 继续作为 historical boundary；commercial Authenticode 继续 deferred。
+**B7-G0/B7-G1/B7-G2/B7-G3/B7-G4/B7-G5/B7-G6 accepted；canonical remote `main=c8f404b4d9d627f6530890b2f7a6b2c4f4743645`，exact post-G6 repair CI run `31929765569` PASS。** Primary integration=`f63eb76...`，whitespace repair PR #2=`a47bb215...`，Strong Authorization PR #3=`fd29a2a...`，production infrastructure PR #4=`8188384...`，production identity bootstrap PR #5=`13acc173...`，atomic Worker Secret-bundle wiring PR #6=`4608d8b...`，Service Token JWT compatibility repair PR #7=`f760355...`，G6 packaging repair PR #9=`8f7f457...`，credential preflight PR #10=`6e99e858...`，Python transport probe PR #11=`dc5e25b...`，automation product User-Agent PR #12=`c8f404b4...`。B7-G5 governance=`docs/superpowers/governance/2026-08-16-board-7-production-worker-deployment-acceptance.md`；B7-G6 governance=`docs/superpowers/governance/2026-08-16-board-7-production-automation-acceptance.md`。Accepted G6 workflow run `31929835013` published/registered stable `0.6.0` with exact D1 terminal state `enabled=false` / `paused=true` / rollout 0 and reconciled R2/GitHub/D1 hashes. GitHub-native `isImmutable=false` on this already-published release triggered a hard stop; the user approved retaining it as the one G6 exception and enabling repository-level Immutable Releases prospectively. Fresh setting readback is `enabled=true`; no retroactive immutable claim is made for `v0.6.0`. 当前进入 B7-G7 Production Canary E2E；exactly one internal beta canary license/device is allowed，no real Private user issuance。历史 frozen main=`a579a25cb7f16e6fdf88d618252b4a5cbffef53d` 与本地 retained main checkout 继续作为 historical boundary；commercial Authenticode 继续 deferred。
 
 ## 10. 当前下一步
 
