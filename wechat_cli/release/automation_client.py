@@ -11,6 +11,10 @@ from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
 from ..admin.client import AdminApiError
+from ..version import APP_VERSION
+
+
+_AUTOMATION_USER_AGENT = f"WeChatCliReleaseAutomation/{APP_VERSION}"
 
 
 class AutomationJsonTransport(Protocol):
@@ -123,6 +127,7 @@ class UrllibReleaseAutomationTransport:
         ).encode("utf-8")
         request_headers = dict(headers)
         request_headers["Accept"] = "application/json"
+        request_headers["User-Agent"] = _AUTOMATION_USER_AGENT
         if body is not None:
             request_headers["Content-Type"] = "application/json"
         return self._send(
@@ -148,6 +153,7 @@ class UrllibReleaseAutomationTransport:
         request_headers.update(metadata_headers)
         request_headers["Accept"] = "application/json"
         request_headers["Content-Type"] = "application/zip"
+        request_headers["User-Agent"] = _AUTOMATION_USER_AGENT
         status, response = self._send(
             Request(
                 self._url(path),
