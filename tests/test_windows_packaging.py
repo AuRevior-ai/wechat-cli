@@ -849,8 +849,9 @@ class WindowsPackagingTests(unittest.TestCase):
                     build_id="prod-060-20335fa7df13",
                 )
 
-            self.assertEqual(output_dir / "wechat-cli-app-0.6.0-win-x64.zip", update_zip)
+            self.assertEqual("wechat-cli-app-0.6.0-win-x64.zip", update_zip.name)
             self.assertTrue(update_zip.is_file())
+            self.assertTrue(update_zip.samefile(output_dir / update_zip.name))
             self.assertFalse(dist.exists())
             with zipfile.ZipFile(update_zip, "r") as archive:
                 manifest = json.loads(archive.read("app-manifest.json").decode("utf-8"))
