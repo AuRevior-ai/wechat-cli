@@ -850,6 +850,7 @@ class WindowsPackagingTests(unittest.TestCase):
             self.assertEqual(update_zip, returned_update)
             self.assertTrue(captured["metadata"]["production_capable"])
             self.assertEqual("production-installer", captured["metadata"]["distribution_tier"])
+            self.assertEqual("stable", captured["metadata"]["channel"])
             self.assertEqual([("build", "installer")], events)
             self.assertTrue(final_installer.parent.samefile(output_dir))
 
@@ -1378,6 +1379,15 @@ class WindowsPackagingTests(unittest.TestCase):
         self.assertIn("$PreviousVersion = $LegacyVersion", script)
         self.assertIn("Existing legacy app was preserved", script)
         self.assertNotIn("Remove-Item -Force -Recurse $LegacyAppDir", script)
+
+    def test_installer_accepts_embedded_production_channel_when_operational_config_omits_channel(self):
+        script = (ROOT / "packaging" / "windows" / "install.ps1").read_text(encoding="utf-8")
+
+        self.assertIn('$SourceConfigData = Get-Content -Raw -Encoding UTF8 $SourceConfig | ConvertFrom-Json', script)
+        self.assertIn('if ($SourceConfigData.PSObject.Properties.Name -contains "channel")', script)
+        self.assertIn('elseif ($PackageMetadata.PSObject.Properties.Name -contains "channel")', script)
+        self.assertIn('$Channel = [string]$PackageMetadata.channel', script)
+        self.assertIn('if ($Channel -notin @("stable", "beta"))', script)
 
     def test_installer_supports_isolated_no_start_no_shortcuts_mode(self):
         script = (ROOT / "packaging" / "windows" / "install.ps1").read_text(encoding="utf-8")

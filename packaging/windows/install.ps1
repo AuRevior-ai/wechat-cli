@@ -381,7 +381,13 @@ try {
     }
 
     $PreviousVersion = $null
-    $Channel = [string](Get-Content -Raw -Encoding UTF8 $SourceConfig | ConvertFrom-Json).channel
+    $SourceConfigData = Get-Content -Raw -Encoding UTF8 $SourceConfig | ConvertFrom-Json
+    $Channel = $null
+    if ($SourceConfigData.PSObject.Properties.Name -contains "channel") {
+        $Channel = [string]$SourceConfigData.channel
+    } elseif ($PackageMetadata.PSObject.Properties.Name -contains "channel") {
+        $Channel = [string]$PackageMetadata.channel
+    }
     if ($HadCurrentState) {
         try {
             $ExistingCurrent = Get-Content -Raw -Encoding UTF8 $CurrentStatePath | ConvertFrom-Json
@@ -415,6 +421,9 @@ try {
             $LegacyVersionCreated = $true
         }
         $PreviousVersion = $LegacyVersion
+    }
+    if ($Channel -notin @("stable", "beta")) {
+        throw "Package channel metadata is invalid."
     }
 
     Write-InstallTransaction -Stage "staged" -TransactionId $InstallTransactionId -Version $Version -LegacyVersion $LegacyVersion
