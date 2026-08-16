@@ -2,7 +2,7 @@
 
 Date: 2026-08-15
 Gate: B7-G4 Production Identity & Key Bootstrap
-Status: IN PROGRESS
+Status: READY FOR SOURCE INTEGRATION
 
 ## Canonical entry boundary
 
@@ -150,19 +150,38 @@ releases:register
 
 No wildcard scope is permitted. No standing legacy production admin token is created.
 
-## Remaining B7-G4 work
+## Executed B7-G4 work
 
-Before B7-G4 can be accepted complete:
+All ten planned B7-G4 bootstrap steps are now complete on the cloud/local side:
 
-1. generate the real repo-external production material through the tested helper;
-2. verify safe metadata/public-key/trust-profile/ACL evidence without exposing private values;
-3. insert the exact human production principal into clean-room production D1;
-4. create the exact Cloudflare Access Service Token `wechat-cli-release-automation-production`;
-5. record its safe client identity and bind only that identity to the automation Access Service Auth policy;
-6. finalize `ACCESS_AUTOMATION_IDENTITIES` and the exact automation principal row;
-7. create/install the dedicated GitHub App `wechat-cli-release-publisher` only on the release provenance repository, or hard-stop if the required secure identity boundary is unavailable;
-8. configure the `production` GitHub Environment credential boundary if available without security downgrade, otherwise use only an already-designed secure repo-external fallback;
-9. run the first identity-complete production preflight with the real repo-external trust profile and exact safe Secret-name inventory;
-10. perform read-only credential/bootstrap reconcile.
+1. fresh repo-external production material generated through the tested helper;
+2. safe output set and ACL evidence verified without exposing private values;
+3. exact human production principal inserted into clean-room production D1;
+4. exact Cloudflare Access Service Token created;
+5. exact Service Auth policy bound only to that token;
+6. production automation identity finalized in source and D1 with the approved three-scope matrix;
+7. dedicated GitHub App created and installed only on the release provenance repository;
+8. the source repository `production` GitHub Environment populated with the approved credential/variable boundary;
+9. first identity-complete production preflight passed with the real repo-external trust profile and exact nine-name Secret inventory;
+10. read-only D1 / GitHub bootstrap reconcile passed.
 
-No Worker application deployment, release publication, license creation, rollout, or Public / Formal Authenticode action occurs in B7-G4.
+Fresh production D1 state after bootstrap remains `licenses=0`, `devices=0`, `releases=0`, `admin_principals=1`, `admin_sessions=0`, `automation_principals=1`. The human principal has the exact eleven approved scopes. The automation principal has only `releases:upload`, `releases:read`, and `releases:register`; no wildcard and no `releases:state` capability exist.
+
+The dedicated GitHub App is `wechat-cli-release-publisher`, App ID `4608862`. Read-only installation verification proved repository selection is `selected`, with exactly one selected repository: `AuRevior-ai/wechat-cli-releases`. Effective permissions are `contents: write` plus GitHub-required `metadata: read` only.
+
+The `production` GitHub Environment remains restricted to branch `main`. Exact Environment Secret names present are `CLOUDFLARE_API_TOKEN`, `PRODUCTION_ACCESS_CLIENT_ID`, `PRODUCTION_ACCESS_CLIENT_SECRET`, `PRODUCTION_RELEASE_SIGNING_PRIVATE_KEY`, and `RELEASE_PUBLISHER_APP_PRIVATE_KEY`. Exact non-secret variables present are `CLOUDFLARE_ACCOUNT_ID`, `PRODUCTION_ADMIN_ORIGIN`, `PRODUCTION_API_ORIGIN`, `PRODUCTION_TRUST_PROFILE_JSON`, `RELEASE_PROVENANCE_OWNER`, `RELEASE_PROVENANCE_REPOSITORY`, `RELEASE_PROVENANCE_REPOSITORY_NAME`, and `RELEASE_PUBLISHER_APP_ID`. No private value is recorded in source.
+
+Fresh local closure verification after identity/config finalization:
+
+- Python full suite: 699 tests / 2 expected skips / 0 failures;
+- Worker typecheck: PASS;
+- Worker Vitest: 18 files / 130 tests PASS;
+- deployment/workflow focused suite: 48/48 PASS;
+- workflow source policy: PASS;
+- tracked sensitive-value scan: PASS;
+- `git diff --check`: PASS;
+- real production preflight with the repo-external trust profile: PASS.
+
+No Worker application deployment, release publication, license creation, rollout, or Public / Formal Authenticode action occurred in B7-G4.
+
+B7-G4 becomes accepted complete only after this exact reviewed G4 head passes hosted branch/PR CI, is history-preserving merged into canonical `main`, and fresh remote-main readback matches the resulting merge commit. B7-G5 must deploy only from that post-G4 canonical main.
