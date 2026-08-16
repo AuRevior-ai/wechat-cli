@@ -67,6 +67,7 @@ def build_binary(
     targets: list[str] | None = None,
     trust_profile_path: str | Path | None = None,
     installer_payload_path: str | Path | None = None,
+    source_sha: str | None = None,
 ) -> None:
     command = [sys.executable, str(ROOT / "npm" / "scripts" / "build.py"), PLATFORM]
     for target in targets or []:
@@ -75,6 +76,8 @@ def build_binary(
         command.extend(["--trust-profile", str(trust_profile_path)])
     if installer_payload_path is not None:
         command.extend(["--installer-payload", str(installer_payload_path)])
+    if source_sha is not None:
+        command.extend(["--source-sha", source_sha])
     subprocess.check_call(command, cwd=ROOT)
 
 
@@ -323,6 +326,8 @@ def create_production_installer(
     trust_profile_path: str | Path,
     signing_provider,
     authenticode_verifier=None,
+    output_dir: Path | None = None,
+    source_sha: str | None = None,
 ) -> tuple[Path, Path, Path]:
     from scripts.sign_windows_artifacts import sign_and_verify_windows_artifacts
     from wechat_cli.launcher.trust_profile import DeploymentTrustProfile
@@ -331,11 +336,25 @@ def create_production_installer(
     trust_profile = DeploymentTrustProfile.load(trust_profile_path)
     publisher = trust_profile.windows_publisher_policy.strip()
     private_controlled = trust_profile.distribution_profile == "private_controlled"
+    destination = (
+        DIST_DIR
+        if output_dir is None
+        else assert_outside_repository(output_dir, repository_root=ROOT)
+    )
+    build_id = None
+    if source_sha is not None:
+        from wechat_cli.version import production_build_id
+
+        build_id = production_build_id(source_sha)
     if private_controlled:
         package_dir, legacy_zip, update_zip = create_package(
             launcher_config_path=launcher_config_path,
             trust_profile_path=trust_profile_path,
             skip_build=False,
+            output_dir=None if output_dir is None else destination,
+            build_id=build_id,
+            source_sha=source_sha,
+            allow_overwrite=output_dir is None,
         )
         policy = AuthenticodePolicy(required=False)
     else:
@@ -374,7 +393,13 @@ def create_production_installer(
             ),
             encoding="utf-8",
         )
-        build_binary(targets=["installer"], installer_payload_path=payload)
+        build_kwargs = {
+            "targets": ["installer"],
+            "installer_payload_path": payload,
+        }
+        if source_sha is not None:
+            build_kwargs["source_sha"] = source_sha
+        build_binary(**build_kwargs)
 
     installer_source = _binary_path("wechat-cli-installer.exe")
     if policy.required:
@@ -384,8 +409,8 @@ def create_production_installer(
             policy=policy,
             verifier=authenticode_verifier,
         )
-    DIST_DIR.mkdir(parents=True, exist_ok=True)
-    final_installer = DIST_DIR / f"wechat-cli-installer-{version}-win-x64.exe"
+    destination.mkdir(parents=True, exist_ok=True)
+    final_installer = destination / f"wechat-cli-installer-{version}-win-x64.exe"
     if final_installer.exists():
         raise FileExistsError(f"installer output already exists: {final_installer}")
     shutil.copy2(installer_source, final_installer)
@@ -432,13 +457,28 @@ def create_package(
     launcher_config_path: str | Path,
     trust_profile_path: str | Path | None = None,
     skip_build: bool = False,
+    output_dir: Path | None = None,
+    build_id: str | None = None,
+    source_sha: str | None = None,
+    allow_overwrite: bool = True,
 ) -> tuple[Path, Path, Path]:
     if not skip_build:
-        build_binary(trust_profile_path=trust_profile_path)
+        build_kwargs = {"trust_profile_path": trust_profile_path}
+        if source_sha is not None:
+            build_kwargs["source_sha"] = source_sha
+        build_binary(**build_kwargs)
 
+    destination = (
+        DIST_DIR
+        if output_dir is None
+        else assert_outside_repository(output_dir, repository_root=ROOT)
+    )
+    destination.mkdir(parents=True, exist_ok=True)
     version = read_version()
-    package_dir = DIST_DIR / f"{PACKAGE_STEM}-{version}"
+    package_dir = destination / f"{PACKAGE_STEM}-{version}"
     if package_dir.exists():
+        if not allow_overwrite:
+            raise FileExistsError(f"Bootstrap directory already exists: {package_dir}")
         shutil.rmtree(package_dir)
     package_dir.mkdir(parents=True)
 
@@ -446,9 +486,13 @@ def create_package(
         package_dir,
         launcher_config_path=launcher_config_path,
         version=version,
+        build_id=build_id,
     )
 
-    archive_base = DIST_DIR / f"{PACKAGE_STEM}-{version}"
+    archive_base = destination / f"{PACKAGE_STEM}-{version}"
+    bootstrap_zip_path = Path(str(archive_base) + ".zip")
+    if bootstrap_zip_path.exists() and not allow_overwrite:
+        raise FileExistsError(f"Bootstrap archive already exists: {bootstrap_zip_path}")
     bootstrap_zip = Path(
         shutil.make_archive(
             str(archive_base),
@@ -457,7 +501,12 @@ def create_package(
             base_dir=package_dir.name,
         )
     )
-    update_zip = create_update_package(package_dir / "versions" / version, version)
+    update_zip = create_update_package(
+        package_dir / "versions" / version,
+        version,
+        allow_overwrite=allow_overwrite,
+        output_dir=destination,
+    )
     return package_dir, bootstrap_zip, update_zip
 
 
@@ -490,15 +539,27 @@ def main(argv: list[str] | None = None) -> None:
         action="store_true",
         help="Package only a bootstrap from explicit source/binary roots into external output.",
     )
+    parser.add_argument(
+        "--production-installer",
+        action="store_true",
+        help="Build the production installer directly into an external output directory.",
+    )
     parser.add_argument("--output-dir", type=Path)
     parser.add_argument("--source-root", type=Path)
     parser.add_argument("--binary-root", type=Path)
     parser.add_argument("--version")
     parser.add_argument("--build-id")
+    parser.add_argument("--source-sha")
     args = parser.parse_args(argv)
 
-    if args.update_only and args.bootstrap_only:
-        parser.error("--update-only and --bootstrap-only are mutually exclusive")
+    selected_modes = sum(
+        bool(value)
+        for value in (args.update_only, args.bootstrap_only, args.production_installer)
+    )
+    if selected_modes > 1:
+        parser.error(
+            "--update-only, --bootstrap-only, and --production-installer are mutually exclusive"
+        )
 
     if args.update_only:
         update_zip = create_update_only_package(
@@ -507,6 +568,28 @@ def main(argv: list[str] | None = None) -> None:
             version=args.version,
             build_id=args.build_id,
         )
+        print(f"[+] Update archive: {update_zip}")
+        return
+
+    if args.production_installer:
+        required = {
+            "--launcher-config": args.launcher_config,
+            "--launcher-trust-profile": args.launcher_trust_profile,
+            "--output-dir": args.output_dir,
+            "--source-sha": args.source_sha,
+        }
+        missing = [flag for flag, value in required.items() if value is None]
+        if missing:
+            parser.error(f"--production-installer requires {' '.join(missing)}")
+        installer, bootstrap_zip, update_zip = create_production_installer(
+            launcher_config_path=args.launcher_config,
+            trust_profile_path=args.launcher_trust_profile,
+            signing_provider=None,
+            output_dir=args.output_dir,
+            source_sha=args.source_sha,
+        )
+        print(f"[+] Production installer: {installer}")
+        print(f"[+] Bootstrap archive: {bootstrap_zip}")
         print(f"[+] Update archive: {update_zip}")
         return
 
