@@ -8,6 +8,7 @@ import runpy
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from typing import Mapping
 
@@ -29,6 +30,15 @@ def production_build_environment(
     environment["WECHAT_CLI_BUILD_ID"] = production_build_id(source_sha)
     environment["WECHAT_CLI_SOURCE_SHA"] = source_sha
     return environment
+
+
+def production_runtime_hook_source(source_sha: str) -> str:
+    build_id = production_build_id(source_sha)
+    return (
+        "import os\n"
+        f"os.environ['WECHAT_CLI_BUILD_ID'] = {build_id!r}\n"
+        f"os.environ['WECHAT_CLI_SOURCE_SHA'] = {source_sha!r}\n"
+    )
 
 
 PLATFORM_MAP = {
@@ -106,6 +116,7 @@ def make_pyinstaller_command(
     target: str = "app",
     trust_profile_path: str | Path | None = None,
     installer_payload_path: str | Path | None = None,
+    runtime_hook_path: str | Path | None = None,
 ):
     if platform not in PLATFORM_MAP:
         raise ValueError(f"Unknown platform: {platform}")
@@ -128,6 +139,11 @@ def make_pyinstaller_command(
             raise ValueError("installer bootstrap payload must be a regular directory")
         if not (payload_path / "install.ps1").is_file():
             raise ValueError("installer bootstrap payload is missing install.ps1")
+    hook_path = None
+    if runtime_hook_path is not None:
+        hook_path = Path(runtime_hook_path)
+        if hook_path.is_symlink() or not hook_path.is_file():
+            raise ValueError("production runtime hook must be a regular file")
 
     output_dir = PLATFORMS_DIR / platform / "bin"
     sep = _resource_sep(platform)
@@ -159,6 +175,8 @@ def make_pyinstaller_command(
         "--noconfirm",
         "--clean",
     ]
+    if hook_path is not None:
+        cmd.extend(["--runtime-hook", str(hook_path)])
     if target in {"launcher", "installer"}:
         cmd.append("--windowed")
 
@@ -244,30 +262,47 @@ def build_platform(
             print(f"[-] Cannot build {target} for {platform}: {exc}")
             return False
 
-    for target in selected_targets:
-        cmd = make_pyinstaller_command(
-            platform,
-            target,
-            trust_profile_path=trust_profile_path,
-            installer_payload_path=installer_payload_path,
+    runtime_hook_temp = None
+    runtime_hook_path = None
+    if source_sha is not None:
+        runtime_hook_temp = tempfile.TemporaryDirectory(
+            prefix="wechat-cli-production-runtime-hook-"
         )
-        print(f"[+] Running ({target}): {' '.join(cmd)}")
-        try:
-            check_call_kwargs = {"cwd": str(ROOT)}
-            if source_sha is not None:
-                check_call_kwargs["env"] = production_build_environment(source_sha)
-            subprocess.check_call(cmd, **check_call_kwargs)
-        except subprocess.CalledProcessError as exc:
-            print(f"[-] {target} build failed for {platform}: {exc}")
-            return False
+        runtime_hook_path = Path(runtime_hook_temp.name) / "production_metadata.py"
+        runtime_hook_path.write_text(
+            production_runtime_hook_source(source_sha),
+            encoding="utf-8",
+        )
 
-        binary_path = output_dir / expected[target]
-        if not binary_path.exists():
-            print(f"[-] Binary not found: {binary_path}")
-            return False
-        print(f"[+] Built: {binary_path}")
-        print(f"    Size: {binary_path.stat().st_size / 1024 / 1024:.1f} MB")
-    return True
+    try:
+        for target in selected_targets:
+            cmd = make_pyinstaller_command(
+                platform,
+                target,
+                trust_profile_path=trust_profile_path,
+                installer_payload_path=installer_payload_path,
+                runtime_hook_path=runtime_hook_path,
+            )
+            print(f"[+] Running ({target}): {' '.join(cmd)}")
+            try:
+                check_call_kwargs = {"cwd": str(ROOT)}
+                if source_sha is not None:
+                    check_call_kwargs["env"] = production_build_environment(source_sha)
+                subprocess.check_call(cmd, **check_call_kwargs)
+            except subprocess.CalledProcessError as exc:
+                print(f"[-] {target} build failed for {platform}: {exc}")
+                return False
+
+            binary_path = output_dir / expected[target]
+            if not binary_path.exists():
+                print(f"[-] Binary not found: {binary_path}")
+                return False
+            print(f"[+] Built: {binary_path}")
+            print(f"    Size: {binary_path.stat().st_size / 1024 / 1024:.1f} MB")
+        return True
+    finally:
+        if runtime_hook_temp is not None:
+            runtime_hook_temp.cleanup()
 
 
 def main():
