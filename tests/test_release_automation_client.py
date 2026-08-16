@@ -2,14 +2,59 @@ import hashlib
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from wechat_cli.release.automation_client import (
     ReleaseAutomationClient,
     UrllibReleaseAutomationTransport,
 )
+from wechat_cli.version import APP_VERSION
 
 
 class ReleaseAutomationClientTests(unittest.TestCase):
+    def test_urllib_transport_sets_product_user_agent_for_json_and_upload_requests(self):
+        requests = []
+
+        class FakeResponse:
+            status = 200
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def read(self, _limit):
+                return b'{"releases":[],"ready":true}'
+
+        def fake_urlopen(request, timeout):
+            requests.append(request)
+            return FakeResponse()
+
+        transport = UrllibReleaseAutomationTransport("https://admin.example.test")
+        with patch("wechat_cli.release.automation_client.urlopen", side_effect=fake_urlopen):
+            transport.json_request("GET", "/v1/automation/releases", {}, None)
+            with tempfile.TemporaryDirectory() as tmp:
+                package = Path(tmp) / "package.zip"
+                package.write_bytes(b"abc")
+                transport.upload(
+                    "/v1/automation/releases/rel_060/package",
+                    {},
+                    package,
+                    {
+                        "X-Release-Channel": "stable",
+                        "X-Package-Sha256": hashlib.sha256(b"abc").hexdigest(),
+                        "X-Operation-Nonce": "nonce_upload_01",
+                        "Content-Length": "3",
+                    },
+                )
+
+        expected = f"WeChatCliReleaseAutomation/{APP_VERSION}"
+        self.assertEqual(2, len(requests))
+        for request in requests:
+            with self.subTest(method=request.method):
+                self.assertEqual(expected, request.get_header("User-agent"))
+
     def test_https_transport_is_restricted_to_custom_automation_origin_and_paths(self):
         for invalid in (
             "http://admin.example.test",
