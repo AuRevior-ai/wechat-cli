@@ -125,20 +125,21 @@ class WorkflowPolicyTests(unittest.TestCase):
         self.assertIn("read-only reconcile", text)
         self.assertIn("/v1/automation/releases", text)
 
-    def test_publish_workflow_preflights_automation_credentials_before_signing(self):
+    def test_publish_workflow_preflights_python_automation_transport_before_signing(self):
         text = (WORKFLOWS / "publish-production-release.yml").read_text(
             encoding="utf-8"
         )
-        preflight = "- name: Verify production release automation credential"
+        preflight = "- name: Verify production release automation Python transport"
         signing = "- name: Sign public release assets only"
         publishing = (
             "- name: Publish with R2 readiness, immutable GitHub provenance, and disabled registration"
         )
         self.assertIn(preflight, text)
+        self.assertIn("WECHAT_CLI_ACCESS_CLIENT_ID", text)
         self.assertIn("${{ secrets.PRODUCTION_ACCESS_CLIENT_ID }}", text)
+        self.assertIn("WECHAT_CLI_ACCESS_CLIENT_SECRET", text)
         self.assertIn("${{ secrets.PRODUCTION_ACCESS_CLIENT_SECRET }}", text)
-        self.assertIn("/v1/automation/releases", text)
-        self.assertIn("-Method Get", text)
+        self.assertIn("python scripts/production_release.py probe --admin-origin", text)
         self.assertLess(text.index(preflight), text.index(signing))
         self.assertLess(text.index(preflight), text.index(publishing))
 

@@ -11,7 +11,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
+import tempfile
 from datetime import datetime
 from pathlib import Path
 
@@ -20,6 +22,11 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from scripts.production_release_workflow import publish_prepared_release  # noqa: E402
+from wechat_cli.admin.client import AdminApiError  # noqa: E402
+from wechat_cli.release.automation_client import (  # noqa: E402
+    ReleaseAutomationClient,
+    UrllibReleaseAutomationTransport,
+)
 from wechat_cli.release.builder import ReleaseBuildOptions  # noqa: E402
 from wechat_cli.release.workflow import sign_release_for_workflow  # noqa: E402
 
@@ -51,6 +58,55 @@ def sign_command(args: argparse.Namespace) -> dict[str, object]:
         output_dir=args.output_dir,
         options=options,
     )
+
+
+def probe_command(args: argparse.Namespace) -> dict[str, object]:
+    client_id = os.environ.get("WECHAT_CLI_ACCESS_CLIENT_ID", "")
+    client_secret = os.environ.get("WECHAT_CLI_ACCESS_CLIENT_SECRET", "")
+    if not client_id or not client_secret:
+        raise ValueError("production automation credential is unavailable")
+
+    transport = UrllibReleaseAutomationTransport(args.admin_origin)
+    headers = {
+        "CF-Access-Client-Id": client_id,
+        "CF-Access-Client-Secret": client_secret,
+    }
+    client = ReleaseAutomationClient(
+        json_transport=transport.json_request,
+        upload_transport=transport.upload,
+        header_provider=lambda: dict(headers),
+    )
+    releases = client.list_releases()
+
+    with tempfile.TemporaryDirectory() as tmp:
+        probe_path = Path(tmp) / "transport-probe.bin"
+        probe_path.write_bytes(b"x")
+        try:
+            transport.upload(
+                "/v1/automation/releases/rel_transport_probe/package",
+                headers,
+                probe_path,
+                {
+                    "X-Release-Channel": "stable",
+                    "X-Package-Sha256": "invalid",
+                    "X-Operation-Nonce": "transport-probe",
+                    "Content-Length": "1",
+                },
+            )
+        except AdminApiError as exc:
+            if exc.code != "INVALID_REQUEST" or exc.status != 400:
+                raise RuntimeError(
+                    f"production automation PUT probe failed code={exc.code} status={exc.status}"
+                ) from exc
+        else:
+            raise RuntimeError("production automation PUT probe was unexpectedly accepted")
+
+    return {
+        "ok": True,
+        "release_count": len(releases),
+        "put_probe_status": 400,
+        "put_probe_code": "INVALID_REQUEST",
+    }
 
 
 def publish_command(args: argparse.Namespace) -> dict[str, object]:
@@ -87,6 +143,12 @@ def _build_parser() -> argparse.ArgumentParser:
     sign.add_argument("--summary", default="")
     sign.add_argument("--notes-url")
 
+    probe = subcommands.add_parser(
+        "probe",
+        help="Verify the production automation Python transport without mutating release state.",
+    )
+    probe.add_argument("--admin-origin", required=True)
+
     publish = subcommands.add_parser(
         "publish",
         help="Publish already-signed public assets through GitHub provenance and machine automation.",
@@ -110,7 +172,12 @@ def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
     try:
-        result = sign_command(args) if args.action == "sign" else publish_command(args)
+        if args.action == "sign":
+            result = sign_command(args)
+        elif args.action == "probe":
+            result = probe_command(args)
+        else:
+            result = publish_command(args)
     except (ValueError, RuntimeError) as exc:
         parser.error(str(exc))
     print(json.dumps(result, ensure_ascii=False, sort_keys=True))
