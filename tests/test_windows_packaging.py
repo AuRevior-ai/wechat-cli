@@ -826,6 +826,38 @@ class WindowsPackagingTests(unittest.TestCase):
 
         build_binary.assert_called_once_with(trust_profile_path=profile)
 
+    def test_update_only_package_writes_to_explicit_output_dir(self):
+        package = load_module(
+            "package_windows_update_output_dir",
+            ROOT / "scripts" / "package_windows_app.py",
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            dist = root / "dist"
+            output_dir = root / "external"
+            app_binary = root / "wechat-cli.exe"
+            app_binary.write_bytes(b"app-binary")
+            with patch.object(package, "DIST_DIR", dist), patch.object(
+                package, "read_version", return_value="0.6.0"
+            ), patch.object(
+                package, "_binary_path", return_value=app_binary
+            ), patch.object(package, "build_binary") as build_binary:
+                update_zip = package.create_update_only_package(
+                    skip_build=True,
+                    output_dir=output_dir,
+                    version="0.6.0",
+                    build_id="prod-060-20335fa7df13",
+                )
+
+            self.assertEqual(output_dir / "wechat-cli-app-0.6.0-win-x64.zip", update_zip)
+            self.assertTrue(update_zip.is_file())
+            self.assertFalse(dist.exists())
+            with zipfile.ZipFile(update_zip, "r") as archive:
+                manifest = json.loads(archive.read("app-manifest.json").decode("utf-8"))
+            self.assertEqual("0.6.0", manifest["version"])
+            self.assertEqual("prod-060-20335fa7df13", manifest["build_id"])
+            build_binary.assert_not_called()
+
     def test_update_only_cli_does_not_require_launcher_config(self):
         package = load_module(
             "package_windows_update_cli",
@@ -841,7 +873,55 @@ class WindowsPackagingTests(unittest.TestCase):
         ):
             package.main(["--update-only", "--skip-build"])
 
-        create_update.assert_called_once_with(skip_build=True)
+        create_update.assert_called_once_with(
+            skip_build=True,
+            output_dir=None,
+            version=None,
+            build_id=None,
+        )
+
+    def test_update_only_cli_forwards_explicit_output_dir(self):
+        package = load_module(
+            "package_windows_update_output_cli",
+            ROOT / "scripts" / "package_windows_app.py",
+        )
+        output_dir = Path("C:/external/production-release")
+        with patch.object(
+            package,
+            "create_update_only_package",
+            return_value=output_dir / "wechat-cli-app-0.6.0-win-x64.zip",
+        ) as create_update:
+            package.main(
+                [
+                    "--update-only",
+                    "--skip-build",
+                    "--output-dir",
+                    str(output_dir),
+                    "--version",
+                    "0.6.0",
+                    "--build-id",
+                    "prod-060-20335fa7df13",
+                ]
+            )
+
+        create_update.assert_called_once_with(
+            skip_build=True,
+            output_dir=output_dir,
+            version="0.6.0",
+            build_id="prod-060-20335fa7df13",
+        )
+
+    def test_update_only_rejects_explicit_version_mismatch(self):
+        package = load_module(
+            "package_windows_update_version_guard",
+            ROOT / "scripts" / "package_windows_app.py",
+        )
+        with patch.object(package, "read_version", return_value="0.6.0"):
+            with self.assertRaisesRegex(ValueError, "must match source version"):
+                package.create_update_only_package(
+                    skip_build=True,
+                    version="0.6.1",
+                )
 
     def _write_bootstrap_only_inputs(self, root: Path):
         source_root = root / "source"

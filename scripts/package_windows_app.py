@@ -204,12 +204,13 @@ def copy_package_files(
     )
 
 
-def _update_archive_base(version: str) -> Path:
-    return DIST_DIR / f"{UPDATE_PACKAGE_STEM}-{version}-win-x64"
+def _update_archive_base(version: str, *, output_dir: Path | None = None) -> Path:
+    root = DIST_DIR if output_dir is None else output_dir
+    return root / f"{UPDATE_PACKAGE_STEM}-{version}-win-x64"
 
 
-def _update_archive_path(version: str) -> Path:
-    return Path(str(_update_archive_base(version)) + ".zip")
+def _update_archive_path(version: str, *, output_dir: Path | None = None) -> Path:
+    return Path(str(_update_archive_base(version, output_dir=output_dir)) + ".zip")
 
 
 def create_update_package(
@@ -217,9 +218,10 @@ def create_update_package(
     version: str,
     *,
     allow_overwrite: bool = True,
+    output_dir: Path | None = None,
 ) -> Path:
-    archive_base = _update_archive_base(version)
-    archive_path = _update_archive_path(version)
+    archive_base = _update_archive_base(version, output_dir=output_dir)
+    archive_path = _update_archive_path(version, output_dir=output_dir)
     if archive_path.exists() and not allow_overwrite:
         raise FileExistsError(f"Update archive already exists: {archive_path}")
     return Path(
@@ -231,9 +233,25 @@ def create_update_package(
     )
 
 
-def create_update_only_package(*, skip_build: bool = False) -> Path:
-    version = read_version()
-    archive_path = _update_archive_path(version)
+def create_update_only_package(
+    *,
+    skip_build: bool = False,
+    output_dir: Path | None = None,
+    version: str | None = None,
+    build_id: str | None = None,
+) -> Path:
+    source_version = read_version()
+    selected_version = source_version if version is None else version
+    if selected_version != source_version:
+        raise ValueError(
+            f"update package version {selected_version} must match source version {source_version}"
+        )
+    destination = (
+        DIST_DIR
+        if output_dir is None
+        else assert_outside_repository(output_dir, repository_root=ROOT)
+    )
+    archive_path = _update_archive_path(selected_version, output_dir=destination)
     if archive_path.exists():
         raise FileExistsError(f"Update archive already exists: {archive_path}")
 
@@ -241,13 +259,13 @@ def create_update_only_package(*, skip_build: bool = False) -> Path:
         build_binary(targets=["app"])
 
     app_binary = _binary_path("wechat-cli.exe")
-    DIST_DIR.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix=f"wechat-cli-app-{version}-") as tmp:
+    destination.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix=f"wechat-cli-app-{selected_version}-") as tmp:
         assembly_dir = Path(tmp)
         shutil.copy2(app_binary, assembly_dir / "wechat-cli.exe")
         (assembly_dir / "app-manifest.json").write_text(
             json.dumps(
-                _app_manifest(version),
+                _app_manifest(selected_version, build_id=build_id),
                 ensure_ascii=False,
                 sort_keys=True,
                 separators=(",", ":"),
@@ -256,8 +274,9 @@ def create_update_only_package(*, skip_build: bool = False) -> Path:
         )
         return create_update_package(
             assembly_dir,
-            version,
+            selected_version,
             allow_overwrite=False,
+            output_dir=destination,
         )
 
 
@@ -470,7 +489,12 @@ def main(argv: list[str] | None = None) -> None:
         parser.error("--update-only and --bootstrap-only are mutually exclusive")
 
     if args.update_only:
-        update_zip = create_update_only_package(skip_build=args.skip_build)
+        update_zip = create_update_only_package(
+            skip_build=args.skip_build,
+            output_dir=args.output_dir,
+            version=args.version,
+            build_id=args.build_id,
+        )
         print(f"[+] Update archive: {update_zip}")
         return
 
