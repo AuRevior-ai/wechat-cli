@@ -791,14 +791,20 @@ class WindowsPackagingTests(unittest.TestCase):
                 )
 
             final_installer, returned_legacy, returned_update = result
-            create_package.assert_called_once_with(
-                launcher_config_path=root / "launcher-config.json",
-                trust_profile_path=profile,
-                skip_build=False,
-                output_dir=output_dir,
-                build_id="prod-060-bbbbbbbbbbbb",
-                source_sha=source_sha,
-                allow_overwrite=False,
+            create_package.assert_called_once()
+            create_package_kwargs = dict(create_package.call_args.kwargs)
+            actual_output_dir = Path(create_package_kwargs.pop("output_dir"))
+            self.assertTrue(actual_output_dir.samefile(output_dir))
+            self.assertEqual(
+                {
+                    "launcher_config_path": root / "launcher-config.json",
+                    "trust_profile_path": profile,
+                    "skip_build": False,
+                    "build_id": "prod-060-bbbbbbbbbbbb",
+                    "source_sha": source_sha,
+                    "allow_overwrite": False,
+                },
+                create_package_kwargs,
             )
             self.assertEqual(b"unsigned-private-installer", final_installer.read_bytes())
             self.assertEqual(legacy_zip, returned_legacy)
@@ -806,7 +812,7 @@ class WindowsPackagingTests(unittest.TestCase):
             self.assertTrue(captured["metadata"]["production_capable"])
             self.assertEqual("production-installer", captured["metadata"]["distribution_tier"])
             self.assertEqual([("build", "installer")], events)
-            self.assertEqual(output_dir, final_installer.parent)
+            self.assertTrue(final_installer.parent.samefile(output_dir))
 
     def test_private_production_installer_cli_uses_external_output_and_exact_source_sha(self):
         package = load_module(
