@@ -34,12 +34,12 @@ async function signedJwt(payloadMutation: Record<string, unknown> = {}, key = pr
   const now = 1_786_579_200;
   const header = { alg: "RS256", typ: "JWT", kid: "automation-kid" };
   const payload = {
+    type: "app",
     iss: "https://team.example.cloudflareaccess.com",
     aud: ["automation-aud"],
-    sub: "service-token-subject",
+    sub: "",
     common_name: "release-automation-client",
     iat: now - 30,
-    nbf: now - 30,
     exp: now + 300,
     ...payloadMutation,
   };
@@ -109,6 +109,20 @@ describe("production automation identity", () => {
       identity: "release-automation-client",
       authMode: "access_service",
     });
+  });
+
+  it("rejects human-style non-empty sub on the service-token path", async () => {
+    const assertion = await signedJwt({ sub: "service-token-subject", nbf: 1_786_579_170 });
+    await expect(
+      authenticateAutomationAssertion(env(), assertion, "releases:read", verifierOptions()),
+    ).rejects.toMatchObject({ code: "AUTOMATION_IDENTITY_INVALID" });
+  });
+
+  it("rejects a service-token assertion that is not an application token", async () => {
+    const assertion = await signedJwt({ type: "org" });
+    await expect(
+      authenticateAutomationAssertion(env(), assertion, "releases:read", verifierOptions()),
+    ).rejects.toMatchObject({ code: "AUTOMATION_IDENTITY_INVALID" });
   });
 
   it.each([

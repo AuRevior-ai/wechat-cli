@@ -96,6 +96,7 @@ export async function authenticateAutomationAssertion(
       jwksUrl,
       audiences,
       identityClaim,
+      serviceTokenMode: true,
       fetchJwks: options.fetchJwks ?? fetchAccessJwks,
       ...(options.now === undefined ? {} : { now: options.now }),
     });
