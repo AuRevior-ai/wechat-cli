@@ -568,6 +568,20 @@ class WindowsPackagingTests(unittest.TestCase):
         self.assertIn("--trust-profile", command)
         self.assertEqual(str(profile), command[command.index("--trust-profile") + 1])
 
+    def test_package_build_binary_forwards_exact_source_sha(self):
+        package = load_module(
+            "package_windows_build_source_sha_forwarding",
+            ROOT / "scripts" / "package_windows_app.py",
+        )
+        source_sha = "a" * 40
+
+        with patch.object(package.subprocess, "check_call") as check_call:
+            package.build_binary(targets=["app"], source_sha=source_sha)
+
+        command = check_call.call_args.args[0]
+        self.assertIn("--source-sha", command)
+        self.assertEqual(source_sha, command[command.index("--source-sha") + 1])
+
     def test_update_only_builds_only_application_target(self):
         package = load_module(
             "package_windows_update_build",
@@ -763,6 +777,8 @@ class WindowsPackagingTests(unittest.TestCase):
             ), patch.object(
                 package, "_binary_path", return_value=installer_source
             ):
+                output_dir = root / "external-output"
+                source_sha = "b" * 40
                 result = package.create_production_installer(
                     launcher_config_path=root / "launcher-config.json",
                     trust_profile_path=profile,
@@ -770,13 +786,25 @@ class WindowsPackagingTests(unittest.TestCase):
                     authenticode_verifier=lambda *_args: self.fail(
                         "private_controlled installer must not run Authenticode verification"
                     ),
+                    output_dir=output_dir,
+                    source_sha=source_sha,
                 )
 
             final_installer, returned_legacy, returned_update = result
-            create_package.assert_called_once_with(
-                launcher_config_path=root / "launcher-config.json",
-                trust_profile_path=profile,
-                skip_build=False,
+            create_package.assert_called_once()
+            create_package_kwargs = dict(create_package.call_args.kwargs)
+            actual_output_dir = Path(create_package_kwargs.pop("output_dir"))
+            self.assertTrue(actual_output_dir.samefile(output_dir))
+            self.assertEqual(
+                {
+                    "launcher_config_path": root / "launcher-config.json",
+                    "trust_profile_path": profile,
+                    "skip_build": False,
+                    "build_id": "prod-060-bbbbbbbbbbbb",
+                    "source_sha": source_sha,
+                    "allow_overwrite": False,
+                },
+                create_package_kwargs,
             )
             self.assertEqual(b"unsigned-private-installer", final_installer.read_bytes())
             self.assertEqual(legacy_zip, returned_legacy)
@@ -784,6 +812,48 @@ class WindowsPackagingTests(unittest.TestCase):
             self.assertTrue(captured["metadata"]["production_capable"])
             self.assertEqual("production-installer", captured["metadata"]["distribution_tier"])
             self.assertEqual([("build", "installer")], events)
+            self.assertTrue(final_installer.parent.samefile(output_dir))
+
+    def test_private_production_installer_cli_uses_external_output_and_exact_source_sha(self):
+        package = load_module(
+            "package_windows_private_production_installer_cli",
+            ROOT / "scripts" / "package_windows_app.py",
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            launcher_config = root / "launcher-config.json"
+            trust_profile = root / "production-trust-profile.json"
+            output_dir = root / "production-output"
+            source_sha = "c" * 40
+            expected = (
+                output_dir / "wechat-cli-installer-0.6.0-win-x64.exe",
+                output_dir / "wechat-cli-web-bootstrap-win32-x64-0.6.0.zip",
+                output_dir / "wechat-cli-app-0.6.0-win-x64.zip",
+            )
+            with patch.object(
+                package, "create_production_installer", return_value=expected
+            ) as create_installer:
+                package.main(
+                    [
+                        "--production-installer",
+                        "--launcher-config",
+                        str(launcher_config),
+                        "--launcher-trust-profile",
+                        str(trust_profile),
+                        "--output-dir",
+                        str(output_dir),
+                        "--source-sha",
+                        source_sha,
+                    ]
+                )
+
+        create_installer.assert_called_once_with(
+            launcher_config_path=launcher_config,
+            trust_profile_path=trust_profile,
+            signing_provider=None,
+            output_dir=output_dir,
+            source_sha=source_sha,
+        )
 
     def test_signed_package_path_requires_explicit_signing_provider_contract(self):
         package = load_module(
