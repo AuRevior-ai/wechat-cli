@@ -385,6 +385,7 @@ def create_production_installer(
         metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
         metadata["production_capable"] = True
         metadata["distribution_tier"] = "production-installer"
+        metadata["channel"] = trust_profile.expected_channel
         metadata_path.write_text(
             json.dumps(
                 metadata,
