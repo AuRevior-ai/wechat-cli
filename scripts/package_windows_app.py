@@ -329,7 +329,6 @@ def create_production_installer(
     output_dir: Path | None = None,
     source_sha: str | None = None,
 ) -> tuple[Path, Path, Path]:
-    from scripts.sign_windows_artifacts import sign_and_verify_windows_artifacts
     from wechat_cli.launcher.trust_profile import DeploymentTrustProfile
     from wechat_cli.windows.authenticode import AuthenticodePolicy
 
@@ -403,6 +402,10 @@ def create_production_installer(
 
     installer_source = _binary_path("wechat-cli-installer.exe")
     if policy.required:
+        try:
+            from scripts.sign_windows_artifacts import sign_and_verify_windows_artifacts
+        except ModuleNotFoundError:  # Direct execution: python scripts/package_windows_app.py
+            from sign_windows_artifacts import sign_and_verify_windows_artifacts
         sign_and_verify_windows_artifacts(
             [installer_source],
             provider=signing_provider,

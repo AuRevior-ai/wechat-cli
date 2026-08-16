@@ -776,6 +776,8 @@ class WindowsPackagingTests(unittest.TestCase):
                 package, "build_binary", side_effect=build_installer
             ), patch.object(
                 package, "_binary_path", return_value=installer_source
+            ), patch.dict(
+                sys.modules, {"scripts.sign_windows_artifacts": None}
             ):
                 output_dir = root / "external-output"
                 source_sha = "b" * 40
