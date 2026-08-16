@@ -91,6 +91,18 @@ class WorkflowPolicyTests(unittest.TestCase):
             self.assertIn("scripts/verify_canonical_main.py", text)
             self.assertIn("environment: production", text)
 
+    def test_deploy_workflow_materializes_atomic_worker_secret_bundle(self):
+        text = (WORKFLOWS / "deploy-production-worker.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertEqual(
+            1, text.count("${{ secrets.PRODUCTION_WORKER_SECRETS_JSON }}")
+        )
+        self.assertIn("worker-secrets.production.json", text)
+        self.assertIn("--secrets-file $secretsFile", text)
+        self.assertIn("Remove-Item -LiteralPath $secretsFile", text)
+        self.assertNotIn("wrangler secret put", text.lower())
+
     def test_publish_workflow_has_no_release_state_or_license_mutation(self):
         text = (WORKFLOWS / "publish-production-release.yml").read_text(
             encoding="utf-8"
