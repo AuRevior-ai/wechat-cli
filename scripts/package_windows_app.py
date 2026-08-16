@@ -20,6 +20,8 @@ except ModuleNotFoundError:  # Direct execution: python scripts/package_windows_
 
 
 ROOT = Path(__file__).resolve().parent.parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 DIST_DIR = ROOT / "dist"
 PLATFORM = "win32-x64"
 PACKAGE_STEM = "wechat-cli-web-bootstrap-win32-x64"

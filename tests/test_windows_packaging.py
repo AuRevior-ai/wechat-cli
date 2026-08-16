@@ -35,6 +35,41 @@ class WindowsPackagingTests(unittest.TestCase):
         self.assertIn("--launcher-config", result.stdout)
         self.assertIn("--update-only", result.stdout)
 
+    def test_package_script_production_path_resolves_project_imports_under_direct_execution(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            launcher_config = root / "launcher-config.json"
+            trust_profile = root / "invalid-trust-profile.json"
+            output_dir = root / "output"
+            launcher_config.write_text("{}", encoding="utf-8")
+            trust_profile.write_text("{}", encoding="utf-8")
+            output_dir.mkdir()
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(ROOT / "scripts" / "package_windows_app.py"),
+                    "--production-installer",
+                    "--launcher-config",
+                    str(launcher_config),
+                    "--launcher-trust-profile",
+                    str(trust_profile),
+                    "--output-dir",
+                    str(output_dir),
+                    "--source-sha",
+                    "a" * 40,
+                ],
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=False,
+            )
+
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("unsupported deployment trust profile schema", result.stderr)
+        self.assertNotIn("ModuleNotFoundError", result.stderr)
+
     def test_release_metadata_and_windows_guide_credit_author(self):
         pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
         guide = (
