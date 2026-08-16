@@ -700,6 +700,91 @@ class WindowsPackagingTests(unittest.TestCase):
                 events,
             )
 
+    def test_private_controlled_production_installer_does_not_require_authenticode(self):
+        package = load_module(
+            "package_windows_private_production_installer",
+            ROOT / "scripts" / "package_windows_app.py",
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            dist = root / "dist"
+            dist.mkdir()
+            package_dir = root / "private-package"
+            package_dir.mkdir()
+            (package_dir / "bootstrap-package.json").write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "product": "wechat-cli-web",
+                        "version": "0.6.0",
+                        "production_capable": False,
+                        "distribution_tier": "compatibility",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            legacy_zip = root / "legacy.zip"
+            update_zip = root / "update.zip"
+            profile = root / "deployment-trust-profile.json"
+            profile.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 2,
+                        "distribution_profile": "private_controlled",
+                        "environment": "production",
+                        "api_base_url": "https://wechat-cli-api.aurevior-devspace.com",
+                        "expected_channel": "stable",
+                        "fingerprint_salt": "fresh-production-fingerprint-salt",
+                        "release_public_keys": {"release-key-production-01": "release-key"},
+                        "lease_public_keys": {"lease-key-production-01": "lease-key"},
+                        "windows_publisher_policy": "",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            installer_source = root / "wechat-cli-installer.exe"
+            events = []
+            captured = {}
+
+            def build_installer(**kwargs):
+                payload = Path(kwargs["installer_payload_path"])
+                captured["metadata"] = json.loads(
+                    (payload / "bootstrap-package.json").read_text(encoding="utf-8")
+                )
+                events.append(("build", "installer"))
+                installer_source.write_bytes(b"unsigned-private-installer")
+
+            with patch.object(package, "DIST_DIR", dist), patch.object(
+                package,
+                "create_package",
+                return_value=(package_dir, legacy_zip, update_zip),
+            ) as create_package, patch.object(
+                package, "build_binary", side_effect=build_installer
+            ), patch.object(
+                package, "_binary_path", return_value=installer_source
+            ):
+                result = package.create_production_installer(
+                    launcher_config_path=root / "launcher-config.json",
+                    trust_profile_path=profile,
+                    signing_provider=None,
+                    authenticode_verifier=lambda *_args: self.fail(
+                        "private_controlled installer must not run Authenticode verification"
+                    ),
+                )
+
+            final_installer, returned_legacy, returned_update = result
+            create_package.assert_called_once_with(
+                launcher_config_path=root / "launcher-config.json",
+                trust_profile_path=profile,
+                skip_build=False,
+            )
+            self.assertEqual(b"unsigned-private-installer", final_installer.read_bytes())
+            self.assertEqual(legacy_zip, returned_legacy)
+            self.assertEqual(update_zip, returned_update)
+            self.assertTrue(captured["metadata"]["production_capable"])
+            self.assertEqual("production-installer", captured["metadata"]["distribution_tier"])
+            self.assertEqual([("build", "installer")], events)
+
     def test_signed_package_path_requires_explicit_signing_provider_contract(self):
         package = load_module(
             "package_windows_signed_contract",
