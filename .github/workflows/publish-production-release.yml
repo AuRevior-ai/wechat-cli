@@ -71,6 +71,32 @@ jobs:
           }
           $branch = Invoke-RestMethod -Uri '${{ github.api_url }}/repos/${{ github.repository }}/branches/main' -Headers $headers
           python scripts/verify_canonical_main.py --requested-sha '${{ inputs.source_sha }}' --checked-out-sha $checked --observed-main-sha $branch.commit.sha
+      - name: Verify production release automation credential
+        shell: pwsh
+        env:
+          ACCESS_CLIENT_ID: ${{ secrets.PRODUCTION_ACCESS_CLIENT_ID }}
+          ACCESS_CLIENT_SECRET: ${{ secrets.PRODUCTION_ACCESS_CLIENT_SECRET }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $headers = @{
+            'CF-Access-Client-Id' = $env:ACCESS_CLIENT_ID
+            'CF-Access-Client-Secret' = $env:ACCESS_CLIENT_SECRET
+          }
+          try {
+            $rows = Invoke-RestMethod -Uri '${{ vars.PRODUCTION_ADMIN_ORIGIN }}/v1/automation/releases' -Headers $headers -Method Get
+            if ($null -eq $rows.releases) { throw 'automation release list response is invalid' }
+          }
+          catch {
+            $status = -1
+            if ($null -ne $_.Exception.Response) {
+              $status = [int]$_.Exception.Response.StatusCode
+            }
+            throw "production release automation credential preflight failed HTTP=$status"
+          }
+          finally {
+            Remove-Item Env:ACCESS_CLIENT_ID -ErrorAction SilentlyContinue
+            Remove-Item Env:ACCESS_CLIENT_SECRET -ErrorAction SilentlyContinue
+          }
       - name: Fresh Python verification
         shell: pwsh
         run: python -m unittest discover -s tests
