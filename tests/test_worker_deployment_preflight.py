@@ -795,7 +795,7 @@ class WorkerDeploymentPreflightTests(unittest.TestCase):
 
         self.assertEqual("staging", result.environment)
 
-    def test_current_production_source_remains_fail_closed_while_identity_placeholders_exist(self):
+    def test_current_production_source_is_identity_complete_after_g4_service_token_bootstrap(self):
         from scripts.deploy_worker import preflight_worker_deployment
 
         config = json.loads(WRANGLER.read_text(encoding="utf-8"))
@@ -805,9 +805,26 @@ class WorkerDeploymentPreflightTests(unittest.TestCase):
             for name, value in production_vars.items()
             if isinstance(value, str) and "REPLACE_WITH_PRODUCTION" in value
         }
-        self.assertTrue(unresolved, "G3/G4 source must name unresolved identity placeholders explicitly")
-        with self.assertRaises(ValueError):
-            preflight_worker_deployment(WRANGLER, environment="production")
+        self.assertEqual({}, unresolved)
+        self.assertEqual(
+            "041e41fb1311ac7ace455c33e2d7e6cd.access",
+            production_vars["ACCESS_AUTOMATION_IDENTITIES"],
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            profile_path = self._write_profile(
+                Path(tmp),
+                api_origin="https://wechat-cli-api.aurevior-devspace.com",
+            )
+            result = preflight_worker_deployment(
+                WRANGLER,
+                environment="production",
+                trust_profile_path=profile_path,
+                api_origin="https://wechat-cli-api.aurevior-devspace.com",
+                declared_secret_names=self._production_secret_names(),
+            )
+
+        self.assertEqual("production", result.environment)
 
     def test_cli_help_exposes_explicit_staging_and_guarded_production_deploy_action(self):
         root_help = subprocess.run(
