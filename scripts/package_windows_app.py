@@ -328,17 +328,28 @@ def create_production_installer(
     from wechat_cli.launcher.trust_profile import DeploymentTrustProfile
     from wechat_cli.windows.authenticode import AuthenticodePolicy
 
-    package_dir, legacy_zip, update_zip = create_signed_package(
-        launcher_config_path=launcher_config_path,
-        trust_profile_path=trust_profile_path,
-        signing_provider=signing_provider,
-        authenticode_verifier=authenticode_verifier,
-    )
     trust_profile = DeploymentTrustProfile.load(trust_profile_path)
     publisher = trust_profile.windows_publisher_policy.strip()
-    if not publisher:
-        raise ValueError("production installer requires a publisher policy")
-    policy = AuthenticodePolicy(required=True, expected_subject=publisher)
+    private_controlled = trust_profile.distribution_profile == "private_controlled"
+    if private_controlled:
+        package_dir, legacy_zip, update_zip = create_package(
+            launcher_config_path=launcher_config_path,
+            trust_profile_path=trust_profile_path,
+            skip_build=False,
+        )
+        policy = AuthenticodePolicy(required=False)
+    else:
+        if not publisher:
+            raise ValueError("production installer requires a publisher policy")
+        if signing_provider is None:
+            raise ValueError("production installer requires a signing provider")
+        package_dir, legacy_zip, update_zip = create_signed_package(
+            launcher_config_path=launcher_config_path,
+            trust_profile_path=trust_profile_path,
+            signing_provider=signing_provider,
+            authenticode_verifier=authenticode_verifier,
+        )
+        policy = AuthenticodePolicy(required=True, expected_subject=publisher)
 
     source_metadata = json.loads(
         (package_dir / "bootstrap-package.json").read_text(encoding="utf-8")
@@ -366,12 +377,13 @@ def create_production_installer(
         build_binary(targets=["installer"], installer_payload_path=payload)
 
     installer_source = _binary_path("wechat-cli-installer.exe")
-    sign_and_verify_windows_artifacts(
-        [installer_source],
-        provider=signing_provider,
-        policy=policy,
-        verifier=authenticode_verifier,
-    )
+    if policy.required:
+        sign_and_verify_windows_artifacts(
+            [installer_source],
+            provider=signing_provider,
+            policy=policy,
+            verifier=authenticode_verifier,
+        )
     DIST_DIR.mkdir(parents=True, exist_ok=True)
     final_installer = DIST_DIR / f"wechat-cli-installer-{version}-win-x64.exe"
     if final_installer.exists():
