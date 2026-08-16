@@ -1,5 +1,6 @@
 import base64
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -7,9 +8,13 @@ import unittest
 import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 
 from Crypto.PublicKey import ECC
 
+from scripts import production_release
+from wechat_cli.admin.client import AdminApiError
 from wechat_cli.release.builder import ReleaseBuildOptions
 from wechat_cli.release.workflow import (
     load_prepared_release,
@@ -20,7 +25,12 @@ from wechat_cli.release.workflow import (
 class ReleaseWorkflowTests(unittest.TestCase):
     def test_production_release_entrypoint_is_directly_executable(self):
         root = Path(__file__).resolve().parents[1]
-        for arguments in (["--help"], ["sign", "--help"], ["publish", "--help"]):
+        for arguments in (
+            ["--help"],
+            ["sign", "--help"],
+            ["probe", "--help"],
+            ["publish", "--help"],
+        ):
             with self.subTest(arguments=arguments):
                 result = subprocess.run(
                     [sys.executable, str(root / "scripts" / "production_release.py"), *arguments],
@@ -30,6 +40,70 @@ class ReleaseWorkflowTests(unittest.TestCase):
                     check=False,
                 )
                 self.assertEqual(0, result.returncode, result.stderr)
+
+    def test_production_probe_uses_same_python_transport_without_mutation(self):
+        class FakeTransport:
+            def __init__(self):
+                self.json_calls = []
+                self.upload_calls = []
+
+            def json_request(self, method, path, headers, payload):
+                self.json_calls.append((method, path, dict(headers), payload))
+                return 200, {"releases": []}
+
+            def upload(self, path, headers, source, metadata_headers):
+                source_path = Path(source)
+                self.upload_calls.append(
+                    (
+                        path,
+                        dict(headers),
+                        source_path.stat().st_size,
+                        dict(metadata_headers),
+                    )
+                )
+                raise AdminApiError(
+                    "INVALID_REQUEST",
+                    "发布包摘要无效。",
+                    status=400,
+                )
+
+        fake = FakeTransport()
+        with patch.object(
+            production_release,
+            "UrllibReleaseAutomationTransport",
+            return_value=fake,
+        ), patch.dict(
+            os.environ,
+            {
+                "WECHAT_CLI_ACCESS_CLIENT_ID": "client-id.access",
+                "WECHAT_CLI_ACCESS_CLIENT_SECRET": "client-secret",
+            },
+            clear=False,
+        ):
+            result = production_release.probe_command(
+                SimpleNamespace(admin_origin="https://admin.example.test")
+            )
+
+        self.assertEqual(
+            {
+                "ok": True,
+                "release_count": 0,
+                "put_probe_status": 400,
+                "put_probe_code": "INVALID_REQUEST",
+            },
+            result,
+        )
+        self.assertEqual("GET", fake.json_calls[0][0])
+        self.assertEqual("/v1/automation/releases", fake.json_calls[0][1])
+        self.assertEqual(1, len(fake.upload_calls))
+        upload_path, _, source_size, metadata = fake.upload_calls[0]
+        self.assertEqual(
+            "/v1/automation/releases/rel_transport_probe/package",
+            upload_path,
+        )
+        self.assertEqual(1, source_size)
+        self.assertEqual("invalid", metadata["X-Package-Sha256"])
+        self.assertEqual("1", metadata["Content-Length"])
 
     def test_production_sign_cli_does_not_expose_rollout_control(self):
         root = Path(__file__).resolve().parents[1]
