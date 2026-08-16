@@ -214,6 +214,48 @@ class WindowsPackagingTests(unittest.TestCase):
         self.assertIn("launcher_entry.py", joined)
         self.assertIn("wechat-cli-launcher", cmd)
 
+    def test_launcher_build_stages_production_profile_under_runtime_filename(self):
+        build = load_module(
+            "npm_build_launcher_canonical_profile_name",
+            ROOT / "npm" / "scripts" / "build.py",
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            profile = root / "production-trust-profile.json"
+            profile.write_text("production-profile-bytes", encoding="utf-8")
+            platforms = root / "platforms"
+            captured = {}
+
+            def make_command(platform, target, **kwargs):
+                staged = Path(kwargs["trust_profile_path"])
+                captured["name"] = staged.name
+                captured["content"] = staged.read_text(encoding="utf-8")
+                return ["fake-pyinstaller"]
+
+            def check_call(_cmd, **_kwargs):
+                output = platforms / "win32-x64" / "bin"
+                output.mkdir(parents=True, exist_ok=True)
+                (output / "wechat-cli-launcher.exe").write_bytes(b"launcher")
+
+            with patch.object(build, "PLATFORMS_DIR", platforms), patch.object(
+                build, "make_pyinstaller_command", side_effect=make_command
+            ), patch.object(
+                build, "ensure_target_dependencies"
+            ), patch.object(
+                build.subprocess, "check_call", side_effect=check_call
+            ):
+                self.assertTrue(
+                    build.build_platform(
+                        "win32-x64",
+                        targets=["launcher"],
+                        trust_profile_path=profile,
+                    )
+                )
+
+        self.assertEqual("deployment-trust-profile.json", captured["name"])
+        self.assertEqual("production-profile-bytes", captured["content"])
+
     def test_launcher_build_fails_fast_when_pywebview_is_missing(self):
         build = load_module(
             "npm_build_missing_webview",

@@ -262,6 +262,20 @@ def build_platform(
             print(f"[-] Cannot build {target} for {platform}: {exc}")
             return False
 
+    launcher_profile_temp = None
+    resolved_trust_profile_path = trust_profile_path
+    if "launcher" in selected_targets and trust_profile_path is not None:
+        source_profile = Path(trust_profile_path)
+        if source_profile.is_symlink() or not source_profile.is_file():
+            raise ValueError("launcher deployment trust profile must be a regular file")
+        launcher_profile_temp = tempfile.TemporaryDirectory(
+            prefix="wechat-cli-launcher-trust-profile-"
+        )
+        resolved_trust_profile_path = (
+            Path(launcher_profile_temp.name) / "deployment-trust-profile.json"
+        )
+        shutil.copy2(source_profile, resolved_trust_profile_path)
+
     runtime_hook_temp = None
     runtime_hook_path = None
     if source_sha is not None:
@@ -279,7 +293,7 @@ def build_platform(
             cmd = make_pyinstaller_command(
                 platform,
                 target,
-                trust_profile_path=trust_profile_path,
+                trust_profile_path=resolved_trust_profile_path,
                 installer_payload_path=installer_payload_path,
                 runtime_hook_path=runtime_hook_path,
             )
@@ -303,6 +317,8 @@ def build_platform(
     finally:
         if runtime_hook_temp is not None:
             runtime_hook_temp.cleanup()
+        if launcher_profile_temp is not None:
+            launcher_profile_temp.cleanup()
 
 
 def main():
