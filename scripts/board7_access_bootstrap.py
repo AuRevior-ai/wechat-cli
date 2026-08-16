@@ -22,7 +22,7 @@ ACCOUNT_ID = "2040a134dbf533fd538deae668556226"
 API_BASE = "https://api.cloudflare.com/client/v4"
 
 HUMAN_APP_NAME = "wechat-cli-production-human-admin"
-HUMAN_APP_DOMAIN = "wechat-cli-admin.aurevior-devspace.com/v1/admin/*"
+HUMAN_APP_DOMAIN = "wechat-cli-admin.aurevior-devspace.com/v1/admin/login/start"
 HUMAN_POLICY_NAME = "wechat-cli-production-human-admin-allow"
 
 AUTOMATION_APP_NAME = "wechat-cli-production-release-automation"

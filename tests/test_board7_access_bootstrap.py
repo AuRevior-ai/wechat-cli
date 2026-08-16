@@ -14,9 +14,10 @@ class Board7AccessBootstrapTests(unittest.TestCase):
             plan["human_app"]["name"],
         )
         self.assertEqual(
-            "wechat-cli-admin.aurevior-devspace.com/v1/admin/*",
+            "wechat-cli-admin.aurevior-devspace.com/v1/admin/login/start",
             plan["human_app"]["domain"],
         )
+        self.assertNotIn("*", plan["human_app"]["domain"])
         self.assertEqual("self_hosted", plan["human_app"]["type"])
         self.assertEqual("30m", plan["human_app"]["session_duration"])
         self.assertIs(plan["human_app"]["app_launcher_visible"], False)
@@ -93,7 +94,7 @@ class Board7AccessBootstrapTests(unittest.TestCase):
                     "id": "human-app-id",
                     "aud": "human-aud",
                     "name": "wechat-cli-production-human-admin",
-                    "domain": "wechat-cli-admin.aurevior-devspace.com/v1/admin/*",
+                    "domain": "wechat-cli-admin.aurevior-devspace.com/v1/admin/login/start",
                     "type": "self_hosted",
                 },
             },
@@ -165,7 +166,7 @@ class Board7AccessBootstrapTests(unittest.TestCase):
                     "id": "human-app-id",
                     "aud": "human-aud",
                     "name": "wrong-name",
-                    "domain": "wechat-cli-admin.aurevior-devspace.com/v1/admin/*",
+                    "domain": "wechat-cli-admin.aurevior-devspace.com/v1/admin/login/start",
                     "type": "self_hosted",
                 },
             },
