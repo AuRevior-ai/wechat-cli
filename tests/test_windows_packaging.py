@@ -331,6 +331,8 @@ class WindowsPackagingTests(unittest.TestCase):
         environment = check_call.call_args.kwargs["env"]
         self.assertEqual("prod-060-abcdef012345", environment["WECHAT_CLI_BUILD_ID"])
         self.assertEqual(source_sha, environment["WECHAT_CLI_SOURCE_SHA"])
+        command = check_call.call_args.args[0]
+        self.assertIn("--runtime-hook", command)
 
     def test_windows_installer_only_build_forwards_payload_and_checks_output(self):
         build = load_module(

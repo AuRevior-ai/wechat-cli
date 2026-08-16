@@ -100,6 +100,20 @@ class VersionMetadataTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             build.production_build_environment("feature-branch")
 
+    def test_production_runtime_hook_bakes_source_metadata_into_frozen_process(self):
+        build = load_build_script()
+        source_sha = "abcdef0123456789abcdef0123456789abcdef01"
+
+        hook_source = build.production_runtime_hook_source(source_sha)
+
+        with patch.dict(os.environ, {}, clear=True):
+            exec(compile(hook_source, "<production-runtime-hook>", "exec"), {})
+            self.assertEqual(
+                "prod-060-abcdef012345",
+                os.environ["WECHAT_CLI_BUILD_ID"],
+            )
+            self.assertEqual(source_sha, os.environ["WECHAT_CLI_SOURCE_SHA"])
+
     def test_build_script_direct_execution_uses_current_worktree_imports(self):
         result = subprocess.run(
             [sys.executable, str(ROOT / "npm" / "scripts" / "build.py"), "--help"],
