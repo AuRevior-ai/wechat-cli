@@ -9,7 +9,7 @@ from __future__ import annotations
 import os
 
 PRODUCT = "wechat-cli-web"
-APP_VERSION = "0.6.1-canary.1"
+APP_VERSION = "0.6.1"
 LAUNCHER_VERSION = "0.2.0"
 UPDATE_SCHEMA_VERSION = 1
 API_VERSION = "v1"
