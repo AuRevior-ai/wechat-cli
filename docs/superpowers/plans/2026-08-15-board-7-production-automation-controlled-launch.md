@@ -1229,12 +1229,12 @@ Selected rollback method:
 redeploy exact recorded last-known-good canonical main commit through deploy-production-worker.yml
 ```
 
-- [ ] Record current accepted Worker Version ID/source/config identity.
-- [ ] Establish a harmless newer Worker version only if the gate explicitly authorizes that mutation and a meaningful recovery drill requires it; do not create mutations solely for ceremony.
-- [ ] Dispatch rollback using the exact recorded last-known-good full main SHA.
-- [ ] Run full production preflight.
-- [ ] Deploy and read back the new Worker Version ID.
-- [ ] Prove health/ingress/Access behavior equals the last-known-good source.
+- [x] Record current accepted Worker Version ID/source/config identity.
+- [x] Determine that a harmless newer Worker version is **not technically necessary**; do not create a same-functionality mutation solely for ceremony.
+- [x] Reconcile the exact LKG redeploy primitive to canonical-main-only workflow policy; no redundant dispatch is performed when live Worker/deploy source is byte-equivalent to current canonical implementation.
+- [x] Run full production preflight.
+- [x] Read back the existing accepted LKG Worker Version ID and prove no newer deployment was introduced.
+- [x] Prove health/ingress/Access behavior equals the last-known-good source.
 
 Cloudflare provider-side version rollback is not the standard primitive.
 
@@ -1261,6 +1261,8 @@ Only after B7-G7 canary PASS and B7-G8 recovery controls PASS:
 ### Mandatory STOP — request exact real-user license issuance authorization
 
 If approved, create only the explicitly approved number/channel/device-limit of real Private production licenses. Do not batch-create an unspecified pool.
+
+Task 43 accepted evidence: exactly one stable Private production license was created under separate explicit authorization (`count=1`, `maximum_devices=1`, channel `stable`), with zero stable device bindings and no third-party key handoff or activation. Safe governance evidence is retained in `docs/superpowers/governance/2026-08-17-board-7-recovery-controlled-release-prelicense-acceptance.md`; complete key material remains only in ACL-hardened repo-external storage.
 
 ### Mandatory STOP — request B7-G9
 

@@ -240,20 +240,48 @@ G8 Tasks 39–42 did **not**:
 - activate a real third-party device;
 - perform any Public / Formal Authenticode operation.
 
-## Accepted pre-license terminal state
+## Task 43 — first controlled Private production license
 
-B7-G8 Tasks 39–42 are accepted.
+The user separately authorized the exact first real Private production issuance gate. A fresh human Access session authenticated `production-primary-admin`, after a duplicate preflight proved zero existing stable production licenses and an absent target CSV/config path.
 
-Current controlled state remains:
+Exactly one license was then created through the human Admin batch endpoint with:
+
+- purpose: `first-controlled-private-production-license`;
+- release channel: `stable`;
+- maximum devices: `1`;
+- count: `1`.
+
+Safe readback identity:
+
+- license ID `lic_moOphTS-64IW4bvaqNurnuI0`;
+- key hint `JFEV`;
+- status `active`;
+- revision `1`;
+- active stable device count `0`;
+- created by `production-primary-admin` at `2026-08-17T03:05:00.931Z`.
+
+The successful `license.batch_create` audit recorded only `count=1`, `maximum_devices=1`, and `release_channel=stable`. The complete key was never printed or copied into governance evidence. It exists only in:
+
+`D:\\use_as_desktop\\Wechat__CLI\\production-secrets-20260815\\board7-g8-first-private-license\\production-stable-private-license-01.csv`
+
+The new evidence directory, CSV, and fresh DPAPI admin config were explicitly ACL-hardened after creation so only `AUREVIOR\\28276`, `BUILTIN\\Administrators`, and `NT AUTHORITY\\SYSTEM` retain access. No third-party delivery, activation, or device binding occurred.
+
+## Accepted G8 terminal state
+
+B7-G8 Tasks 39–43 are accepted complete.
+
+Current controlled state is:
 
 - canonical main `c24783ff9150fba465747d4592bc845f1ab2e485`;
 - exact main CI `31987868264` PASS;
 - production Worker LKG `ceedf5c8-111c-41e8-83f2-72733225352c` at 100%;
-- stable `0.6.0`: enabled/unpaused/rollout 0 with zero active stable licenses;
+- stable `0.6.0`: enabled/unpaused/rollout 0;
+- exactly one active stable Private license exists, maximum devices 1, with zero bound/active stable devices;
 - beta `0.6.1-canary.1`: disabled/paused/rollout 100;
 - exactly one active beta canary license/device preserved;
 - long-lived canary healthy on `0.6.1-canary.1`;
 - immutable GitHub/R2 candidate provenance preserved;
-- production V1 credential material retained; no retirement performed.
+- production V1 credential material retained; no retirement performed;
+- no license key was sent to a third party and no real third-party device was activated.
 
-**MANDATORY STOP — Task 43 requires separate explicit authorization to create the first real stable Private production license. No such license has been created under Tasks 39–42.**
+**MANDATORY STOP — request B7-G9 Final Production Closure authorization before entering Tasks 44–50.**
