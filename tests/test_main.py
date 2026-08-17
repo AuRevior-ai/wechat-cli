@@ -19,11 +19,12 @@ class FakeStream:
 
 
 class MainTests(unittest.TestCase):
-    def test_release_version_is_internal_canary(self):
+    def test_release_version_is_stable_061(self):
         result = CliRunner().invoke(cli, ["--version"])
 
         self.assertEqual(result.exit_code, 0, result.output)
-        self.assertIn("0.6.1-canary.1", result.output)
+        self.assertIn("0.6.1", result.output)
+        self.assertNotIn("canary", result.output)
 
     def test_configure_utf8_stdio_reconfigures_stdout_and_stderr(self):
         stdout = FakeStream()

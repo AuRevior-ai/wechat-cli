@@ -78,7 +78,7 @@ class WindowsPackagingTests(unittest.TestCase):
             ROOT / "packaging" / "windows" / "README-APP.md"
         ).read_text(encoding="utf-8")
 
-        self.assertIn('version = "0.6.1.dev1"', pyproject)
+        self.assertIn('version = "0.6.1"', pyproject)
         self.assertIn('authors = [{ name = "Au Revior" }]', pyproject)
         self.assertIn("作者：Au Revior", guide)
         self.assertIn("关于与支持", guide)
