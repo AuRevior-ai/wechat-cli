@@ -25,7 +25,7 @@
 | 4 | 首次测试许可证与测试发布 | **已完成** | Task 1–7 全部完成；验收报告已生成，0.5.0/0.5.1 staging 资产与 Worker 状态已最终复核 |
 | 5 | Windows 真实端到端验收 | **已完成** | functional E2E、process-tree repair、fresh rollback、version-level suppression、fault disable、Cloud Cleanup Gate、fresh final verification 与 final acceptance report 均已完成 |
 | 6 | 安全与正式交付准备 | **已完成** | B6-G0..G8 accepted complete under Private / Controlled Distribution；final report=`docs/deployment/2026-08-12-board-6-security-delivery-preparation-report.md`；final staging Worker=`633945cb...`；commercial Authenticode deferred optional for future Public / Formal Distribution；production remained fail-closed and unmutated |
-| 7 | 自动化发布与正式上线 | **B7-G8 accepted complete；B7-G9 Mandatory STOP** | G7 governance closure 已通过 PR #23 合入 canonical `main=c24783ff...`，exact main CI `31987868264` PASS；G8 Tasks 39–43 全部 accepted；已创建 exactly one first controlled stable Private license（`lic_moOphTS-64IW4bvaqNurnuI0` / hint `JFEV` / max_devices=1），0 stable device bindings，key 未发送/激活；下一步需单独批准 B7-G9 final closure |
+| 7 | 自动化发布与正式上线 | **已完成；B7-G0..G9 accepted complete** | G8 governance closure 已通过 PR #24 合入 canonical `main=a685fcfa...`，exact main CI `31990697139` PASS；G9 fresh full verification / production reconcile / historical-boundary / sensitive scan 全部通过；最终报告=`docs/deployment/2026-08-15-board-7-production-automation-controlled-launch-report.md`；Board 7 与 Authorized Update Program 均 accepted complete under Private / Controlled Distribution；G9 final docs-only canonical integration 正在本 closure branch 完成 |
 
 ## 3. 板块 1：本地最终收尾
 
@@ -313,7 +313,7 @@ B6-G0 已选择性集成审核后的 Board 5 product lineage，未 wholesale mer
 
 ### 状态
 
-**已完成；B6-G0 through B6-G8 accepted complete。当前 closure profile=Private / Controlled Distribution；commercial Authenticode deferred optional。Board 7 B7-G0 through B7-G8 accepted complete；G7 governance closure 已通过 PR #23 合入 canonical `main=c24783ff9150fba465747d4592bc845f1ab2e485`，exact main CI run `31987868264` PASS。B7-G8 recovery/controlled-release controls 与 Task 43 first controlled Private issuance 均已 accepted，evidence=`docs/superpowers/governance/2026-08-17-board-7-recovery-controlled-release-prelicense-acceptance.md`。Production 保留 exactly one active beta canary license/device，并新增 exactly one active stable Private license（max_devices=1）但 0 stable device bindings；stable `0.6.0` enabled/unpaused/rollout 0；internal `0.6.1-canary.1` human-disabled/paused/rollout 100 且 immutable GitHub/R2 provenance 保留。当前处于 **B7-G9 Mandatory STOP**；无第三方 key handoff 或 device activation。**
+**已完成；B6-G0 through B6-G8 accepted complete。Board 7 B7-G0 through B7-G9 也已满足全部 mandatory acceptance conditions，最终报告=`docs/deployment/2026-08-15-board-7-production-automation-controlled-launch-report.md`；因此原七板 Authorized Update Program accepted complete。当前 closure profile 继续为 Private / Controlled Distribution，commercial Authenticode deferred optional。G8 governance closure canonical main=`a685fcfa24fd1ae2336a5286642affab87b6a85d`，exact main CI run `31990697139` PASS。Production 保留 exactly one active beta canary license/device 与 exactly one active stable Private license（max_devices=1、0 stable device bindings）；stable `0.6.0` enabled/unpaused/rollout 0；internal `0.6.1-canary.1` human-disabled/paused/rollout 100 且 immutable GitHub/R2 provenance 保留。无第三方 key handoff 或 device activation。G9 仅剩本 docs-only closure branch 的 history-preserving canonical integration，不再需要 production mutation。**
 
 ## 9. 板块 7：自动化发布与正式上线
 
@@ -339,11 +339,11 @@ B6-G0 已选择性集成审核后的 Board 5 product lineage，未 wholesale mer
 
 ### 状态
 
-**B7-G0/B7-G1/B7-G2/B7-G3/B7-G4/B7-G5/B7-G6/B7-G7/B7-G8 accepted；accepted G7 implementation main `8afbc7a074a0cc1cbefa7d9f53da82caa38a9e42`，G7 governance closure canonical main `c24783ff9150fba465747d4592bc845f1ab2e485`，exact canonical-main CI run `31987868264` PASS。** G7 preserved exactly one beta canary license/device；`v0.6.1-canary.1` remains GitHub-native immutable and candidate final state=`enabled=false` / `paused=true` / rollout 100。B7-G8 Tasks 39–43 已 accepted，recovery/issuance evidence=`docs/superpowers/governance/2026-08-17-board-7-recovery-controlled-release-prelicense-acceptance.md`；首个 controlled stable Private license=`lic_moOphTS-64IW4bvaqNurnuI0` / hint `JFEV` / max_devices=1 / 0 stable device bindings，完整 key 仅在受限 repo-external CSV 中，未发送第三方。当前处于 **B7-G9 Final Production Closure Mandatory STOP**。历史 frozen main=`a579a25cb7f16e6fdf88d618252b4a5cbffef53d` 与本地 retained main checkout 继续作为 historical boundary；commercial Authenticode 继续 deferred。
+**B7-G0/B7-G1/B7-G2/B7-G3/B7-G4/B7-G5/B7-G6/B7-G7/B7-G8/B7-G9 accepted complete；Authorized Update Program accepted complete。** G7 implementation main=`8afbc7a074a0cc1cbefa7d9f53da82caa38a9e42`；G7 governance closure=`c24783ff9150fba465747d4592bc845f1ab2e485`；G8 governance closure canonical main=`a685fcfa24fd1ae2336a5286642affab87b6a85d` with exact CI `31990697139` PASS。G9 fresh verification=Python 713 / 2 skips / 0 failures + Worker 132/132 + deployment/workflow 50/50 + workflow policy/sensitive scans PASS；fresh production R2/GitHub/D1/Worker/Access/canary/controlled-issuance reconcile PASS。Final report=`docs/deployment/2026-08-15-board-7-production-automation-controlled-launch-report.md`。Production 继续保留 one beta canary license/device、one stable Private license with 0 stable device bindings；`v0.6.1-canary.1` disabled/paused/rollout100 且 native immutable。历史 frozen main=`a579a25cb7f16e6fdf88d618252b4a5cbffef53d` 与本地 retained main checkout继续作为 historical boundary；commercial Authenticode 继续 deferred。
 
 ## 10. 当前下一步
 
-**当前唯一合法下一步是 B7-G9 Final Production Closure 授权。B7-G8 Tasks 39–43 已 accepted complete；首个 stable Private license 已按单独授权创建，但 key 未发送、0 stable device bindings、无第三方 activation。G7 指定的单一 beta canary license/device继续保留为长期内部 canary，`0.6.1-canary.1` 保持 disabled/paused 且 immutable GitHub/R2 provenance 保留。**
+**原七板 Authorized Update Program 已进入 final closure integration：Board 7 B7-G0..G9 的 mandatory acceptance conditions 已全部通过，当前 closure branch 只需完成 docs-only commit、PR、CI、history-preserving merge 与最终 canonical-main readback。此 closure 不授权新增 license/user/device、第三方 key handoff、Public/Formal Distribution、commercial Authenticode、credential retirement 或 destructive cleanup；这些未来动作必须进入新的独立 scope/design authorization。**
 
 以下为历史执行记录。
 

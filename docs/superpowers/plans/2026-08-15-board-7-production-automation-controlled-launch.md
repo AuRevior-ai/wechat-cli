@@ -1364,6 +1364,17 @@ Authorized Update Program accepted complete
 
 If any mandatory production/canary/automation/recovery condition remains incomplete, keep Board 7 in progress and name the exact blocker. Deferred commercial Authenticode is not a blocker for `private_controlled`.
 
+### B7-G9 execution evidence — 2026-08-17
+
+- [x] Task 44 fresh verification: Python 713 run / 2 expected skips / 0 failures; Worker typecheck PASS; Vitest 132/132; deployment/workflow focused 50/50; workflow policy PASS; tracked sensitive-value scan PASS; `git diff --check` PASS.
+- [x] Task 45 fresh production read-only reconcile: exact Worker/D1/R2/API/Admin identities, human/machine scope split, release/R2/GitHub hashes, canary state, first controlled stable issuance, diagnostics metadata, production trust-profile key IDs/selectors and LKG recovery identity all reconciled without mutation.
+- [x] Task 46 immutable historical boundaries: Board 5 final report blob remains byte-identical to its frozen accepted evidence commit despite selective-integration ancestry; Board 6 final-report ancestry/blob remain retained; Board 7 history-preserving lineage remains ancestral; no tracked/historical Board 7 `NUL` path was introduced; accepted installer remains `NotSigned` under Private / Controlled Distribution.
+- [x] Task 47 sensitive-value scan: tracked verifier PASS plus an additional non-test tracked scan for complete private-key/license/device/admin-session/GitHub-token shapes PASS.
+- [x] Task 48 final report written at `docs/deployment/2026-08-15-board-7-production-automation-controlled-launch-report.md`.
+- [x] Task 49 canonical project state and roadmap updated to `Board 7 accepted complete` / `Authorized Update Program accepted complete` on this closure branch, pending only the docs-only canonical integration below.
+
+Task 50 is satisfied by the exact docs-only commit containing this execution record, final report, project-state update, and roadmap update. The local untracked `nul` artifact is explicitly excluded and remains untouched because closure does not authorize cleanup.
+
 ## Task 50: Local closure commit
 
 ```powershell
